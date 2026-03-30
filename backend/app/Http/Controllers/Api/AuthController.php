@@ -1,0 +1,69 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Models\User;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
+
+class AuthController extends Controller
+{
+    public function login(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            // email:filter (PHP) acepta dominios de desarrollo tipo @*.local; la regla `email` sola usa RFC estricto.
+            'correo' => ['required', 'string', 'email:filter', 'max:255'],
+            'password' => ['required', 'string'],
+            'device_name' => ['sometimes', 'string', 'max:255'],
+        ]);
+
+        $user = User::where('correo', $data['correo'])->first();
+
+        if (! $user || ! Hash::check($data['password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'correo' => ['Correo o contraseña incorrectos.'],
+            ]);
+        }
+
+        if ($user->estado !== User::ESTADO_ACTIVO) {
+            return response()->json([
+                'message' => 'Usuario inactivo. Contacte al administrador.',
+            ], 403);
+        }
+
+        $device = $data['device_name'] ?? 'web';
+        $token = $user->createToken($device)->plainTextToken;
+
+        return response()->json([
+            'token' => $token,
+            'token_type' => 'Bearer',
+            'user' => $this->userPayload($user),
+        ]);
+    }
+
+    public function logout(Request $request): JsonResponse
+    {
+        $request->user()->currentAccessToken()->delete();
+
+        return response()->json(['message' => 'Sesión cerrada.']);
+    }
+
+    public function me(Request $request): JsonResponse
+    {
+        return response()->json($this->userPayload($request->user()));
+    }
+
+    private function userPayload(User $user): array
+    {
+        return [
+            'id' => $user->id,
+            'nombre' => $user->nombre,
+            'correo' => $user->correo,
+            'rol' => $user->rol,
+            'estado' => $user->estado,
+        ];
+    }
+}
