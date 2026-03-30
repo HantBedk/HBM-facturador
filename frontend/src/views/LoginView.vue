@@ -82,13 +82,25 @@ function mapServerError(e) {
   globalError.value = 'No se pudo iniciar sesión. Intenta de nuevo.'
 }
 
-async function onSubmit() {
-  syncLoginFieldsFromDom()
+async function onSubmit(e) {
+  if (e && e.target) {
+    const emailNode = e.target.querySelector('input[type="email"]')
+    const passNode = e.target.querySelector('input[type="password"]')
+    if (emailNode && emailNode.value) correo.value = emailNode.value
+    if (passNode && passNode.value) password.value = passNode.value
+  } else {
+    syncLoginFieldsFromDom()
+  }
   if (!validateLocal()) return
 
   globalError.value = ''
   fieldErrors.value = {}
   loading.value = true
+
+  console.warn("⚠️ [DEBUG LOGIN] Correo enviado:", correo.value);
+  console.warn("⚠️ [DEBUG LOGIN] Longitud de la contraseña enviada:", password.value.length);
+  // Si la longitud de la contraseña no es 8 (que es el tamaño de "1qwer432"), el autocompletado está inyectando una clave incorrecta.
+
   try {
     const user = await auth.login(
       {
@@ -198,12 +210,14 @@ async function onSubmit() {
                 </svg>
               </span>
               <input
+                id="correo"
+                name="correo"
                 ref="correoInputEl"
                 v-model="correo"
                 type="email"
                 autocomplete="username"
                 inputmode="email"
-                placeholder="admin@hbm.local"
+                placeholder="correo@algo.com"
                 class="min-w-0 flex-1 border-0 bg-transparent text-[0.9375rem] text-white outline-none ring-0 placeholder:text-slate-500"
                 @change="syncLoginFieldsFromDom"
               />
@@ -223,6 +237,8 @@ async function onSubmit() {
                 </svg>
               </span>
               <input
+                id="password"
+                name="password"
                 ref="passwordInputEl"
                 v-model="password"
                 type="password"
@@ -294,3 +310,15 @@ async function onSubmit() {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Evitar que el autocompletado del navegador cambie el color de fondo a blanco/amarillo */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px transparent inset !important;
+  -webkit-text-fill-color: white !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+</style>

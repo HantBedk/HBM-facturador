@@ -1,0 +1,8 @@
+[30-Mar-2026 14:51:08] NOTICE: fpm is running, pid 1
+[30-Mar-2026 14:51:08] NOTICE: ready to handle connections
+172.19.0.8 -  30/Mar/2026:14:56:12 +0000 "GET /index.php" 500
+[30-Mar-2026 15:18:33] NOTICE: Finishing ...
+[30-Mar-2026 15:18:33] NOTICE: exiting, bye-bye!
+[30-Mar-2026 15:19:01] NOTICE: fpm is running, pid 1
+[30-Mar-2026 15:19:01] NOTICE: ready to handle connections
+172.19.0.5 -  30/Mar/2026:15:25:58 +0000 "POST /index.php" 500
