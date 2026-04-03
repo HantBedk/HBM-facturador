@@ -59,12 +59,26 @@ class AuthController extends Controller
 
     private function userPayload(User $user): array
     {
-        return [
+        $base = [
             'id' => $user->id,
             'nombre' => $user->nombre,
             'correo' => $user->correo,
             'rol' => $user->rol,
             'estado' => $user->estado,
         ];
+
+        if ($user->rol === User::ROL_EMPLEADO) {
+            $base['perfil_completado_at'] = $user->perfil_completado_at?->toIso8601String();
+            $base['telefono'] = $user->telefono;
+            $base['tipo_documento'] = $user->tipo_documento;
+            $base['numero_documento'] = $user->numero_documento;
+            $base['ciudad'] = $user->ciudad;
+            $base['departamento'] = $user->departamento;
+            $base['banco_codigo'] = $user->banco_codigo;
+            $base['cuenta_tipo'] = $user->cuenta_tipo;
+            $base['cuenta_numero'] = $user->cuenta_numero;
+        }
+
+        return $base;
     }
 }

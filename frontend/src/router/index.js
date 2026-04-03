@@ -10,6 +10,7 @@ import InvoiceEditorView from '@/views/admin/InvoiceEditorView.vue'
 import InvoiceDetailView from '@/views/admin/InvoiceDetailView.vue'
 import EmpleadosListView from '@/views/admin/EmpleadosListView.vue'
 import EmpleadoDashboardView from '@/views/empleado/EmpleadoDashboardView.vue'
+import EmpleadoOnboardingView from '@/views/empleado/EmpleadoOnboardingView.vue'
 import EmployeeHistorialView from '@/views/empleado/EmployeeHistorialView.vue'
 import ServicesListView from '@/views/services/ServicesListView.vue'
 import ServiceRegisterView from '@/views/services/ServiceRegisterView.vue'
@@ -18,6 +19,7 @@ import ServiceEditView from '@/views/services/ServiceEditView.vue'
 import ServiceCatalogView from '@/views/admin/ServiceCatalogView.vue'
 import PublicInvoiceConsultView from '@/views/public/PublicInvoiceConsultView.vue'
 import { isAdminPanelRole } from '@/utils/roles.js'
+import { isEmpleadoPerfilIncomplete } from '@/utils/empleadoPerfil.js'
 
 const routes = [
   {
@@ -77,6 +79,15 @@ const routes = [
     component: EmpleadoLayout,
     meta: { auth: true, roles: ['empleado'] },
     children: [
+      {
+        path: 'completar-perfil',
+        redirect: (to) => ({ name: 'empleado-perfil', query: to.query }),
+      },
+      {
+        path: 'perfil',
+        name: 'empleado-perfil',
+        component: EmpleadoOnboardingView,
+      },
       { path: '', name: 'empleado-dashboard', component: EmpleadoDashboardView },
       { path: 'historial', name: 'emp-historial', component: EmployeeHistorialView },
       { path: 'registro-servicio', name: 'emp-registro-servicio', component: ServiceRegisterView },
@@ -126,6 +137,20 @@ router.beforeEach(async (to) => {
     return isAdminPanelRole(auth.user.rol)
       ? { name: 'admin-dashboard' }
       : { name: 'empleado-dashboard' }
+  }
+
+  /** Técnicos: si faltan datos obligatorios (teléfono, documento, cuenta, etc.) solo se permite /empleado/perfil. */
+  if (auth.isAuthenticated && auth.user?.rol === 'empleado') {
+    const incomplete = isEmpleadoPerfilIncomplete(auth.user)
+    if (to.path === '/empleado/perfil' || to.path === '/empleado/completar-perfil') {
+      return true
+    }
+    if (incomplete) {
+      return {
+        path: '/empleado/perfil',
+        query: { redirect: to.fullPath },
+      }
+    }
   }
 
   return true

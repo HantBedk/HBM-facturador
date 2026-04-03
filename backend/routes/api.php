@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CompanyController;
 use App\Http\Controllers\Api\EmpleadoDashboardController;
+use App\Http\Controllers\Api\EmpleadoPerfilController;
 use App\Http\Controllers\Api\EmployeeHistorialController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\PublicInvoiceController;
@@ -81,6 +82,8 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
 
     Route::get('/empleado/dashboard', [EmpleadoDashboardController::class, 'index'])->middleware('role:empleado');
     Route::get('/empleado/historial', [EmployeeHistorialController::class, 'mine'])->middleware('role:empleado');
+    Route::get('/empleado/perfil', [EmpleadoPerfilController::class, 'show'])->middleware('role:empleado');
+    Route::put('/empleado/perfil', [EmpleadoPerfilController::class, 'update'])->middleware('role:empleado');
 
     Route::get('/services', [ServiceController::class, 'index']);
     Route::post('/services', [ServiceController::class, 'store']);

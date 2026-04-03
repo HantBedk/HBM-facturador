@@ -5,7 +5,10 @@ import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  /** En Docker: http://nginx. En host: backend en el puerto publicado (p. ej. 8080). */
+  /**
+   * Desarrollo local: API en Docker o artisan en 8080 → proxy /api hacia aquí.
+   * Si en el futuro usas Vite dentro de Docker, define VITE_API_PROXY_TARGET=http://nginx
+   */
   const apiProxyTarget = env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8080'
 
   return {
@@ -16,10 +19,18 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      host: '0.0.0.0',
+      /** Abre siempre http://localhost:5173 (HMR y mismo origen para /api) */
+      host: 'localhost',
       port: 5173,
+      strictPort: true,
       headers: {
         'Cache-Control': 'no-store',
+      },
+      hmr: {
+        protocol: 'ws',
+        host: 'localhost',
+        port: 5173,
+        clientPort: 5173,
       },
       proxy: {
         '/api': {

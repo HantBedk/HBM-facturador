@@ -73,6 +73,19 @@ export const useAuthStore = defineStore('auth', () => {
     persistUser(null)
   }
 
+  /** Refresca el usuario desde `/auth/me` (p. ej. tras completar perfil). */
+  async function refreshUser() {
+    if (!getToken()) return
+    try {
+      const me = await api('/auth/me')
+      const persistent = !!localStorage.getItem('auth_token')
+      persistUser(me, persistent)
+    } catch {
+      clearTokenStorage()
+      persistUser(null)
+    }
+  }
+
   return {
     user,
     bootstrapped,
@@ -80,5 +93,6 @@ export const useAuthStore = defineStore('auth', () => {
     bootstrap,
     login,
     logout,
+    refreshUser,
   }
 })

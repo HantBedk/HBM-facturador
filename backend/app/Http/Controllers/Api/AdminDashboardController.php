@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Models\Service;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class AdminDashboardController extends Controller
@@ -55,15 +56,13 @@ class AdminDashboardController extends Controller
             ->whereMonth('payment_date', $month)
             ->sum('amount');
 
-        $pendingCollect = Invoice::query()
-            ->where('status', '!=', Invoice::STATUS_BORRADOR)
-            ->withSum('payments', 'amount')
-            ->get()
-            ->sum(function (Invoice $invoice) {
-                $paid = (float) ($invoice->payments_sum_amount ?? 0);
-
-                return max(0, (float) $invoice->total - $paid);
-            });
+        // Una sola consulta agregada (antes: cargaba todas las facturas en memoria).
+        $pendingCollect = (float) (DB::table('invoices as i')
+            ->where('i.status', '!=', Invoice::STATUS_BORRADOR)
+            ->selectRaw(
+                'COALESCE(SUM(GREATEST(0, CAST(i.total AS DECIMAL(14,2)) - COALESCE((SELECT SUM(amount) FROM payments WHERE invoice_id = i.id), 0))), 0) as p'
+            )
+            ->value('p') ?? 0);
 
         $invoicesCountMonth = Invoice::query()
             ->where('period_year', $year)

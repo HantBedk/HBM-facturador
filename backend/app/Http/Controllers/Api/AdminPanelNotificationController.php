@@ -21,6 +21,14 @@ class AdminPanelNotificationController extends Controller
             $q->where('read', false);
         }
 
+        $cat = $request->string('category')->toString();
+        if ($cat !== '' && in_array($cat, ['empleados', 'servicios', 'facturas'], true)) {
+            $types = PanelNotification::typesInCategory($cat);
+            if ($types !== []) {
+                $q->whereIn('type', $types);
+            }
+        }
+
         $limit = min(100, max(1, $request->integer('limit', 40)));
 
         return PanelNotificationResource::collection($q->limit($limit)->get());
@@ -28,12 +36,20 @@ class AdminPanelNotificationController extends Controller
 
     public function unreadCount(Request $request): JsonResponse
     {
-        $n = PanelNotification::query()
-            ->where('user_id', $request->user()->id)
-            ->where('read', false)
-            ->count();
+        $userId = $request->user()->id;
 
-        return response()->json(['count' => $n]);
+        $base = fn () => PanelNotification::query()
+            ->where('user_id', $userId)
+            ->where('read', false);
+
+        return response()->json([
+            'count' => $base()->count(),
+            'by_category' => [
+                'empleados' => $base()->whereIn('type', PanelNotification::typesInCategory('empleados'))->count(),
+                'servicios' => $base()->whereIn('type', PanelNotification::typesInCategory('servicios'))->count(),
+                'facturas' => $base()->whereIn('type', PanelNotification::typesInCategory('facturas'))->count(),
+            ],
+        ]);
     }
 
     public function markRead(Request $request, PanelNotification $panel_notification): PanelNotificationResource|JsonResponse

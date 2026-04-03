@@ -11,9 +11,17 @@ class PanelNotificationResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $category = PanelNotification::categoryForType($this->type);
+
         return [
             'id' => $this->id,
             'type' => $this->type,
+            'category' => $category,
+            'category_label' => match ($category) {
+                'empleados' => 'Empleados',
+                'servicios' => 'Servicios',
+                default => 'Facturas',
+            },
             'message' => $this->message,
             'read' => $this->read,
             'meta' => $this->meta,
