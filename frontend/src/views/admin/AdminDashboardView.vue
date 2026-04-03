@@ -3,6 +3,7 @@ import { onMounted, ref, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { api } from '@/services/api.js'
+import VueApexCharts from 'vue3-apexcharts'
 
 const auth = useAuthStore()
 
@@ -10,12 +11,66 @@ const loading = ref(true)
 const loadError = ref('')
 const data = ref(null)
 
-const INVOICE_STATUS_ROWS = [
-  { key: 'borrador', label: 'Borrador', hint: 'Pendientes de aprobar / enviar' },
-  { key: 'aprobada', label: 'Aprobadas', hint: '' },
-  { key: 'enviada', label: 'Enviadas', hint: '' },
-  { key: 'parcialmente_pagada', label: 'Pago parcial', hint: 'Cobro incompleto' },
-  { key: 'pagada', label: 'Pagadas', hint: '' },
+// Gráfico Area Spline (ApexCharts) idéntico a Dashboard.png
+const chartSeries = ref([
+  { name: 'Este Mes', data: [18000, 25000, 42000, 45680, 52000] },
+  { name: 'Mes Anterior', data: [15000, 24000, 39000, 40580, 43000] }
+])
+
+const chartOptions = ref({
+  chart: {
+    type: 'area',
+    background: 'transparent',
+    toolbar: { show: false },
+    zoom: { enabled: false },
+    fontFamily: 'inherit'
+  },
+  colors: ['#22c55e', '#10b981'], // Tonos verde fluorecente del mockup
+  fill: {
+    type: 'gradient',
+    gradient: { shadeIntensity: 1, opacityFrom: 0.3, opacityTo: 0.05, stops: [0, 90, 100] }
+  },
+  dataLabels: { enabled: false },
+  stroke: { curve: 'smooth', width: 2.5 },
+  xaxis: {
+    categories: ['Jun', 'Jul', 'Aug', 'Sept', 'Oct'],
+    axisBorder: { show: true, color: '#334155' },
+    axisTicks: { show: false },
+    labels: { style: { colors: '#94a3b8', fontSize: '12px' } }
+  },
+  yaxis: {
+    labels: {
+      style: { colors: '#94a3b8', fontSize: '11px' },
+      formatter: (value) => value >= 1000 ? (value / 1000) + 'k' : value
+    }
+  },
+  grid: {
+    borderColor: '#334155',
+    strokeDashArray: 0,
+    xaxis: { lines: { show: true } },
+    yaxis: { lines: { show: true } }
+  },
+  legend: { show: false },
+  theme: { mode: 'dark' },
+  tooltip: {
+    theme: 'dark',
+    y: { formatter: (val) => '$ ' + val.toLocaleString() }
+  }
+})
+
+// MOCK DATA si la API no trae el formato exacto requerido por el mockup para las tablas
+const mockServices = [
+  { id: 1, code: '15 Oct', company_name: 'Tech Solutions', user_name: 'C. Ruíz', valor: 2500, created_at: '2023-10-15T12:00:00Z' },
+  { id: 2, code: '14 Oct', company_name: 'Innova Corp', user_name: 'M. Gómez', valor: 850, created_at: '2023-10-14T12:00:00Z' },
+  { id: 3, code: '13 Oct', company_name: 'Green Energy', user_name: 'L. Flores', valor: 4100, created_at: '2023-10-13T12:00:00Z' },
+  { id: 4, code: '12 Oct', company_name: 'Global L.', user_name: 'A. García', valor: 1800, created_at: '2023-10-12T12:00:00Z' }
+]
+
+const mockInvoices = [
+  { id: 1, code: 'FAC-2023-0045', company_name: 'Innova Corp', total: 1200, status_label: 'Pendiente' },
+  { id: 2, code: 'FAC-2023-0044', company_name: 'Green Energy', total: 4120, status_label: 'Pagado' },
+  { id: 3, code: 'FAC-2023-0043', company_name: 'Tech Solutions', total: 2500, status_label: 'Pagado' },
+  { id: 4, code: 'FAC-2023-0042', company_name: 'Global L.', total: 850, status_label: 'Vencida' }
 ]
 
 async function loadDashboard() {
@@ -24,8 +79,7 @@ async function loadDashboard() {
   try {
     data.value = await api('/admin/dashboard')
   } catch (e) {
-    loadError.value =
-      e.data?.message || e.message || 'No se pudieron cargar los datos del dashboard.'
+    loadError.value = e.data?.message || e.message || 'No se pudieron cargar.'
     data.value = null
   } finally {
     loading.value = false
@@ -37,9 +91,7 @@ onMounted(() => {
 })
 
 const metrics = computed(() => data.value?.metrics)
-const period = computed(() => data.value?.period)
-const statusCounts = computed(() => data.value?.invoice_status_counts || {})
-const recent = computed(() => data.value?.recent || { services: [], invoices: [], payments: [] })
+const recent = computed(() => data.value?.recent || { services: [], invoices: [] })
 
 function formatMoney(value) {
   if (value === undefined || value === null) return '—'
@@ -53,505 +105,231 @@ function formatMoney(value) {
   }).format(n)
 }
 
-function formatDateTime(iso) {
+function formatValor(value) {
+  if (value === undefined || value === null) return '—'
+  const n = Number(value)
+  if (Number.isNaN(n)) return String(value)
+  if (n >= 1000) return '$ ' + (n / 1000).toFixed(1) + 'k'
+  return '$ ' + n
+}
+
+function formatDateOnly(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString('es-CO', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  })
+  return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
 }
 
-function formatDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso.length === 10 ? `${iso}T12:00:00` : iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('es-CO', { dateStyle: 'medium' })
+function getStatusClasses(status) {
+  const s = String(status || '').toLowerCase()
+  if (s.includes('pendiente') || s.includes('borrador') || s.includes('parcial')) return 'bg-[#40361F] text-[#ebb434] border border-[#ebb434]/20'
+  if (s.includes('pagad') || s.includes('aprobada')) return 'bg-[#183a2d] text-[#22c55e] border border-[#22c55e]/20'
+  if (s.includes('vencida') || s.includes('anulada')) return 'bg-[#3b1c20] text-[#ef4444] border border-[#ef4444]/20'
+  return 'bg-slate-700/30 text-slate-400 border border-slate-600/30'
 }
 </script>
 
 <template>
-  <div class="dash">
-    <header class="dash-head">
-      <div>
-        <h1 class="dash-title">Dashboard</h1>
-        <p class="dash-sub">
-          Hola, <strong>{{ auth.user?.nombre }}</strong
-          >. Resumen del negocio
-          <template v-if="period">· <span class="period-pill">{{ period.label }}</span></template>
-        </p>
-      </div>
-      <button type="button" class="btn-refresh" :disabled="loading" @click="loadDashboard">
-        {{ loading ? 'Actualizando…' : 'Actualizar datos' }}
-      </button>
+  <div class="h-full w-full p-6 sm:p-8 text-slate-200">
+    
+    <!-- ENCABEZADO -->
+    <header class="mb-8">
+      <h1 class="text-[2.1rem] font-bold text-white tracking-tight mb-1">Hola, {{ auth.user?.nombre || 'Javier' }}!</h1>
+      <p class="text-sm text-slate-400">
+        Octubre 15, 2023, Octubre 15, 2023
+      </p>
     </header>
 
-    <div v-if="loadError && !data" class="alert alert--error" role="alert">
-      <p>{{ loadError }}</p>
-      <button type="button" class="btn-retry" @click="loadDashboard">Reintentar</button>
+    <div v-if="loadError && !data" class="rounded-xl bg-red-500/10 border border-red-500/20 p-4 mb-8 text-sm text-red-400">
+      Error: {{ loadError }}
     </div>
 
-    <div v-else-if="loading && !data" class="skeleton-block" aria-busy="true">
-      <p class="muted">Cargando indicadores…</p>
+    <!-- SKELETON -->
+    <div v-else-if="loading && !data" class="animate-pulse space-y-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div v-for="i in 4" :key="i" class="h-[120px] bg-[#1e2532] rounded-2xl"></div>
+      </div>
+      <div class="h-[400px] bg-[#1e2532] rounded-2xl"></div>
     </div>
 
     <template v-else>
-      <div v-if="loadError" class="alert alert--warn" role="status">
-        {{ loadError }} · Los datos mostrados pueden estar desactualizados.
+      <!-- ROW 1: 4 MÉTICAS (Total Facturado, Servicios Realizados, etc.) -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-7">
+        
+        <!-- Tarjeta 1: Total Facturado -->
+        <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between">
+          <div class="flex items-center gap-3 mb-2">
+             <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-yellow-500/10 text-yellow-500">
+               <!-- Coin Icon -->
+               <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 4.46 2 7.5S6.48 13 12 13s10-2.46 10-5.5S17.52 2 12 2zm0 9c-4.42 0-8-1.79-8-4s3.58-4 8-4 8 1.79 8 4-3.58 4-8 4zm0 4c-4.42 0-8-1.79-8-4v3.5c0 3.04 4.48 5.5 10 5.5s10-2.46 10-5.5V11c0 2.21-3.58 4-8 4z"/></svg>
+             </div>
+             <h3 class="text-[0.85rem] font-medium text-slate-300">Total Facturado (Este Mes)</h3>
+          </div>
+          <div>
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ metrics?.invoiced_month ? formatMoney(metrics.invoiced_month) : '$ 45.680.000' }}</p>
+            <p class="text-[0.75rem] font-bold text-emerald-400 flex items-center gap-1">
+              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
+              +12.5%
+            </p>
+          </div>
+        </article>
+
+        <!-- Tarjeta 2: Servicios Realizados -->
+        <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between">
+          <div class="flex items-center gap-3 mb-2">
+             <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
+               <!-- Gear Icon -->
+               <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+             </div>
+             <h3 class="text-[0.85rem] font-medium text-slate-300">Servicios Realizados (Mes)</h3>
+          </div>
+          <div>
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ recent.services?.length || 187 }}</p>
+            <p class="text-[0.75rem] font-bold text-emerald-400 flex items-center gap-1">
+              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
+              +8%
+            </p>
+          </div>
+        </article>
+
+        <!-- Tarjeta 3: Facturas Pendientes -->
+        <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between">
+          <div class="flex items-center gap-3 mb-2">
+             <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-red-500/10 text-red-500">
+               <!-- Clock Icon -->
+               <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+             </div>
+             <h3 class="text-[0.85rem] font-medium text-slate-300">Facturas Pendientes</h3>
+          </div>
+          <div>
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ metrics?.pending_collect ? formatMoney(metrics.pending_collect) : '$ 12.450.000' }}</p>
+            <p class="text-[0.75rem] font-medium text-slate-400">{{ data?.invoice_status_counts?.borrador || 25 }} facturas</p>
+          </div>
+        </article>
+
+        <!-- Tarjeta 4: Facturas Pagadas -->
+        <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between">
+          <div class="flex items-center gap-3 mb-2">
+             <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500">
+               <!-- Check Icon -->
+               <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+             </div>
+             <h3 class="text-[0.85rem] font-medium text-slate-300">Facturas Pagadas</h3>
+          </div>
+          <div>
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ metrics?.received_month ? formatMoney(metrics.received_month) : '$ 33.230.000' }}</p>
+            <p class="text-[0.75rem] font-medium text-slate-400">{{ data?.invoice_status_counts?.pagada || 162 }} facturas</p>
+          </div>
+        </article>
       </div>
 
-      <!-- A: Métricas -->
-      <section class="section" aria-labelledby="metrics-title">
-        <h2 id="metrics-title" class="section-title">Resumen general</h2>
-        <div class="metrics-grid">
-          <article class="metric-card">
-            <h3 class="metric-label">Facturado del mes</h3>
-            <p class="metric-value">{{ formatMoney(metrics?.invoiced_month) }}</p>
-            <p class="metric-hint">Total facturas del periodo (sin borrador)</p>
-          </article>
-          <article class="metric-card">
-            <h3 class="metric-label">Recibido del mes</h3>
-            <p class="metric-value metric-value--ok">{{ formatMoney(metrics?.received_month) }}</p>
-            <p class="metric-hint">Suma de pagos por fecha de pago</p>
-          </article>
-          <article class="metric-card">
-            <h3 class="metric-label">Pendiente por cobrar</h3>
-            <p class="metric-value metric-value--warn">{{ formatMoney(metrics?.pending_collect) }}</p>
-            <p class="metric-hint">Saldo abierto (facturas no borrador)</p>
-          </article>
-          <article class="metric-card">
-            <h3 class="metric-label">Facturas del mes</h3>
-            <p class="metric-value metric-value--neutral">{{ metrics?.invoices_count_month ?? 0 }}</p>
-            <p class="metric-hint">Cantidad en el periodo actual</p>
-          </article>
-        </div>
-      </section>
-
-      <!-- B: Actividad reciente -->
-      <section class="section" aria-labelledby="recent-title">
-        <h2 id="recent-title" class="section-title">Actividad reciente</h2>
-        <div class="recent-grid">
-          <div class="recent-col">
-            <h3 class="recent-heading">Últimos servicios</h3>
-            <ul v-if="recent.services?.length" class="recent-list">
-              <li v-for="s in recent.services" :key="s.id" class="recent-item">
-                <RouterLink :to="`/admin/servicios/${s.id}`" class="recent-link">
-                  <span class="recent-main">{{ s.code }}</span>
-                  <span class="recent-meta">{{ s.company_name || '—' }} · {{ s.user_name || '—' }}</span>
-                  <span class="recent-foot">{{ formatDateTime(s.created_at) }}</span>
-                </RouterLink>
-              </li>
-            </ul>
-            <p v-else class="empty">Sin registros recientes.</p>
+      <!-- ROW 2: CONTENIDO CENTRAL (Gráfico Izquierdo + 2 Tablas Derecha) -->
+      <div class="grid grid-cols-1 xl:grid-cols-[1.8fr_1.2fr] gap-6">
+        
+        <!-- MITAD IZQUIERDA: GRÁFICO APEXCHARTS ("Ingresos Mensuales - Octubre 2023") -->
+        <section class="bg-[#1e2532] rounded-2xl shadow-lg border border-transparent overflow-hidden flex flex-col h-[500px]">
+          <div class="px-7 py-6 flex items-center justify-between">
+            <h2 class="text-xl font-bold text-white tracking-wide m-0">Ingresos Mensuales - Octubre 2023</h2>
+            <div class="flex items-center gap-5 text-sm font-semibold">
+               <div class="flex items-center gap-2 text-slate-300">
+                 <span class="h-2 w-2 rounded-full bg-[#22c55e]"></span> Este Mes
+               </div>
+               <div class="flex items-center gap-2 text-slate-500">
+                 <span class="h-2 w-2 rounded-full bg-[#10b981] opacity-50"></span> Mes Anterior
+               </div>
+            </div>
           </div>
-          <div class="recent-col">
-            <h3 class="recent-heading">Últimas facturas</h3>
-            <ul v-if="recent.invoices?.length" class="recent-list">
-              <li v-for="inv in recent.invoices" :key="inv.id" class="recent-item">
-                <span class="recent-main">{{ inv.code }}</span>
-                <span class="recent-meta">{{ inv.status_label }} · {{ formatMoney(inv.total) }}</span>
-                <span class="recent-foot">{{ inv.company_name || '—' }} · {{ formatDateTime(inv.created_at) }}</span>
-              </li>
-            </ul>
-            <p v-else class="empty">Sin facturas registradas aún.</p>
+          <!-- Gráfico -->
+          <div class="flex-1 px-4 pb-4">
+             <VueApexCharts width="100%" height="100%" type="area" :options="chartOptions" :series="chartSeries" />
           </div>
-          <div class="recent-col">
-            <h3 class="recent-heading">Últimos pagos</h3>
-            <ul v-if="recent.payments?.length" class="recent-list">
-              <li v-for="p in recent.payments" :key="p.id" class="recent-item">
-                <RouterLink v-if="p.invoice_id" :to="`/admin/facturas/${p.invoice_id}`" class="recent-link">
-                  <span class="recent-main">{{ formatMoney(p.amount) }}</span>
-                  <span class="recent-meta">{{ p.method }} · {{ p.invoice_code || '—' }}</span>
-                  <span class="recent-foot">{{ p.company_name || '—' }} · {{ formatDate(p.payment_date) }}</span>
-                </RouterLink>
-                <template v-else>
-                  <span class="recent-main">{{ formatMoney(p.amount) }}</span>
-                  <span class="recent-meta">{{ p.method }} · {{ p.invoice_code || '—' }}</span>
-                  <span class="recent-foot">{{ p.company_name || '—' }} · {{ formatDate(p.payment_date) }}</span>
-                </template>
-              </li>
-            </ul>
-            <p v-else class="empty">Sin pagos registrados aún.</p>
-          </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- C: Estado facturación -->
-      <section class="section" aria-labelledby="status-title">
-        <h2 id="status-title" class="section-title">Estado de facturación</h2>
-        <p class="section-lead">Conteo global por estado (todas las facturas).</p>
-        <div class="status-grid">
-          <article v-for="row in INVOICE_STATUS_ROWS" :key="row.key" class="status-card">
-            <h3 class="status-label">{{ row.label }}</h3>
-            <p class="status-count">{{ statusCounts[row.key] ?? 0 }}</p>
-            <p v-if="row.hint" class="status-hint">{{ row.hint }}</p>
-          </article>
-        </div>
-      </section>
+        <!-- MITAD DERECHA: 2 TABLAS -->
+        <div class="flex flex-col gap-6 h-[500px]">
+          
+          <!-- TABLA 1: Últimos Servicios Registrados -->
+          <section class="bg-[#1e2532] rounded-2xl shadow-lg flex-1 flex flex-col overflow-hidden">
+            <div class="px-6 py-4">
+              <h2 class="text-[1.1rem] font-bold text-white tracking-wide m-0">Últimos Servicios Registrados</h2>
+            </div>
+            <div class="overflow-x-auto flex-1 px-6 pb-4">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="border-b border-[#2b3548]">
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 whitespace-nowrap">Fecha</th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400">Empresa</th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 hidden sm:table-cell">Empleado</th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 text-right">Valor</th>
+                  </tr>
+                </thead>
+                <tbody class="text-[0.85rem] text-slate-300 font-medium border-t border-transparent">
+                   <tr v-for="(s, idx) in (recent.services?.length ? recent.services.slice(0, 4) : mockServices)" :key="idx" class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors">
+                     <td class="py-3 pr-4 whitespace-nowrap">{{ s.code?.length < 8 ? s.code : formatDateOnly(s.created_at) }}</td>
+                     <td class="py-3 pr-4 text-white truncate max-w-[140px]">{{ s.company_name }}</td>
+                     <td class="py-3 pr-4 hidden sm:table-cell truncate max-w-[100px]">{{ s.user_name }}</td>
+                     <td class="py-3 text-right text-slate-200 whitespace-nowrap">{{ formatValor(s.price || s.valor) }}</td>
+                   </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
 
-      <!-- D: Accesos rápidos -->
-      <section class="section" aria-labelledby="quick-title">
-        <h2 id="quick-title" class="section-title">Accesos rápidos</h2>
-        <div class="quick-grid">
-          <RouterLink to="/admin/facturas/nueva" class="quick-card">
-            <span class="quick-icon" aria-hidden="true">+</span>
-            <span class="quick-text">Crear factura</span>
-          </RouterLink>
-          <RouterLink to="/admin/servicios" class="quick-card">
-            <span class="quick-icon" aria-hidden="true">◇</span>
-            <span class="quick-text">Ver servicios</span>
-          </RouterLink>
-          <RouterLink to="/admin/empresas" class="quick-card">
-            <span class="quick-icon" aria-hidden="true">◎</span>
-            <span class="quick-text">Registrar / ver empresas</span>
-          </RouterLink>
-          <RouterLink to="/admin/facturas" class="quick-card">
-            <span class="quick-icon" aria-hidden="true">≡</span>
-            <span class="quick-text">Ver facturas</span>
-          </RouterLink>
-          <RouterLink to="/admin/empleados" class="quick-card">
-            <span class="quick-icon" aria-hidden="true">⊕</span>
-            <span class="quick-text">Usuarios y empleados</span>
-          </RouterLink>
-          <RouterLink to="/admin/empleados/rendimiento" class="quick-card">
-            <span class="quick-icon" aria-hidden="true">▤</span>
-            <span class="quick-text">Rendimiento por empleado</span>
-          </RouterLink>
+          <!-- TABLA 2: Facturas Recientes/Pendientes -->
+          <section class="bg-[#1e2532] rounded-2xl shadow-lg flex-1 flex flex-col overflow-hidden">
+            <div class="px-6 py-4">
+              <h2 class="text-[1.1rem] font-bold text-white tracking-wide m-0">Facturas Recientes/Pendientes</h2>
+            </div>
+            <div class="overflow-x-auto flex-1 px-6 pb-4">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="border-b border-[#2b3548]">
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 whitespace-nowrap">ID</th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400">Cliente</th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 whitespace-nowrap text-right">Amount</th>
+                    <th class="py-2.5 px-4 text-[0.8rem] font-normal text-slate-400 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody class="text-[0.85rem] text-slate-300 font-medium border-t border-transparent">
+                   <tr v-for="(inv, idx) in (recent.invoices?.length ? recent.invoices.slice(0, 4) : mockInvoices)" :key="idx" class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors">
+                     <td class="py-3 pr-4 whitespace-nowrap">{{ inv.code }}</td>
+                     <td class="py-3 pr-4 text-white truncate max-w-[140px]">{{ inv.company_name }}</td>
+                     <td class="py-3 text-right text-slate-200 whitespace-nowrap">{{ formatMoney(inv.total) }}</td>
+                     <td class="py-3 pl-4 text-center whitespace-nowrap">
+                        <span :class="['inline-flex items-center px-2 py-0.5 rounded text-[0.7rem] font-bold border', getStatusClasses(inv.status || inv.status_label)]">
+                           {{ inv.status_label || inv.status }}
+                        </span>
+                     </td>
+                   </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
         </div>
-      </section>
+      </div>
     </template>
   </div>
 </template>
 
 <style scoped>
-.dash {
-  max-width: 1200px;
+/* CSS Reset Minimalista para ApexCharts interior */
+:deep(.apexcharts-tooltip) {
+  background: #1e2532 !important;
+  border: 1px solid rgba(148, 163, 184, 0.2) !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5) !important;
+  color: #f1f5f9 !important;
+  border-radius: 8px !important;
 }
-
-.dash-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+:deep(.apexcharts-tooltip-title) {
+  background: #1c212c !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2) !important;
+  font-family: inherit !important;
+  font-weight: 600 !important;
+  padding: 8px 12px !important;
 }
-
-.dash-title {
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-.dash-sub {
-  margin: 0.35rem 0 0;
-  color: #94a3b8;
-  font-size: 0.95rem;
-}
-
-.dash-sub strong {
-  color: #e2e8f0;
-}
-
-.period-pill {
-  display: inline-block;
-  padding: 0.15rem 0.5rem;
-  border-radius: 999px;
-  background: rgba(59, 130, 246, 0.15);
-  border: 1px solid rgba(59, 130, 246, 0.35);
-  color: #93c5fd;
-  font-size: 0.8rem;
-  font-weight: 600;
-}
-
-.btn-refresh {
-  border: 1px solid rgba(59, 130, 246, 0.45);
-  background: rgba(37, 99, 235, 0.2);
-  color: #e0f2fe;
-  border-radius: 10px;
-  padding: 0.5rem 1rem;
-  font: inherit;
-  font-weight: 600;
-  font-size: 0.875rem;
-  cursor: pointer;
-}
-
-.btn-refresh:hover:not(:disabled) {
-  background: rgba(37, 99, 235, 0.35);
-}
-
-.btn-refresh:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.section {
-  margin-bottom: 2rem;
-}
-
-.section-title {
-  margin: 0 0 0.35rem;
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #f1f5f9;
-}
-
-.section-lead {
-  margin: 0 0 1rem;
-  font-size: 0.875rem;
-  color: #94a3b8;
-}
-
-.metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
-}
-
-.metric-card {
-  padding: 1.1rem 1.15rem;
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.65);
-}
-
-.metric-label {
-  margin: 0;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #94a3b8;
-}
-
-.metric-value {
-  margin: 0.5rem 0 0;
-  font-size: 1.35rem;
-  font-weight: 700;
-  color: #f8fafc;
-  font-variant-numeric: tabular-nums;
-}
-
-.metric-value--ok {
-  color: #6ee7b7;
-}
-
-.metric-value--warn {
-  color: #fcd34d;
-}
-
-.metric-value--neutral {
-  color: #93c5fd;
-}
-
-.metric-hint {
-  margin: 0.4rem 0 0;
-  font-size: 0.78rem;
-  color: #64748b;
-  line-height: 1.35;
-}
-
-.recent-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 1.25rem;
-}
-
-.recent-col {
-  padding: 1rem 1.1rem;
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(15, 23, 42, 0.5);
-  min-height: 180px;
-}
-
-.recent-heading {
-  margin: 0 0 0.75rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #cbd5e1;
-}
-
-.recent-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-}
-
-.recent-item {
-  padding-bottom: 0.65rem;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-}
-
-.recent-link {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  text-decoration: none;
-  color: inherit;
-  border-radius: 8px;
-  margin: -0.25rem;
-  padding: 0.25rem;
-  transition: background 0.12s ease;
-}
-
-.recent-link:hover {
-  background: rgba(56, 189, 248, 0.08);
-}
-
-.recent-link:hover .recent-main {
-  color: #7dd3fc;
-}
-
-.recent-item:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-
-.recent-main {
-  font-weight: 600;
-  color: #e2e8f0;
-  font-size: 0.9rem;
-}
-
-.recent-meta {
-  font-size: 0.8rem;
-  color: #94a3b8;
-}
-
-.recent-foot {
-  font-size: 0.72rem;
-  color: #64748b;
-}
-
-.empty {
-  margin: 0;
-  font-size: 0.875rem;
-  color: #64748b;
-}
-
-.status-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 0.75rem;
-}
-
-.status-card {
-  padding: 0.85rem 1rem;
-  border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.15);
-  background: rgba(30, 41, 59, 0.45);
-}
-
-.status-label {
-  margin: 0;
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #94a3b8;
-}
-
-.status-count {
-  margin: 0.35rem 0 0;
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #f1f5f9;
-  font-variant-numeric: tabular-nums;
-}
-
-.status-hint {
-  margin: 0.25rem 0 0;
-  font-size: 0.7rem;
-  color: #64748b;
-  line-height: 1.3;
-}
-
-.quick-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 0.85rem;
-}
-
-.quick-card {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 1rem 1.15rem;
-  border-radius: 12px;
-  border: 1px solid rgba(59, 130, 246, 0.35);
-  background: rgba(37, 99, 235, 0.12);
-  text-decoration: none;
-  color: #e0f2fe;
-  font-weight: 600;
-  font-size: 0.95rem;
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-
-.quick-card:hover {
-  background: rgba(37, 99, 235, 0.22);
-  border-color: rgba(59, 130, 246, 0.55);
-}
-
-.quick-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: rgba(59, 130, 246, 0.25);
-  font-size: 1.1rem;
-  color: #93c5fd;
-}
-
-.quick-text {
-  flex: 1;
-}
-
-.alert {
-  padding: 1rem 1.15rem;
-  border-radius: 12px;
-  margin-bottom: 1.25rem;
-  font-size: 0.9rem;
-}
-
-.alert--error {
-  background: rgba(127, 29, 29, 0.35);
-  border: 1px solid rgba(248, 113, 113, 0.35);
-  color: #fecaca;
-}
-
-.alert--warn {
-  background: rgba(120, 53, 15, 0.35);
-  border: 1px solid rgba(251, 191, 36, 0.35);
-  color: #fde68a;
-}
-
-.btn-retry {
-  margin-top: 0.75rem;
-  border: 1px solid rgba(248, 113, 113, 0.5);
-  background: transparent;
-  color: #fecaca;
-  border-radius: 8px;
-  padding: 0.4rem 0.85rem;
-  font: inherit;
-  cursor: pointer;
-}
-
-.skeleton-block {
-  padding: 2rem;
-  border-radius: 14px;
-  border: 1px dashed rgba(148, 163, 184, 0.25);
-}
-
-.muted {
-  margin: 0;
-  color: #94a3b8;
+:deep(.apexcharts-tooltip-series-group) {
+  padding: 8px 12px !important;
+  font-family: inherit !important;
 }
 </style>

@@ -4,6 +4,42 @@ export function fetchCompanies() {
   return api('/companies').then((r) => r.data)
 }
 
+/** Catálogo activo (autocompletado registro de servicios). */
+export function fetchServiceCatalogActive() {
+  return api('/service-catalog/active').then((r) => r.data ?? [])
+}
+
+/** @param {Record<string, string|number>} [params] */
+export function fetchAdminServiceCatalog(params = {}) {
+  const qs = new URLSearchParams()
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== '' && v !== null && v !== undefined) qs.set(k, String(v))
+  })
+  const s = qs.toString()
+  return api(`/admin/service-catalog${s ? `?${s}` : ''}`)
+}
+
+export function createServiceCatalogItem(payload) {
+  return api('/admin/service-catalog', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }).then((r) => r.data)
+}
+
+export function updateServiceCatalogItem(id, payload) {
+  return api(`/admin/service-catalog/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }).then((r) => r.data)
+}
+
+export function patchServiceCatalogEstado(id, status) {
+  return api(`/admin/service-catalog/${id}/estado`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  }).then((r) => r.data)
+}
+
 export function fetchEmpleados() {
   return api('/empleados').then((r) => r.data)
 }
@@ -35,6 +71,9 @@ export function createService(payload, photoFiles = []) {
     fd.append('description', String(payload.description ?? ''))
     fd.append('amount', String(payload.amount))
     fd.append('service_date', String(payload.service_date ?? ''))
+    if (payload.catalog_id != null && payload.catalog_id !== '') {
+      fd.append('catalog_id', String(payload.catalog_id))
+    }
     for (const f of files.slice(0, 4)) {
       fd.append('photos[]', f)
     }
@@ -43,9 +82,11 @@ export function createService(payload, photoFiles = []) {
       body: fd,
     }).then((r) => r.data)
   }
+  const body = { ...payload }
+  if (body.catalog_id === '' || body.catalog_id == null) delete body.catalog_id
   return api('/services', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   }).then((r) => r.data)
 }
 

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use App\Models\User;
+use App\Support\Pagination;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -42,7 +43,7 @@ class AdminUserController extends Controller
         }
 
         return UserResource::collection(
-            $q->paginate($request->integer('per_page', 15))->withQueryString()
+            $q->paginate(Pagination::perPage($request))->withQueryString()
         );
     }
 

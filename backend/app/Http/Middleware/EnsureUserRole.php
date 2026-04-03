@@ -12,7 +12,10 @@ class EnsureUserRole
     {
         $user = $request->user();
         if (! $user || ! in_array($user->rol, $roles, true)) {
-            return response()->json(['message' => 'No autorizado.'], 403);
+            return response()->json([
+                'message' => 'No tiene permisos para realizar esta acción.',
+                'code' => 'permission_denied',
+            ], 403);
         }
 
         return $next($request);

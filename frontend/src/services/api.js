@@ -128,10 +128,24 @@ export async function api(path, options = {}) {
 
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
+    if (res.status === 401) {
+      clearTokenStorage()
+      try {
+        sessionStorage.removeItem('auth_user')
+        localStorage.removeItem('auth_user')
+      } catch {
+        /* ignore */
+      }
+    }
     const fromErrors = data.errors && Object.values(data.errors).flat()[0]
     const msg =
       data.message ||
       fromErrors ||
+      (res.status === 403
+        ? data.code === 'permission_denied'
+          ? 'No tiene permisos para esta acción.'
+          : 'Acceso denegado.'
+        : null) ||
       (res.status >= 500
         ? `Error del servidor (${res.status}). Comprueba que el backend esté activo.`
         : res.status === 404
@@ -140,6 +154,10 @@ export async function api(path, options = {}) {
     const err = new Error(msg)
     err.status = res.status
     err.data = data
+    err.code = data.code
+    if (import.meta.env.DEV && res.status >= 500) {
+      console.warn('[api]', res.status, path, data)
+    }
     throw err
   }
   return data

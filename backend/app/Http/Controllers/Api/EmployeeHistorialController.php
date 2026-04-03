@@ -8,6 +8,7 @@ use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class EmployeeHistorialController extends Controller
 {
@@ -18,8 +19,9 @@ class EmployeeHistorialController extends Controller
     {
         $user = $request->user();
         [$year, $month] = $this->validatedYearMonth($request);
+        $filters = $this->validatedHistorialFilters($request);
 
-        return response()->json($this->buildPayload($user, $year, $month));
+        return response()->json($this->buildPayload($user, $year, $month, $filters));
     }
 
     /**
@@ -32,8 +34,9 @@ class EmployeeHistorialController extends Controller
         }
 
         [$year, $month] = $this->validatedYearMonth($request);
+        $filters = $this->validatedHistorialFilters($request);
 
-        return response()->json($this->buildPayload($user, $year, $month));
+        return response()->json($this->buildPayload($user, $year, $month, $filters));
     }
 
     /**
@@ -55,9 +58,28 @@ class EmployeeHistorialController extends Controller
     }
 
     /**
+     * @return array{company_id: int|null, q: string}
+     */
+    private function validatedHistorialFilters(Request $request): array
+    {
+        $validated = $request->validate([
+            'company_id' => ['sometimes', 'nullable', 'integer', 'exists:companies,id'],
+            'q' => ['sometimes', 'nullable', 'string', 'max:200'],
+        ]);
+
+        $q = isset($validated['q']) ? trim($validated['q']) : '';
+
+        return [
+            'company_id' => isset($validated['company_id']) ? (int) $validated['company_id'] : null,
+            'q' => $q,
+        ];
+    }
+
+    /**
+     * @param  array{company_id: int|null, q: string}  $filters
      * @return array<string, mixed>
      */
-    private function buildPayload(User $employee, int $year, int $month): array
+    private function buildPayload(User $employee, int $year, int $month, array $filters): array
     {
         $tz = config('app.timezone');
         $start = Carbon::createFromDate($year, $month, 1, $tz)->startOfMonth();
@@ -67,6 +89,20 @@ class EmployeeHistorialController extends Controller
             ->where('user_id', $employee->id)
             ->visibles()
             ->whereBetween('service_date', [$start->toDateString(), $end->toDateString()]);
+
+        if ($filters['company_id'] !== null) {
+            $base->where('company_id', $filters['company_id']);
+        }
+
+        if ($filters['q'] !== '') {
+            $term = '%'.addcslashes($filters['q'], '%_\\').'%';
+            $base->where(function ($w) use ($term) {
+                $w->where('description', 'like', $term)
+                    ->orWhere('client_name', 'like', $term)
+                    ->orWhere('service_type', 'like', $term)
+                    ->orWhere('code', 'like', $term);
+            });
+        }
 
         $servicesCount = (clone $base)->count();
         $totalAmount = (string) (clone $base)->sum('amount');
@@ -84,6 +120,12 @@ class EmployeeHistorialController extends Controller
             ->unique()
             ->count();
 
+        $maxAmount = $servicesCount > 0
+            ? (string) (clone $base)->max('amount')
+            : '0';
+
+        $busiestDay = $this->busiestDaySummary(clone $base);
+
         $services = (clone $base)
             ->with(['company:id,nombre'])
             ->orderByDesc('service_date')
@@ -98,6 +140,10 @@ class EmployeeHistorialController extends Controller
                 'id' => $employee->id,
                 'nombre' => $employee->nombre,
                 'correo' => $employee->correo,
+                'rol' => $employee->rol,
+                'estado' => $employee->estado,
+                'rol_label' => $this->userRolLabel($employee->rol),
+                'estado_label' => $employee->estado === User::ESTADO_ACTIVO ? 'Activo' : 'Inactivo',
             ],
             'period' => [
                 'year' => $year,
@@ -106,15 +152,55 @@ class EmployeeHistorialController extends Controller
                 'date_from' => $start->toDateString(),
                 'date_to' => $end->toDateString(),
             ],
+            'filters_applied' => [
+                'company_id' => $filters['company_id'],
+                'q' => $filters['q'] !== '' ? $filters['q'] : null,
+            ],
             'summary' => [
                 'services_count' => $servicesCount,
                 'total_amount' => $totalAmount,
                 'avg_per_service' => $avgPerService,
                 'distinct_service_days' => $distinctDays,
+                'max_service_amount' => $maxAmount,
+                'busiest_day' => $busiestDay,
             ],
             'services' => $services,
             'generated_at' => Carbon::now($tz)->toIso8601String(),
         ];
+    }
+
+    /**
+     * Día del mes (en el conjunto filtrado) con más servicios registrados.
+     *
+     * @return array{date: string, services_count: int}|null
+     */
+    private function busiestDaySummary($baseQuery): ?array
+    {
+        $row = (clone $baseQuery)
+            ->select('service_date', DB::raw('COUNT(*) as svc_count'))
+            ->groupBy('service_date')
+            ->orderByDesc('svc_count')
+            ->orderByDesc('service_date')
+            ->first();
+
+        if ($row === null || ! isset($row->service_date)) {
+            return null;
+        }
+
+        return [
+            'date' => $row->service_date->format('Y-m-d'),
+            'services_count' => (int) $row->svc_count,
+        ];
+    }
+
+    private function userRolLabel(string $rol): string
+    {
+        return match ($rol) {
+            User::ROL_EMPLEADO => 'Empleado',
+            User::ROL_ADMIN => 'Administrador',
+            User::ROL_SUPER_ADMIN => 'Super administrador',
+            default => $rol,
+        };
     }
 
     /**

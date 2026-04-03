@@ -15,6 +15,7 @@ import ServicesListView from '@/views/services/ServicesListView.vue'
 import ServiceRegisterView from '@/views/services/ServiceRegisterView.vue'
 import ServiceDetailView from '@/views/services/ServiceDetailView.vue'
 import ServiceEditView from '@/views/services/ServiceEditView.vue'
+import ServiceCatalogView from '@/views/admin/ServiceCatalogView.vue'
 import PublicInvoiceConsultView from '@/views/public/PublicInvoiceConsultView.vue'
 import { isAdminPanelRole } from '@/utils/roles.js'
 
@@ -38,6 +39,7 @@ const routes = [
     children: [
       { path: '', name: 'admin-dashboard', component: AdminDashboardView },
       { path: 'servicios', name: 'admin-servicios', component: ServicesListView },
+      { path: 'catalogo-servicios', name: 'admin-catalogo-servicios', component: ServiceCatalogView },
       { path: 'servicios/nuevo', name: 'admin-servicios-nuevo', component: ServiceRegisterView },
       { path: 'servicios/:id', name: 'admin-servicio-detalle', component: ServiceDetailView, props: true },
       { path: 'servicios/:id/editar', name: 'admin-servicio-editar', component: ServiceEditView, props: true },

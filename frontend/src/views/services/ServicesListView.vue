@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
+import { downloadAdminExportCsv } from '@/services/invoicesApi.js'
 import { fetchCompanies, fetchEmpleados, fetchServices } from '@/services/servicesApi.js'
 
 const auth = useAuthStore()
@@ -14,6 +15,7 @@ const rows = ref([])
 const meta = ref(null)
 const links = ref(null)
 const loading = ref(false)
+const exportBusy = ref(false)
 const error = ref('')
 
 const filters = ref({
@@ -154,6 +156,29 @@ const pageSummary = computed(() => {
   if (!m || !m.total) return ''
   return `${m.from ?? 0}–${m.to ?? 0} de ${m.total} servicio(s)`
 })
+
+async function exportServicesCsv() {
+  if (!isAdmin.value) return
+  error.value = ''
+  exportBusy.value = true
+  try {
+    const params = {}
+    if (filters.value.company_id) params.company_id = filters.value.company_id
+    if (filters.value.user_id) params.user_id = filters.value.user_id
+    if (filters.value.service_date_from) params.service_date_from = filters.value.service_date_from
+    if (filters.value.service_date_to) params.service_date_to = filters.value.service_date_to
+    const { blob, filename } = await downloadAdminExportCsv('/admin/export/services', params)
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(a.href)
+  } catch (e) {
+    error.value = e.message || 'No se pudo exportar.'
+  } finally {
+    exportBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -169,7 +194,18 @@ const pageSummary = computed(() => {
           }}
         </p>
       </div>
-      <RouterLink class="btn primary" :to="nuevoServicioTo">+ Nuevo servicio</RouterLink>
+      <div class="head-btns">
+        <button
+          v-if="isAdmin"
+          type="button"
+          class="btn secondary"
+          :disabled="exportBusy"
+          @click="exportServicesCsv"
+        >
+          {{ exportBusy ? 'Exportando…' : 'Exportar CSV (Excel)' }}
+        </button>
+        <RouterLink class="btn primary" :to="nuevoServicioTo">+ Nuevo servicio</RouterLink>
+      </div>
     </header>
 
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
@@ -303,6 +339,13 @@ const pageSummary = computed(() => {
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 0.75rem;
+}
+
+.head-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .head h1 {

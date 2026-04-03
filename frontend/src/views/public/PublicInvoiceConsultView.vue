@@ -3,15 +3,12 @@ import { ref, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { publicApi, publicApiBlob } from '@/services/api.js'
 
-/** @type {import('vue').Ref<'consult' | 'history' | 'result'>} */
+/** @type {import('vue').Ref<'consult' | 'result'>} */
 const viewState = ref('consult')
 const code = ref('')
+const verificationCode = ref('')
 const nit = ref('')
-/** Detalle de una factura (mismo shape que la API sin `mode`) */
 const payload = ref(null)
-const historyInvoices = ref([])
-const historyCompanies = ref([])
-const fromHistory = ref(false)
 const loading = ref(false)
 const loadingPdf = ref(false)
 const errorMessage = ref('')
@@ -58,12 +55,13 @@ function validateForm() {
   fieldErrors.value = {}
   errorMessage.value = ''
   const c = code.value.trim()
-  const n = nit.value.trim()
-  if (!c && !n) {
-    fieldErrors.value = {
-      code: ['Indica el código o el NIT.'],
-      nit: ['Indica el código o el NIT.'],
-    }
+  const v = verificationCode.value.trim()
+  if (!c) {
+    fieldErrors.value = { code: ['Indica el código de factura.'] }
+    return false
+  }
+  if (!v) {
+    fieldErrors.value = { verification_code: ['Indica el código de verificación (lo entrega su empresa con la factura).'] }
     return false
   }
   return true
@@ -78,26 +76,15 @@ async function onConsult() {
       method: 'POST',
       body: JSON.stringify({
         code: code.value.trim(),
-        nit: nit.value.trim(),
+        verification_code: verificationCode.value.trim(),
+        nit: nit.value.trim() || undefined,
       }),
     })
 
-    if (res.mode === 'history') {
-      historyInvoices.value = res.invoices || []
-      historyCompanies.value = res.companies || []
-      payload.value = null
-      fromHistory.value = false
-      viewState.value = 'history'
-    } else {
-      const { mode: _m, ...detail } = res
-      payload.value = detail
-      fromHistory.value = false
-      viewState.value = 'result'
-    }
+    payload.value = res
+    viewState.value = 'result'
   } catch (e) {
     payload.value = null
-    historyInvoices.value = []
-    historyCompanies.value = []
     if (e.status === 404 || e.status === 403) {
       errorMessage.value = e.message || 'No se pudo completar la consulta.'
     } else if (e.status === 422 && e.data?.errors) {
@@ -112,23 +99,9 @@ async function onConsult() {
   }
 }
 
-function openDetail(item) {
-  payload.value = item
-  fromHistory.value = true
-  viewState.value = 'result'
-}
-
-function volverHistorial() {
-  payload.value = null
-  viewState.value = 'history'
-}
-
 function nuevaConsulta() {
   viewState.value = 'consult'
   payload.value = null
-  historyInvoices.value = []
-  historyCompanies.value = []
-  fromHistory.value = false
   errorMessage.value = ''
   fieldErrors.value = {}
 }
@@ -147,7 +120,8 @@ async function descargarPdf() {
       method: 'POST',
       body: JSON.stringify({
         code: invoiceCode,
-        nit: nit.value.trim(),
+        verification_code: verificationCode.value.trim(),
+        nit: nit.value.trim() || undefined,
       }),
     })
     const url = URL.createObjectURL(blob)
@@ -172,12 +146,12 @@ async function descargarPdf() {
     <div class="bg no-print" aria-hidden="true" />
 
     <div class="stack">
-      <!-- Tarjeta 1: búsqueda (solo en /consulta-factura; independiente del login) -->
       <section class="search-card" aria-labelledby="titulo-consulta">
         <h1 id="titulo-consulta" class="search-title">Consultar Factura</h1>
         <p class="search-sub">
-          Indica el <strong>código de factura</strong> o el <strong>NIT</strong>: con código ves el detalle; solo NIT
-          muestra el historial público de facturas de ese cliente. Sin inicio de sesión.
+          Ingrese el <strong>código de factura</strong> y el <strong>código de verificación</strong> que le entregó la empresa
+          (se genera al aprobar la factura). Opcionalmente puede indicar el NIT de la empresa como comprobación adicional. Sin
+          inicio de sesión.
         </p>
         <div class="search-row">
           <label class="search-field">
@@ -186,23 +160,33 @@ async function descargarPdf() {
               v-model="code"
               type="text"
               autocomplete="off"
-              placeholder="FAC-2023-1025"
+              placeholder="FAC-2026-04-001"
               :class="{ 'input-invalid': fieldErrors.code }"
               @keyup.enter="onConsult"
             />
             <span v-if="fieldErrors.code" class="field-err">{{ fieldErrors.code[0] }}</span>
           </label>
           <label class="search-field">
-            <span class="search-label">NIT de la empresa</span>
+            <span class="search-label">Código de verificación</span>
+            <input
+              v-model="verificationCode"
+              type="password"
+              autocomplete="off"
+              placeholder="Código secreto"
+              :class="{ 'input-invalid': fieldErrors.verification_code }"
+              @keyup.enter="onConsult"
+            />
+            <span v-if="fieldErrors.verification_code" class="field-err">{{ fieldErrors.verification_code[0] }}</span>
+          </label>
+          <label class="search-field">
+            <span class="search-label">NIT (opcional)</span>
             <input
               v-model="nit"
               type="text"
               autocomplete="off"
               placeholder="900.873.222"
-              :class="{ 'input-invalid': fieldErrors.nit }"
               @keyup.enter="onConsult"
             />
-            <span v-if="fieldErrors.nit" class="field-err">{{ fieldErrors.nit[0] }}</span>
           </label>
           <button type="button" class="btn-search" :disabled="loading" @click="onConsult">
             {{ loading ? 'Consultando…' : 'Consultar Factura' }}
@@ -211,50 +195,7 @@ async function descargarPdf() {
         <p v-if="errorMessage && viewState === 'consult'" class="alert" role="alert">{{ errorMessage }}</p>
       </section>
 
-      <!-- Tarjeta 2: historial (sección aparte) -->
-      <section v-if="viewState === 'history'" id="history-print" class="detail-card detail-card--history">
-        <h2 class="detail-section-title">Historial de facturas</h2>
-        <p v-if="historyCompanies.length" class="muted">
-          <template v-for="(co, i) in historyCompanies" :key="`${i}-${co.nombre}`">
-            {{ co.nombre }}<template v-if="co.nit"> · NIT {{ co.nit }}</template
-            ><span v-if="i < historyCompanies.length - 1"> · </span>
-          </template>
-        </p>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Factura</th>
-                <th>Periodo</th>
-                <th>Estado</th>
-                <th class="num">Total</th>
-                <th class="num">Saldo</th>
-                <th class="no-print">Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, i) in historyInvoices" :key="i">
-                <td>{{ row.invoice?.code }}</td>
-                <td>{{ row.invoice?.period_label }}</td>
-                <td>{{ row.invoice?.status_label }}</td>
-                <td class="num">{{ formatMoney(row.financial?.total) }}</td>
-                <td class="num">{{ formatMoney(row.financial?.balance) }}</td>
-                <td class="no-print">
-                  <button type="button" class="btn-inline" @click="openDetail(row)">Ver detalle</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p v-if="errorMessage" class="alert no-print alert--mt" role="alert">{{ errorMessage }}</p>
-        <div class="actions no-print">
-          <button type="button" class="btn ghost" @click="nuevaConsulta">Nueva consulta</button>
-          <button type="button" class="btn ghost" @click="imprimir">Imprimir listado</button>
-        </div>
-      </section>
-
-      <!-- Tarjeta 2: detalle de factura (mockup inferior) -->
-      <section v-else-if="viewState === 'result'" id="invoice-print" class="detail-card detail-card--invoice">
+      <section v-if="viewState === 'result'" id="invoice-print" class="detail-card detail-card--invoice">
         <div class="brand-bar">
           <span class="brand-icon" aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -439,7 +380,6 @@ async function descargarPdf() {
 
         <div class="actions no-print">
           <button type="button" class="btn ghost" @click="nuevaConsulta">Nueva consulta</button>
-          <button v-if="fromHistory" type="button" class="btn ghost" @click="volverHistorial">Volver al historial</button>
         </div>
       </section>
 
@@ -475,7 +415,6 @@ async function descargarPdf() {
   gap: 1.5rem;
 }
 
-/* —— Tarjeta superior: búsqueda —— */
 .search-card {
   border-radius: 12px;
   padding: 1.25rem 1.35rem 1.35rem;
@@ -606,7 +545,6 @@ async function descargarPdf() {
   margin-top: 1rem;
 }
 
-/* —— Tarjeta inferior: detalle / historial —— */
 .detail-card {
   border-radius: 12px;
   padding: 1.5rem 1.35rem 1.75rem;
@@ -616,19 +554,6 @@ async function descargarPdf() {
     0 0 0 1px rgba(59, 130, 246, 0.12),
     0 0 48px rgba(37, 99, 235, 0.12),
     0 20px 50px rgba(0, 0, 0, 0.4);
-}
-
-.detail-card--history {
-  border-color: rgba(59, 130, 246, 0.28);
-  box-shadow:
-    0 0 0 1px rgba(59, 130, 246, 0.08),
-    0 12px 40px rgba(0, 0, 0, 0.35);
-}
-
-.detail-section-title {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-  color: #f1f5f9;
 }
 
 .brand-bar {
@@ -1040,22 +965,6 @@ async function descargarPdf() {
   background: rgba(51, 65, 85, 0.55);
   color: #e2e8f0;
   border: 1px solid rgba(148, 163, 184, 0.25);
-}
-
-.btn-inline {
-  padding: 0.35rem 0.65rem;
-  border-radius: 8px;
-  border: 1px solid rgba(56, 189, 248, 0.45);
-  background: rgba(56, 189, 248, 0.12);
-  color: #7dd3fc;
-  font: inherit;
-  font-size: 0.78rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.btn-inline:hover {
-  background: rgba(56, 189, 248, 0.22);
 }
 
 .muted {

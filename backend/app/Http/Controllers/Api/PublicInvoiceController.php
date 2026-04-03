@@ -3,107 +3,65 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Company;
 use App\Models\Invoice;
+use App\Services\InvoicePublicAccessService;
 use App\Support\InvoicePdfPayload;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 class PublicInvoiceController extends Controller
 {
-    public function consult(Request $request): \Illuminate\Http\JsonResponse
+    public function consult(Request $request, InvoicePublicAccessService $publicAccess): JsonResponse
     {
         $request->merge([
             'code' => trim((string) $request->input('code', '')),
-            'nit' => trim((string) $request->input('nit', '')),
-        ]);
-
-        $validated = $request->validate([
-            'code' => ['nullable', 'string', 'max:64'],
-            'nit' => ['nullable', 'string', 'max:32'],
-        ]);
-
-        $code = $validated['code'];
-        $nit = $validated['nit'];
-
-        if ($code === '' && $nit === '') {
-            return response()->json([
-                'message' => 'Indica el código de factura o el NIT.',
-                'errors' => [
-                    'code' => ['Completa al menos uno de los dos campos.'],
-                    'nit' => ['Completa al menos uno de los dos campos.'],
-                ],
-            ], 422);
-        }
-
-        if ($code !== '') {
-            $invoice = $this->findInvoiceByCode($code);
-            $error = $this->evaluateSingleInvoiceAccess($invoice, $nit);
-            if ($error !== null) {
-                return $error;
-            }
-
-            return response()->json(array_merge(
-                ['mode' => 'detail'],
-                InvoicePdfPayload::build($invoice)
-            ));
-        }
-
-        $normalizedNit = self::normalizeNit($nit);
-        if ($normalizedNit === '') {
-            return response()->json([
-                'message' => 'El NIT indicado no es válido.',
-            ], 422);
-        }
-
-        $companyIds = $this->companyIdsMatchingNit($nit);
-        if ($companyIds === []) {
-            return response()->json([
-                'message' => 'No encontramos facturas registradas con ese NIT.',
-            ], 404);
-        }
-
-        $invoices = Invoice::query()
-            ->whereIn('company_id', $companyIds)
-            ->whereIn('status', Invoice::PUBLIC_STATUSES)
-            ->with(['company', 'services.user', 'payments' => fn ($q) => $q->orderBy('payment_date')])
-            ->orderByDesc('period_year')
-            ->orderByDesc('period_month')
-            ->orderByDesc('id')
-            ->get();
-
-        if ($invoices->isEmpty()) {
-            return response()->json([
-                'message' => 'No hay facturas disponibles para consulta con ese NIT.',
-            ], 404);
-        }
-
-        $companies = $invoices->pluck('company')->filter()->unique('id')->map(fn (Company $co) => [
-            'nombre' => $co->nombre,
-            'nit' => $co->nit,
-        ])->values();
-
-        return response()->json([
-            'mode' => 'history',
-            'companies' => $companies,
-            'invoices' => $invoices->map(fn (Invoice $inv) => InvoicePdfPayload::build($inv))->values()->all(),
-        ]);
-    }
-
-    public function pdf(Request $request): \Symfony\Component\HttpFoundation\Response|\Illuminate\Http\JsonResponse
-    {
-        $request->merge([
-            'code' => trim((string) $request->input('code', '')),
+            'verification_code' => trim((string) $request->input('verification_code', '')),
             'nit' => trim((string) $request->input('nit', '')),
         ]);
 
         $validated = $request->validate([
             'code' => ['required', 'string', 'max:64'],
+            'verification_code' => ['required', 'string', 'max:128'],
             'nit' => ['nullable', 'string', 'max:32'],
         ]);
 
         $invoice = $this->findInvoiceByCode($validated['code']);
-        $error = $this->evaluateSingleInvoiceAccess($invoice, $validated['nit']);
+        $error = $this->evaluateSingleInvoiceAccess(
+            $invoice,
+            $validated['verification_code'],
+            $validated['nit'] ?? '',
+            $publicAccess
+        );
+        if ($error !== null) {
+            return $error;
+        }
+
+        return response()->json(InvoicePdfPayload::build($invoice));
+    }
+
+    public function pdf(Request $request, InvoicePublicAccessService $publicAccess): Response|JsonResponse
+    {
+        $request->merge([
+            'code' => trim((string) $request->input('code', '')),
+            'verification_code' => trim((string) $request->input('verification_code', '')),
+            'nit' => trim((string) $request->input('nit', '')),
+        ]);
+
+        $validated = $request->validate([
+            'code' => ['required', 'string', 'max:64'],
+            'verification_code' => ['required', 'string', 'max:128'],
+            'nit' => ['nullable', 'string', 'max:32'],
+        ]);
+
+        $invoice = $this->findInvoiceByCode($validated['code']);
+        $error = $this->evaluateSingleInvoiceAccess(
+            $invoice,
+            $validated['verification_code'],
+            $validated['nit'] ?? '',
+            $publicAccess
+        );
         if ($error !== null) {
             return $error;
         }
@@ -134,27 +92,34 @@ class PublicInvoiceController extends Controller
     }
 
     /**
-     * Acceso por código: factura en estados públicos. Si el cliente envía NIT y la empresa tiene NIT,
-     * deben coincidir (refuerzo). Sin NIT en el formulario no se exige (clientes sin NIT / enlace por código).
+     * Factura en estados públicos + código de verificación (hash) + NIT opcional como refuerzo.
      */
-    private function evaluateSingleInvoiceAccess(?Invoice $invoice, string $nitInput): ?\Illuminate\Http\JsonResponse
-    {
+    private function evaluateSingleInvoiceAccess(
+        ?Invoice $invoice,
+        string $verificationPlain,
+        string $nitInput,
+        InvoicePublicAccessService $publicAccess
+    ): ?JsonResponse {
         if ($invoice === null) {
-            return response()->json([
-                'message' => 'No encontramos una factura con los datos indicados.',
-            ], 404);
+            return $this->denyPublicAccess();
         }
 
         if ($invoice->status === Invoice::STATUS_BORRADOR) {
             return response()->json([
                 'message' => 'La factura aún no está disponible para consulta.',
+                'code' => 'invoice_unavailable',
             ], 403);
         }
 
         if (! in_array($invoice->status, Invoice::PUBLIC_STATUSES, true)) {
             return response()->json([
                 'message' => 'La factura aún no está disponible para consulta.',
+                'code' => 'invoice_unavailable',
             ], 403);
+        }
+
+        if (! $publicAccess->verifyPlain($invoice, $verificationPlain)) {
+            return $this->denyPublicAccess();
         }
 
         $nitTrim = trim($nitInput);
@@ -163,9 +128,7 @@ class PublicInvoiceController extends Controller
 
         if ($nitTrim !== '' && $companyNitTrim !== '') {
             if (! hash_equals(self::normalizeNit($companyNitTrim), self::normalizeNit($nitTrim))) {
-                return response()->json([
-                    'message' => 'No encontramos una factura con los datos indicados.',
-                ], 404);
+                return $this->denyPublicAccess();
             }
         }
 
@@ -173,22 +136,14 @@ class PublicInvoiceController extends Controller
     }
 
     /**
-     * @return list<int>
+     * Misma respuesta ante factura inexistente o credenciales incorrectas (reduce enumeración).
      */
-    private function companyIdsMatchingNit(string $nitInput): array
+    private function denyPublicAccess(): JsonResponse
     {
-        $target = self::normalizeNit($nitInput);
-        if ($target === '') {
-            return [];
-        }
-
-        return Company::query()
-            ->whereNotNull('nit')
-            ->where('nit', '!=', '')
-            ->get()
-            ->filter(fn (Company $c) => hash_equals($target, self::normalizeNit((string) $c->nit)))
-            ->pluck('id')
-            ->all();
+        return response()->json([
+            'message' => 'No encontramos una factura con los datos indicados o el código de verificación no es válido.',
+            'code' => 'public_invoice_denied',
+        ], 404);
     }
 
     /**
@@ -200,5 +155,4 @@ class PublicInvoiceController extends Controller
 
         return (string) preg_replace('/[^a-z0-9]/u', '', $s);
     }
-
 }

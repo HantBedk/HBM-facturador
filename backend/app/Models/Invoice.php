@@ -27,6 +27,10 @@ class Invoice extends Model
         self::STATUS_PAGADA,
     ];
 
+    protected $hidden = [
+        'public_access_token',
+    ];
+
     protected $fillable = [
         'code',
         'company_id',

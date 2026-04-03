@@ -9,6 +9,8 @@ const props = defineProps({
   modelValue: { type: Object, required: true },
   photos: { type: Array, default: () => [] },
   companies: { type: Array, default: () => [] },
+  /** Desde API; si hay filas, sustituye al catálogo estático del front. */
+  catalogItems: { type: Array, default: () => [] },
   clientSuggestions: { type: Array, default: () => [] },
   fieldErrors: { type: Object, default: () => ({}) },
   disabled: { type: Boolean, default: false },
@@ -61,18 +63,39 @@ function patch(partial) {
   emit('update:modelValue', { ...props.modelValue, ...partial })
 }
 
+const effectiveTypeCatalog = computed(() => {
+  if (props.catalogItems.length > 0) {
+    return props.catalogItems.map((c) => ({
+      id: `db-${c.id}`,
+      label: c.name,
+      basePrice: Number(c.base_price),
+      description: c.description,
+      catalog_id: c.id,
+    }))
+  }
+  return SERVICE_TYPE_CATALOG.map((c) => ({ ...c, catalog_id: null }))
+})
+
 const filteredCatalog = computed(() => {
   const q = typeFilter.value.trim().toLowerCase()
-  if (!q) return SERVICE_TYPE_CATALOG
-  return SERVICE_TYPE_CATALOG.filter(
-    (i) => i.label.toLowerCase().includes(q) || i.id.includes(q)
+  const list = effectiveTypeCatalog.value
+  if (!q) return list
+  return list.filter(
+    (i) => i.label.toLowerCase().includes(q) || String(i.id).toLowerCase().includes(q)
   )
 })
 
 function pickCatalogItem(item) {
+  let desc = (item.description || '').trim()
+  if (desc.length < 8) {
+    const label = item.label || item.name
+    desc = `Servicio estándar: ${label}. Detalle del trabajo realizado según visita en sitio.`
+  }
   patch({
+    catalog_id: item.catalog_id != null && item.catalog_id !== '' ? item.catalog_id : '',
     service_type: item.label,
     amount: String(item.basePrice),
+    description: desc,
   })
   typeFilter.value = item.label
   typeMenuOpen.value = false
