@@ -6,6 +6,9 @@ import {
   patchCompanyEstado,
   updateCompany,
 } from '@/services/companiesApi.js'
+import { useUiDialogStore } from '@/stores/uiDialog'
+
+const uiDialog = useUiDialogStore()
 
 const rows = ref([])
 const loading = ref(false)
@@ -146,14 +149,22 @@ async function onSubmitModal() {
 async function onToggleEstado(row) {
   const next = row.estado === 'activo' ? 'inactivo' : 'activo'
   const label = next === 'activo' ? 'activar' : 'desactivar'
-  if (!window.confirm(`¿${label} la empresa «${row.nombre}»?`)) return
+  const ok = await uiDialog.confirm({
+    title: next === 'activo' ? 'Activar empresa' : 'Desactivar empresa',
+    message: `¿${label} la empresa «${row.nombre}»?`,
+    danger: next === 'inactivo',
+  })
+  if (!ok) return
   try {
     const updated = await patchCompanyEstado(row.id, next)
     const i = rows.value.findIndex((r) => r.id === row.id)
     if (i >= 0) rows.value[i] = { ...rows.value[i], ...updated }
     else await load()
   } catch (e) {
-    window.alert(e.data?.message || e.message || 'No se pudo actualizar el estado.')
+    await uiDialog.alert({
+      title: 'Error',
+      message: e.data?.message || e.message || 'No se pudo actualizar el estado.',
+    })
   }
 }
 </script>

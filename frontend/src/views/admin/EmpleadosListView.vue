@@ -10,9 +10,11 @@ import {
   updateUser,
 } from '@/services/usersApi.js'
 import { useAuthStore } from '@/stores/auth'
+import { useUiDialogStore } from '@/stores/uiDialog'
 
 const route = useRoute()
 const auth = useAuthStore()
+const uiDialog = useUiDialogStore()
 const router = useRouter()
 
 const rows = ref([])
@@ -230,28 +232,39 @@ async function onSubmitModal() {
 async function onApproveCorreo(row) {
   if (!row.correo_solicitado) return false
   const msg = `¿Aplicar como correo de acceso el siguiente?\n${row.correo_solicitado}\n\nEl técnico usará ese correo para iniciar sesión.`
-  if (!window.confirm(msg)) return false
+  const ok = await uiDialog.confirm({ title: 'Aprobar correo solicitado', message: msg })
+  if (!ok) return false
   try {
     await approveCorreoSolicitud(row.id)
     await load()
     return true
   } catch (e) {
-    window.alert(e.data?.message || e.message || 'No se pudo aprobar.')
+    await uiDialog.alert({
+      title: 'Error',
+      message: e.data?.message || e.message || 'No se pudo aprobar.',
+    })
     return false
   }
 }
 
 async function onRejectCorreo(row) {
   if (!row.correo_solicitado) return false
-  if (!window.confirm('¿Rechazar la solicitud de cambio de correo? El técnico seguirá con su correo actual.')) {
-    return false
-  }
+  const ok = await uiDialog.confirm({
+    title: 'Rechazar solicitud',
+    message: '¿Rechazar la solicitud de cambio de correo? El técnico seguirá con su correo actual.',
+    danger: true,
+    confirmLabel: 'Rechazar',
+  })
+  if (!ok) return false
   try {
     await rejectCorreoSolicitud(row.id)
     await load()
     return true
   } catch (e) {
-    window.alert(e.data?.message || e.message || 'No se pudo rechazar.')
+    await uiDialog.alert({
+      title: 'Error',
+      message: e.data?.message || e.message || 'No se pudo rechazar.',
+    })
     return false
   }
 }
@@ -273,14 +286,22 @@ async function rejectFromModal() {
 async function onToggleEstado(row) {
   const next = row.estado === 'activo' ? 'inactivo' : 'activo'
   const label = next === 'activo' ? 'activar' : 'desactivar'
-  if (!window.confirm(`¿${label} a «${row.nombre}»?`)) return
+  const ok = await uiDialog.confirm({
+    title: next === 'activo' ? 'Activar empleado' : 'Desactivar empleado',
+    message: `¿${label} a «${row.nombre}»?`,
+    danger: next === 'inactivo',
+  })
+  if (!ok) return
   try {
     const updated = await patchUserEstado(row.id, next)
     const i = rows.value.findIndex((r) => r.id === row.id)
     if (i >= 0) rows.value[i] = { ...rows.value[i], ...updated }
     else await load()
   } catch (e) {
-    window.alert(e.data?.message || e.message || 'No se pudo actualizar.')
+    await uiDialog.alert({
+      title: 'Error',
+      message: e.data?.message || e.message || 'No se pudo actualizar.',
+    })
   }
 }
 

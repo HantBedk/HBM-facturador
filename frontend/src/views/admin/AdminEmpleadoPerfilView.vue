@@ -2,6 +2,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { clearEmpleadoDatosPago, fetchAdminEmpleadoPerfil } from '@/services/usersApi.js'
+import { useUiDialogStore } from '@/stores/uiDialog'
+
+const uiDialog = useUiDialogStore()
 
 const props = defineProps({
   userId: { type: String, required: true },
@@ -60,9 +63,13 @@ async function load() {
 }
 
 async function onClearDatosPago() {
-  const ok = window.confirm(
-    '¿Borrar entidad, tipo de cuenta y número/llave Bre-B de este técnico? Se le pedirá que actualice sus datos de pago en «Mi perfil» y recibirá un aviso.'
-  )
+  const ok = await uiDialog.confirm({
+    title: 'Borrar datos de pago',
+    message:
+      '¿Borrar entidad, tipo de cuenta y número/llave Bre-B de este técnico? Se le pedirá que actualice sus datos de pago en «Mi perfil» y recibirá un aviso.',
+    danger: true,
+    confirmLabel: 'Borrar',
+  })
   if (!ok) return
   clearing.value = true
   toast.value = ''

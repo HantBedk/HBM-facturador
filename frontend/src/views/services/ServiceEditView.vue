@@ -5,10 +5,12 @@ import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
 import ServiceCorrectionFields from '@/components/services/ServiceCorrectionFields.vue'
 import { fetchService, fetchServiceCatalogActive, updateService } from '@/services/servicesApi.js'
+import { useUiDialogStore } from '@/stores/uiDialog'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const uiDialog = useUiDialogStore()
 
 const service = ref(null)
 const loading = ref(true)
@@ -105,7 +107,8 @@ async function onSubmit() {
   const msg = isAdmin.value
     ? '¿Confirmar los cambios? Estos datos afectan la facturación y lo que verá el cliente.'
     : '¿Guardar los cambios en tu servicio?'
-  if (!window.confirm(msg)) return
+  const ok = await uiDialog.confirm({ title: 'Guardar cambios', message: msg })
+  if (!ok) return
 
   saving.value = true
   try {
@@ -121,7 +124,7 @@ async function onSubmit() {
       payload.catalog_id = null
     }
     await updateService(route.params.id, payload)
-    window.alert('Cambios guardados.')
+    await uiDialog.alert({ title: 'Listo', message: 'Cambios guardados.' })
     await router.push(detailPath.value)
   } catch (e) {
     if (e.data?.errors) fieldErrors.value = e.data.errors

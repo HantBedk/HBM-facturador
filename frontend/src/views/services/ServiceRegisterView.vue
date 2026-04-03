@@ -15,8 +15,10 @@ import {
   pushRecentClientName,
   saveServiceDraft,
 } from '@/services/servicesApi.js'
+import { useUiDialogStore } from '@/stores/uiDialog'
 
 const auth = useAuthStore()
+const uiDialog = useUiDialogStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -255,7 +257,10 @@ async function onSubmit() {
       lastCreated.value = { id: created.id, code: created.code }
       resetFormToDefaults()
     } else {
-      window.alert(`Servicio registrado correctamente.\nCódigo: ${created.code}`)
+      await uiDialog.alert({
+        title: 'Servicio registrado',
+        message: `Servicio registrado correctamente.\nCódigo: ${created.code}`,
+      })
       await router.push(`${basePrefix.value}/servicios/${created.id}`)
     }
   } catch (e) {

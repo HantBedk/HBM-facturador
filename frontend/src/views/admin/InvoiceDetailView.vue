@@ -9,6 +9,9 @@ import {
   patchInvoiceStatus,
   regenerateInvoicePublicAccess,
 } from '@/services/invoicesApi.js'
+import { useUiDialogStore } from '@/stores/uiDialog'
+
+const uiDialog = useUiDialogStore()
 
 function formatDateShort(iso) {
   if (!iso) return '—'
@@ -120,9 +123,14 @@ async function onEnviar() {
 }
 
 async function onRegeneratePublicCode() {
-  if (!window.confirm('Se generará un nuevo código de verificación. El anterior dejará de ser válido para la consulta pública. ¿Continuar?')) {
-    return
-  }
+  const ok = await uiDialog.confirm({
+    title: 'Regenerar código público',
+    message:
+      'Se generará un nuevo código de verificación. El anterior dejará de ser válido para la consulta pública. ¿Continuar?',
+    danger: true,
+    confirmLabel: 'Regenerar',
+  })
+  if (!ok) return
   actionError.value = ''
   publicVerificationShown.value = ''
   publicVerificationNotice.value = ''
@@ -167,7 +175,13 @@ async function onAddPayment() {
 }
 
 async function onDeletePayment(pid) {
-  if (!window.confirm('¿Eliminar este pago del registro?')) return
+  const ok = await uiDialog.confirm({
+    title: 'Eliminar pago',
+    message: '¿Eliminar este pago del registro?',
+    danger: true,
+    confirmLabel: 'Eliminar',
+  })
+  if (!ok) return
   actionError.value = ''
   try {
     invoice.value = await deleteInvoicePayment(id.value, pid)

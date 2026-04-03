@@ -5,10 +5,12 @@ import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
 import { archiveService, fetchService, updateService } from '@/services/servicesApi.js'
 import ServiceCorrectionFields from '@/components/services/ServiceCorrectionFields.vue'
+import { useUiDialogStore } from '@/stores/uiDialog'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const uiDialog = useUiDialogStore()
 
 const service = ref(null)
 const loading = ref(true)
@@ -128,7 +130,8 @@ async function onSaveCorrections() {
   const msg =
     '¿Confirmar los cambios en cliente, tipo, descripción y valor?\n\n' +
     'Estos datos afectan la facturación y lo que verá el cliente.'
-  if (!window.confirm(msg)) return
+  const ok = await uiDialog.confirm({ title: 'Guardar correcciones', message: msg })
+  if (!ok) return
 
   saving.value = true
   try {
@@ -138,7 +141,7 @@ async function onSaveCorrections() {
       description: f.description.trim(),
       amount: Number(f.amount),
     })
-    window.alert('Cambios guardados correctamente.')
+    await uiDialog.alert({ title: 'Listo', message: 'Cambios guardados correctamente.' })
   } catch (e) {
     if (e.data?.errors) fieldErrors.value = e.data.errors
     else saveError.value = e.data?.message || e.message || 'No se pudo guardar.'
@@ -150,19 +153,28 @@ async function onSaveCorrections() {
 async function onEmpleadoArchive() {
   const s = service.value
   if (!s || s.invoiced || s.status === 'eliminado') return
-  const typed = window.prompt(
-    `Para eliminar este registro, escribe exactamente el código del servicio (${s.code}):`
-  )
+  const typed = await uiDialog.prompt({
+    title: 'Confirmar eliminación',
+    message: `Para eliminar este registro, escribe exactamente el código del servicio (${s.code}):`,
+    placeholder: s.code,
+    danger: true,
+    confirmLabel: 'Eliminar',
+  })
   if (typed?.trim() !== s.code) {
-    if (typed != null && typed.trim() !== '') window.alert('El código no coincide.')
+    if (typed != null && typed.trim() !== '') {
+      await uiDialog.alert({ title: 'Código incorrecto', message: 'El código no coincide.' })
+    }
     return
   }
   try {
     await archiveService(s.id)
-    window.alert('Servicio marcado como eliminado.')
+    await uiDialog.alert({ title: 'Listo', message: 'Servicio marcado como eliminado.' })
     await router.push(`${base.value}/listado-servicios`)
   } catch (e) {
-    window.alert(e.data?.message || e.message || 'No se pudo eliminar.')
+    await uiDialog.alert({
+      title: 'Error',
+      message: e.data?.message || e.message || 'No se pudo eliminar.',
+    })
   }
 }
 </script>

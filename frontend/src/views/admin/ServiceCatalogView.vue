@@ -13,6 +13,9 @@ import {
   updateServiceCatalogItem,
   updateTechnicianCatalogDiscount,
 } from '@/services/servicesApi.js'
+import { useUiDialogStore } from '@/stores/uiDialog'
+
+const uiDialog = useUiDialogStore()
 
 const route = useRoute()
 
@@ -204,7 +207,11 @@ async function toggleStatus(row) {
 }
 
 async function onApproveSuggestion(s) {
-  if (!window.confirm(`¿Aprobar «${s.name}» y darlo de alta en el catálogo de la empresa?`)) return
+  const ok = await uiDialog.confirm({
+    title: 'Aprobar propuesta',
+    message: `¿Aprobar «${s.name}» y darlo de alta en el catálogo de la empresa?`,
+  })
+  if (!ok) return
   try {
     await approveServiceCatalogSuggestion(s.id)
     await loadPending()
@@ -215,7 +222,13 @@ async function onApproveSuggestion(s) {
 }
 
 async function onRejectSuggestion(s) {
-  if (!window.confirm(`¿Descartar la propuesta «${s.name}»?`)) return
+  const ok = await uiDialog.confirm({
+    title: 'Descartar propuesta',
+    message: `¿Descartar la propuesta «${s.name}»?`,
+    danger: true,
+    confirmLabel: 'Descartar',
+  })
+  if (!ok) return
   try {
     await rejectServiceCatalogSuggestion(s.id)
     await loadPending()
