@@ -69,6 +69,8 @@ class AuthController extends Controller
 
         if ($user->rol === User::ROL_EMPLEADO) {
             $base['perfil_completado_at'] = $user->perfil_completado_at?->toIso8601String();
+            $base['correo_solicitado'] = $user->correo_solicitado;
+            $base['correo_solicitado_at'] = $user->correo_solicitado_at?->toIso8601String();
             $base['telefono'] = $user->telefono;
             $base['tipo_documento'] = $user->tipo_documento;
             $base['numero_documento'] = $user->numero_documento;

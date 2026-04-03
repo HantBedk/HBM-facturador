@@ -86,7 +86,12 @@ class AdminUserController extends Controller
         }
 
         $user->nombre = trim($data['nombre']);
-        $user->correo = trim($data['correo']);
+        $newCorreo = trim($data['correo']);
+        if ($newCorreo !== $user->correo) {
+            $user->correo_solicitado = null;
+            $user->correo_solicitado_at = null;
+        }
+        $user->correo = $newCorreo;
         $user->rol = $data['rol'];
         $user->estado = $data['estado'];
         if (! empty($data['password'])) {

@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -10,7 +11,7 @@ class UserResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        return [
+        $base = [
             'id' => $this->id,
             'nombre' => $this->nombre,
             'correo' => $this->correo,
@@ -19,5 +20,12 @@ class UserResource extends JsonResource
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];
+
+        if ($this->rol === User::ROL_EMPLEADO) {
+            $base['correo_solicitado'] = $this->correo_solicitado;
+            $base['correo_solicitado_at'] = $this->correo_solicitado_at?->toIso8601String();
+        }
+
+        return $base;
     }
 }

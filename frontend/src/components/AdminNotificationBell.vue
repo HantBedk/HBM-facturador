@@ -162,7 +162,7 @@ onUnmounted(() => {
 
     <div
       v-if="open"
-      class="absolute right-0 mt-2 w-[min(100vw-2rem,22rem)] rounded-xl border border-slate-700/60 bg-[#1c212c] shadow-2xl z-50 text-left"
+      class="absolute right-0 top-full z-[100] mt-2 w-[min(100vw-2rem,22rem)] origin-top-right rounded-xl border border-slate-700/60 bg-[#1c212c] text-left shadow-2xl"
       @click.stop
     >
       <div class="flex items-center justify-between px-3 py-2 border-b border-slate-700/50">
@@ -208,7 +208,7 @@ onUnmounted(() => {
       </div>
 
       <p v-if="error" class="px-3 py-2 text-xs text-red-400">{{ error }}</p>
-      <div class="max-h-[min(70vh,320px)] overflow-y-auto">
+      <div class="max-h-[min(55vh,300px)] overflow-y-auto overscroll-contain">
         <p v-if="loading" class="px-3 py-6 text-center text-sm text-slate-500">Cargando…</p>
         <template v-else>
           <button

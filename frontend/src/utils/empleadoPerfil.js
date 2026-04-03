@@ -87,8 +87,19 @@ export function validateEmpleadoPerfilForm(form, bankCodes) {
   const cn = String(form.cuenta_numero ?? '').trim()
   if (cn.length < 4) {
     push('cuenta_numero', 'Indica al menos 4 caracteres.')
-  } else if (!/^[0-9A-Za-z\-]+$/.test(cn)) {
-    push('cuenta_numero', 'Solo números, letras y guiones.')
+  } else if (cn.length > 191) {
+    push('cuenta_numero', 'Máximo 191 caracteres.')
+  } else if (ct && ACCOUNT_TYPES.has(ct)) {
+    if (ct === 'llave_breb') {
+      if (!/^[\p{L}\p{N}@._+\-\s]+$/u.test(cn)) {
+        push(
+          'cuenta_numero',
+          'Para Bre-B usa letras, números, espacios, @, punto, guiones o + (correo o llave).'
+        )
+      }
+    } else if (!/^[0-9A-Za-z\-]+$/.test(cn)) {
+      push('cuenta_numero', 'Solo números, letras y guiones.')
+    }
   }
 
   const ok = Object.keys(fieldErrors).length === 0

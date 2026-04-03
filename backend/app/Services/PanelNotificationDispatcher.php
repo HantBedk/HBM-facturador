@@ -41,4 +41,30 @@ class PanelNotificationDispatcher
             ]);
         }
     }
+
+    /**
+     * Notificación para un usuario concreto (p. ej. técnico: correo, pagos en facturas).
+     *
+     * @param  array<string, mixed>  $meta
+     */
+    public function notifyUser(int $userId, string $type, string $message, array $meta = [], ?string $dedupeKey = null): void
+    {
+        if (! app(EmpleadoNotificacionUserPreferences::class)->shouldReceive($userId, $type)) {
+            return;
+        }
+
+        $key = $dedupeKey !== null ? $dedupeKey.'_user_'.$userId : null;
+        if ($key !== null && PanelNotification::query()->where('dedupe_key', $key)->exists()) {
+            return;
+        }
+
+        PanelNotification::query()->create([
+            'user_id' => $userId,
+            'type' => $type,
+            'message' => $message,
+            'read' => false,
+            'meta' => $meta !== [] ? $meta : null,
+            'dedupe_key' => $key,
+        ]);
+    }
 }

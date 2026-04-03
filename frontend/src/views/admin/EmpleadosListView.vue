@@ -1,7 +1,14 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { createUser, fetchAdminUsers, patchUserEstado, updateUser } from '@/services/usersApi.js'
+import {
+  approveCorreoSolicitud,
+  createUser,
+  fetchAdminUsers,
+  patchUserEstado,
+  rejectCorreoSolicitud,
+  updateUser,
+} from '@/services/usersApi.js'
 
 const rows = ref([])
 const meta = ref(null)
@@ -14,6 +21,8 @@ const estadoFilter = ref('')
 const modalOpen = ref(false)
 const modalMode = ref('create')
 const editingId = ref(null)
+/** Fila en edición (p. ej. solicitud de correo) */
+const editingRow = ref(null)
 const saving = ref(false)
 const modalError = ref('')
 const fieldErrors = ref({})
@@ -89,6 +98,7 @@ function goPage(p) {
 function openCreate() {
   modalMode.value = 'create'
   editingId.value = null
+  editingRow.value = null
   modalError.value = ''
   fieldErrors.value = {}
   form.value = { nombre: '', correo: '', password: '', rol: 'empleado', estado: 'activo' }
@@ -98,6 +108,7 @@ function openCreate() {
 function openEdit(row) {
   modalMode.value = 'edit'
   editingId.value = row.id
+  editingRow.value = row
   modalError.value = ''
   fieldErrors.value = {}
   form.value = {
@@ -147,6 +158,49 @@ async function onSubmitModal() {
   } finally {
     saving.value = false
   }
+}
+
+async function onApproveCorreo(row) {
+  if (!row.correo_solicitado) return false
+  const msg = `¿Aplicar como correo de acceso el siguiente?\n${row.correo_solicitado}\n\nEl técnico usará ese correo para iniciar sesión.`
+  if (!window.confirm(msg)) return false
+  try {
+    await approveCorreoSolicitud(row.id)
+    await load()
+    return true
+  } catch (e) {
+    window.alert(e.data?.message || e.message || 'No se pudo aprobar.')
+    return false
+  }
+}
+
+async function onRejectCorreo(row) {
+  if (!row.correo_solicitado) return false
+  if (!window.confirm('¿Rechazar la solicitud de cambio de correo? El técnico seguirá con su correo actual.')) {
+    return false
+  }
+  try {
+    await rejectCorreoSolicitud(row.id)
+    await load()
+    return true
+  } catch (e) {
+    window.alert(e.data?.message || e.message || 'No se pudo rechazar.')
+    return false
+  }
+}
+
+async function approveFromModal() {
+  const row = editingRow.value
+  if (!row?.correo_solicitado) return
+  const ok = await onApproveCorreo(row)
+  if (ok) closeModal()
+}
+
+async function rejectFromModal() {
+  const row = editingRow.value
+  if (!row?.correo_solicitado) return
+  const ok = await onRejectCorreo(row)
+  if (ok) closeModal()
 }
 
 async function onToggleEstado(row) {
@@ -228,7 +282,16 @@ const pageSummary = computed(() => {
               <td>
                 <span class="name">{{ u.nombre }}</span>
               </td>
-              <td class="muted">{{ u.correo }}</td>
+              <td class="muted">
+                <div>{{ u.correo }}</div>
+                <div
+                  v-if="u.rol === 'empleado' && u.correo_solicitado"
+                  class="correo-solicitado"
+                >
+                  <span class="badge">Pendiente</span>
+                  {{ u.correo_solicitado }}
+                </div>
+              </td>
               <td>
                 <span class="pill" :data-rol="u.rol">{{ ROL_LABEL[u.rol] || u.rol }}</span>
               </td>
@@ -236,6 +299,9 @@ const pageSummary = computed(() => {
                 <span class="pill" :data-st="u.estado">{{ u.estado === 'activo' ? 'Activo' : 'Inactivo' }}</span>
               </td>
               <td class="actions-col">
+                <RouterLink v-if="u.rol === 'empleado'" class="link" :to="`/admin/empleados/${u.id}/perfil`">
+                  Perfil
+                </RouterLink>
                 <RouterLink
                   v-if="u.rol === 'empleado'"
                   class="link"
@@ -243,6 +309,10 @@ const pageSummary = computed(() => {
                 >
                   Historial
                 </RouterLink>
+                <template v-if="u.rol === 'empleado' && u.correo_solicitado">
+                  <button type="button" class="link ok" @click="onApproveCorreo(u)">Aprobar correo</button>
+                  <button type="button" class="link warn" @click="onRejectCorreo(u)">Rechazar</button>
+                </template>
                 <button type="button" class="link" @click="openEdit(u)">Editar</button>
                 <label class="toggle" :title="u.estado === 'activo' ? 'Desactivar' : 'Activar'">
                   <input type="checkbox" :checked="u.estado === 'activo'" @click.prevent="onToggleEstado(u)" />
@@ -274,10 +344,24 @@ const pageSummary = computed(() => {
     </div>
 
     <Teleport to="body">
-      <div v-if="modalOpen" class="modal-backdrop" @click.self="closeModal">
+          <div v-if="modalOpen" class="modal-backdrop" @click.self="closeModal">
         <div class="modal card" role="dialog" aria-modal="true">
           <h2 class="modal-title">{{ modalTitle }}</h2>
           <p v-if="modalError" class="banner err">{{ modalError }}</p>
+          <div
+            v-if="modalMode === 'edit' && form.rol === 'empleado' && editingRow?.correo_solicitado"
+            class="banner info"
+          >
+            <p class="m-0 mb-2">
+              <strong>Solicitud de correo (técnico):</strong>
+              {{ editingRow.correo_solicitado }}
+            </p>
+            <p class="m-0 mb-2 text-sm opacity-90">Acceso actual: {{ form.correo }}</p>
+            <div class="correo-actions">
+              <button type="button" class="btn primary" @click="approveFromModal">Aprobar este correo</button>
+              <button type="button" class="btn secondary" @click="rejectFromModal">Rechazar solicitud</button>
+            </div>
+          </div>
           <form class="modal-form" @submit.prevent="onSubmitModal">
             <label class="field">
               <span>Nombre <abbr title="obligatorio">*</abbr></span>
@@ -397,6 +481,40 @@ h1 {
   border: 1px solid rgba(248, 113, 113, 0.45);
   color: #fecaca;
   margin-bottom: 1rem;
+}
+
+.banner.info {
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #e0f2fe;
+  margin-bottom: 1rem;
+}
+
+.correo-solicitado {
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  color: #fde68a;
+}
+
+.correo-solicitado .badge {
+  display: inline-block;
+  margin-right: 0.35rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  background: rgba(251, 191, 36, 0.2);
+  color: #fde68a;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.link.ok {
+  color: #86efac;
+}
+
+.link.warn {
+  color: #fbbf24;
 }
 
 .meta-line {
@@ -629,5 +747,11 @@ h1 {
   margin-top: 0.5rem;
   padding-top: 0.75rem;
   border-top: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.correo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 </style>

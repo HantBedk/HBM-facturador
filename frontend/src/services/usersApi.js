@@ -29,3 +29,19 @@ export function patchUserEstado(id, estado) {
     body: JSON.stringify({ estado }),
   }).then((r) => r.data)
 }
+
+export function approveCorreoSolicitud(userId) {
+  return api(`/admin/users/${userId}/correo-solicitud/approve`, { method: 'POST' }).then((r) => r.data)
+}
+
+export function rejectCorreoSolicitud(userId) {
+  return api(`/admin/users/${userId}/correo-solicitud/reject`, { method: 'POST' }).then((r) => r.data)
+}
+
+export function fetchAdminEmpleadoPerfil(userId) {
+  return api(`/admin/users/${userId}/empleado-perfil`)
+}
+
+export function clearEmpleadoDatosPago(userId) {
+  return api(`/admin/users/${userId}/empleado-perfil/borrar-datos-pago`, { method: 'POST' })
+}

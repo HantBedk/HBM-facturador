@@ -8,8 +8,11 @@ import CompaniesListView from '@/views/admin/CompaniesListView.vue'
 import InvoicesListView from '@/views/admin/InvoicesListView.vue'
 import InvoiceEditorView from '@/views/admin/InvoiceEditorView.vue'
 import InvoiceDetailView from '@/views/admin/InvoiceDetailView.vue'
+import AdminEmpleadoNotificacionesView from '@/views/admin/AdminEmpleadoNotificacionesView.vue'
+import AdminEmpleadoPerfilView from '@/views/admin/AdminEmpleadoPerfilView.vue'
 import EmpleadosListView from '@/views/admin/EmpleadosListView.vue'
 import EmpleadoDashboardView from '@/views/empleado/EmpleadoDashboardView.vue'
+import EmpleadoConfiguracionView from '@/views/empleado/EmpleadoConfiguracionView.vue'
 import EmpleadoOnboardingView from '@/views/empleado/EmpleadoOnboardingView.vue'
 import EmployeeHistorialView from '@/views/empleado/EmployeeHistorialView.vue'
 import ServicesListView from '@/views/services/ServicesListView.vue'
@@ -62,6 +65,17 @@ const routes = [
       { path: 'empresas', name: 'admin-empresas', component: CompaniesListView },
       { path: 'empleados', name: 'admin-empleados-list', component: EmpleadosListView },
       {
+        path: 'configuracion/notificaciones-tecnicos',
+        name: 'admin-notificaciones-tecnicos',
+        component: AdminEmpleadoNotificacionesView,
+      },
+      {
+        path: 'empleados/:userId(\\d+)/perfil',
+        name: 'admin-empleado-perfil',
+        component: AdminEmpleadoPerfilView,
+        props: true,
+      },
+      {
         path: 'empleados/rendimiento/:userId(\\d+)',
         name: 'admin-emp-rendimiento-user',
         component: EmployeeHistorialView,
@@ -87,6 +101,11 @@ const routes = [
         path: 'perfil',
         name: 'empleado-perfil',
         component: EmpleadoOnboardingView,
+      },
+      {
+        path: 'configuracion',
+        name: 'empleado-configuracion',
+        component: EmpleadoConfiguracionView,
       },
       { path: '', name: 'empleado-dashboard', component: EmpleadoDashboardView },
       { path: 'historial', name: 'emp-historial', component: EmployeeHistorialView },
@@ -139,10 +158,14 @@ router.beforeEach(async (to) => {
       : { name: 'empleado-dashboard' }
   }
 
-  /** Técnicos: si faltan datos obligatorios (teléfono, documento, cuenta, etc.) solo se permite /empleado/perfil. */
+  /** Técnicos: si faltan datos obligatorios solo se permite /empleado/perfil y /empleado/configuracion (contraseña y avisos). */
   if (auth.isAuthenticated && auth.user?.rol === 'empleado') {
     const incomplete = isEmpleadoPerfilIncomplete(auth.user)
-    if (to.path === '/empleado/perfil' || to.path === '/empleado/completar-perfil') {
+    if (
+      to.path === '/empleado/perfil' ||
+      to.path === '/empleado/completar-perfil' ||
+      to.path === '/empleado/configuracion'
+    ) {
       return true
     }
     if (incomplete) {

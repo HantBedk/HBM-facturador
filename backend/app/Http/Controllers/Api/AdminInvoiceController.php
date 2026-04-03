@@ -9,6 +9,7 @@ use App\Models\Invoice;
 use App\Models\PanelNotification;
 use App\Models\Payment;
 use App\Models\Service;
+use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Services\InvoiceCodeGenerator;
 use App\Services\InvoicePublicAccessService;
@@ -447,7 +448,7 @@ class AdminInvoiceController extends Controller
 
         $statusBeforePayment = $invoice->status;
 
-        Payment::query()->create([
+        $payment = Payment::query()->create([
             'invoice_id' => $invoice->id,
             'amount' => $data['amount'],
             'payment_date' => $data['payment_date'],
@@ -469,6 +470,25 @@ class AdminInvoiceController extends Controller
                     'previous_status' => $statusBeforePayment,
                 ],
                 'partial_inv_'.$invoice->id
+            );
+        }
+
+        $dispatcher = app(PanelNotificationDispatcher::class);
+        $empleadoIds = $invoice->services->pluck('user_id')->unique()->filter(fn ($id) => $id !== null && (int) $id > 0)->values();
+        foreach ($empleadoIds as $uid) {
+            $u = User::query()->find((int) $uid);
+            if ($u === null || $u->rol !== User::ROL_EMPLEADO) {
+                continue;
+            }
+            $dispatcher->notifyUser(
+                (int) $uid,
+                PanelNotification::TYPE_EMP_PAGO_FACTURA,
+                'Se registró un pago en la factura '.$invoice->code.' (periodo '.$invoice->period_month.'/'.$invoice->period_year.').',
+                [
+                    'link' => '/empleado/historial?year='.$invoice->period_year.'&month='.$invoice->period_month,
+                    'invoice_id' => $invoice->id,
+                ],
+                'pago_'.$payment->id.'_u_'.$uid
             );
         }
 

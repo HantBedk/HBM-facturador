@@ -40,6 +40,8 @@ class User extends Authenticatable
         'cuenta_tipo',
         'cuenta_numero',
         'perfil_completado_at',
+        'correo_solicitado',
+        'correo_solicitado_at',
     ];
 
     protected $hidden = [
@@ -52,6 +54,8 @@ class User extends Authenticatable
         return [
             'password' => 'hashed',
             'perfil_completado_at' => 'datetime',
+            'correo_solicitado_at' => 'datetime',
+            'empleado_notificaciones_prefs' => 'array',
         ];
     }
 

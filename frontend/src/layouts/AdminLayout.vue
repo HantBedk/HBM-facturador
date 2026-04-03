@@ -138,7 +138,7 @@ async function salir() {
           to="/admin/empleados"
           :class="[
             'group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors',
-            route.path === '/admin/empleados'
+            route.path === '/admin/empleados' || /^\/admin\/empleados\/\d+\/perfil$/.test(route.path)
               ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20'
               : 'text-slate-300 hover:bg-slate-800/50 hover:text-white',
           ]"
@@ -146,7 +146,9 @@ async function salir() {
           <div
             :class="[
               'flex items-center justify-center p-1',
-              route.path === '/admin/empleados' ? 'text-white' : 'text-purple-400 group-hover:text-purple-300',
+              route.path === '/admin/empleados' || /^\/admin\/empleados\/\d+\/perfil$/.test(route.path)
+                ? 'text-white'
+                : 'text-purple-400 group-hover:text-purple-300',
             ]"
           >
             <svg class="h-[1.15rem] w-[1.15rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -160,6 +162,35 @@ async function salir() {
             </svg>
           </div>
           <span>Configuración</span>
+        </RouterLink>
+
+        <RouterLink
+          to="/admin/configuracion/notificaciones-tecnicos"
+          :class="[
+            'group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors',
+            route.path.startsWith('/admin/configuracion/notificaciones-tecnicos')
+              ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20'
+              : 'text-slate-300 hover:bg-slate-800/50 hover:text-white',
+          ]"
+        >
+          <div
+            :class="[
+              'flex items-center justify-center p-1',
+              route.path.startsWith('/admin/configuracion/notificaciones-tecnicos')
+                ? 'text-white'
+                : 'text-sky-400 group-hover:text-sky-300',
+            ]"
+          >
+            <svg class="h-[1.15rem] w-[1.15rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+              />
+            </svg>
+          </div>
+          <span>Avisos técnicos</span>
         </RouterLink>
 
       </nav>

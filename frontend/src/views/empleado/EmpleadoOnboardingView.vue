@@ -7,6 +7,7 @@ import {
   FALLBACK_BANKS,
   FALLBACK_DOCUMENT_TYPES,
 } from '@/constants/empleadoPerfilCatalogs.js'
+import { cancelarCorreoSolicitud, solicitarCambioCorreo } from '@/services/empleadoCorreoApi.js'
 import { fetchEmpleadoPerfilForm, saveEmpleadoPerfil } from '@/services/empleadoPerfilApi.js'
 import { isEmpleadoPerfilIncomplete, validateEmpleadoPerfilForm } from '@/utils/empleadoPerfil.js'
 
@@ -22,7 +23,13 @@ const fieldErrors = ref({})
 const startedMandatory = ref(false)
 const toastOk = ref('')
 
+const nuevoCorreo = ref('')
+const correoMsg = ref('')
+const correoErr = ref('')
+const savingCorreo = ref(false)
+
 const mandatoryMode = computed(() => isEmpleadoPerfilIncomplete(auth.user))
+const solicitudCorreoPendiente = computed(() => !!(auth.user?.correo_solicitado && String(auth.user.correo_solicitado).trim()))
 
 const banks = ref([])
 const documentTypes = ref([])
@@ -112,6 +119,38 @@ async function onSubmit() {
     saving.value = false
   }
 }
+
+async function enviarSolicitudCorreo() {
+  correoErr.value = ''
+  correoMsg.value = ''
+  savingCorreo.value = true
+  try {
+    await solicitarCambioCorreo(nuevoCorreo.value)
+    await auth.refreshUser()
+    nuevoCorreo.value = ''
+    correoMsg.value = 'Solicitud enviada. Un administrador revisará el correo antes de aplicarlo.'
+  } catch (e) {
+    if (e.data?.errors?.correo_solicitado) correoErr.value = e.data.errors.correo_solicitado[0]
+    else correoErr.value = e.data?.message || e.message || 'No se pudo enviar la solicitud.'
+  } finally {
+    savingCorreo.value = false
+  }
+}
+
+async function cancelarSolicitudCorreo() {
+  correoErr.value = ''
+  correoMsg.value = ''
+  savingCorreo.value = true
+  try {
+    await cancelarCorreoSolicitud()
+    await auth.refreshUser()
+    correoMsg.value = 'Solicitud cancelada.'
+  } catch (e) {
+    correoErr.value = e.data?.message || e.message || 'No se pudo cancelar.'
+  } finally {
+    savingCorreo.value = false
+  }
+}
 </script>
 
 <template>
@@ -180,14 +219,51 @@ async function onSubmit() {
             <p class="mt-1 text-xs text-slate-500">Revisa mayúsculas y tildes; así lo usaremos en nómina y mensajes.</p>
             <p v-if="fieldErrors.nombre" class="mt-1 text-sm text-red-400">{{ fieldErrors.nombre[0] }}</p>
           </div>
-          <div>
-            <label class="mb-1.5 block text-xs font-medium text-slate-400">Correo (solo lectura)</label>
+          <div class="rounded-xl border border-slate-700/40 bg-[#0d1219]/50 p-4">
+            <label class="mb-1.5 block text-xs font-medium text-slate-400">Correo para iniciar sesión</label>
             <input
               :value="auth.user?.correo || ''"
               type="email"
               disabled
-              class="w-full cursor-not-allowed rounded-xl border border-slate-700/80 bg-slate-900/50 px-4 py-3 text-slate-500"
+              class="mb-3 w-full cursor-not-allowed rounded-xl border border-slate-700/80 bg-slate-900/50 px-4 py-3 text-slate-400"
             />
+            <p class="mb-3 text-xs text-slate-500">
+              Para cambiarlo, indica el nuevo correo; un administrador lo revisará y lo aplicará tal cual lo escribes (así se evitan errores de digitación).
+            </p>
+            <template v-if="solicitudCorreoPendiente">
+              <p class="mb-2 rounded-lg border border-amber-500/30 bg-amber-950/30 px-3 py-2 text-sm text-amber-100">
+                Solicitud pendiente hacia:
+                <strong class="text-white">{{ auth.user?.correo_solicitado }}</strong>
+              </p>
+              <button
+                type="button"
+                class="rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800/80 disabled:opacity-50"
+                :disabled="savingCorreo"
+                @click="cancelarSolicitudCorreo"
+              >
+                {{ savingCorreo ? '…' : 'Cancelar solicitud' }}
+              </button>
+            </template>
+            <template v-else>
+              <label class="mb-1 block text-xs font-medium text-slate-400">Nuevo correo sugerido</label>
+              <input
+                v-model="nuevoCorreo"
+                type="email"
+                autocomplete="email"
+                placeholder="ejemplo@correo.com"
+                class="mb-2 w-full rounded-xl border border-slate-600/80 bg-[#0d1219] px-4 py-3 text-slate-100 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+              />
+              <p v-if="correoErr" class="mb-2 text-sm text-red-400">{{ correoErr }}</p>
+              <p v-if="correoMsg" class="mb-2 text-sm text-emerald-400/90">{{ correoMsg }}</p>
+              <button
+                type="button"
+                class="rounded-xl bg-slate-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-600 disabled:opacity-50"
+                :disabled="savingCorreo || !nuevoCorreo.trim()"
+                @click="enviarSolicitudCorreo"
+              >
+                {{ savingCorreo ? 'Enviando…' : 'Enviar solicitud de cambio' }}
+              </button>
+            </template>
           </div>
           <div>
             <label class="mb-1.5 block text-xs font-medium text-slate-400">Celular / WhatsApp <span class="text-red-400">*</span></label>
@@ -287,7 +363,8 @@ async function onSubmit() {
                 <option v-for="a in accountTypes" :key="a.codigo" :value="a.codigo">{{ a.nombre }}</option>
               </select>
               <p v-if="form.cuenta_tipo === 'llave_breb'" class="mt-1 text-xs text-sky-400/90">
-                Llave Bre-B: indica tu clave o identificador según tu banco (mismo sistema de pagos instantáneos Bre-B).
+                Llave Bre-B: puede ser tu correo, celular u otro identificador permitido por tu entidad (letras, números,
+                @, punto, guiones o +).
               </p>
               <p v-if="fieldErrors.cuenta_tipo" class="mt-1 text-sm text-red-400">{{ fieldErrors.cuenta_tipo[0] }}</p>
             </div>
@@ -296,9 +373,10 @@ async function onSubmit() {
               <input
                 v-model="form.cuenta_numero"
                 type="text"
-                inputmode="numeric"
-                autocomplete="off"
+                :inputmode="form.cuenta_tipo === 'llave_breb' ? 'text' : 'numeric'"
+                :autocomplete="form.cuenta_tipo === 'llave_breb' ? 'email' : 'off'"
                 required
+                maxlength="191"
                 class="w-full rounded-xl border border-slate-600/80 bg-[#0d1219] px-4 py-3 text-slate-100 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
               />
               <p v-if="fieldErrors.cuenta_numero" class="mt-1 text-sm text-red-400">{{ fieldErrors.cuenta_numero[0] }}</p>
