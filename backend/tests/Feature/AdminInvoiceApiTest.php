@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\Service;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -21,6 +22,7 @@ class AdminInvoiceApiTest extends TestCase
     {
         $company = Company::query()->create([
             'nombre' => 'Empresa Test',
+            'factura_sigla' => 'TST',
             'nit' => '900111222-1',
             'estado' => Company::ESTADO_ACTIVO,
         ]);
@@ -210,10 +212,12 @@ class AdminInvoiceApiTest extends TestCase
         $this->getJson('/api/admin/invoices/'.$s['invoice']->id)->assertForbidden();
     }
 
-    public function test_store_invoice_generates_fac_code_sequential_per_month(): void
+    public function test_store_invoice_generates_fac_code_one_per_company_per_day(): void
     {
+        $tz = config('app.timezone');
         $company = Company::query()->create([
             'nombre' => 'Empresa Fact Test',
+            'factura_sigla' => 'TST',
             'nit' => '900199988-7',
             'estado' => Company::ESTADO_ACTIVO,
         ]);
@@ -234,6 +238,7 @@ class AdminInvoiceApiTest extends TestCase
 
         Sanctum::actingAs($admin);
 
+        Carbon::setTestNow(Carbon::parse('2026-04-03 10:00:00', $tz));
         $s1 = $makeService('T-FAC-SVC-A', '2026-04-12');
         $r1 = $this->postJson('/api/admin/invoices', [
             'company_id' => $company->id,
@@ -241,17 +246,18 @@ class AdminInvoiceApiTest extends TestCase
             'period_month' => 4,
             'service_ids' => [$s1->id],
         ]);
-        $r1->assertCreated()->assertJsonPath('data.code', 'FAC-2026-04-001');
+        $r1->assertCreated()->assertJsonPath('data.code', 'FAC-260403-TST');
 
+        Carbon::setTestNow(Carbon::parse('2026-04-03 11:00:00', $tz));
         $s2 = $makeService('T-FAC-SVC-B', '2026-04-20');
-        $r2 = $this->postJson('/api/admin/invoices', [
+        $this->postJson('/api/admin/invoices', [
             'company_id' => $company->id,
             'period_year' => 2026,
             'period_month' => 4,
             'service_ids' => [$s2->id],
-        ]);
-        $r2->assertCreated()->assertJsonPath('data.code', 'FAC-2026-04-002');
+        ])->assertStatus(422)->assertJsonValidationErrors('company_id');
 
+        Carbon::setTestNow(Carbon::parse('2026-05-08 09:00:00', $tz));
         $s3 = $makeService('T-FAC-SVC-C', '2026-05-08');
         $r3 = $this->postJson('/api/admin/invoices', [
             'company_id' => $company->id,
@@ -259,6 +265,8 @@ class AdminInvoiceApiTest extends TestCase
             'period_month' => 5,
             'service_ids' => [$s3->id],
         ]);
-        $r3->assertCreated()->assertJsonPath('data.code', 'FAC-2026-05-001');
+        $r3->assertCreated()->assertJsonPath('data.code', 'FAC-260508-TST');
+
+        Carbon::setTestNow();
     }
 }

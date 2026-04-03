@@ -126,7 +126,7 @@ class EmpleadoPerfilController extends Controller
             app(PanelNotificationDispatcher::class)->notifyAdmins(
                 PanelNotification::TYPE_EMPLEADO_PERFIL_COMPLETADO,
                 'El técnico '.trim($user->nombre).' completó su perfil de contacto y datos de pago.',
-                ['link' => '/admin/empleados', 'empleado_id' => $user->id],
+                ['link' => '/admin/empleados/'.$user->id.'/perfil', 'empleado_id' => $user->id],
             );
         }
 

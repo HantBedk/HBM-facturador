@@ -21,6 +21,7 @@ class PublicInvoiceAccessTest extends TestCase
     {
         $company = Company::query()->create([
             'nombre' => 'Cliente Público',
+            'factura_sigla' => 'CLP',
             'nit' => '900111222-9',
             'estado' => Company::ESTADO_ACTIVO,
         ]);

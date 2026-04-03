@@ -160,7 +160,7 @@ async function descargarPdf() {
               v-model="code"
               type="text"
               autocomplete="off"
-              placeholder="FAC-2026-04-001"
+              placeholder="FAC-260318-SYF"
               :class="{ 'input-invalid': fieldErrors.code }"
               @keyup.enter="onConsult"
             />

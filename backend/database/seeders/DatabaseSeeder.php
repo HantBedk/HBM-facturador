@@ -16,6 +16,7 @@ class DatabaseSeeder extends Seeder
             [
                 'nombre' => 'Ferretería SYF',
                 'estado' => Company::ESTADO_ACTIVO,
+                'factura_sigla' => 'SYF',
             ]
         );
 
@@ -24,6 +25,7 @@ class DatabaseSeeder extends Seeder
             [
                 'nombre' => 'Tech Solutions Colombia S.A.S.',
                 'estado' => Company::ESTADO_ACTIVO,
+                'factura_sigla' => 'TEC',
             ]
         );
 
@@ -32,6 +34,7 @@ class DatabaseSeeder extends Seeder
             [
                 'nit' => null,
                 'estado' => Company::ESTADO_ACTIVO,
+                'factura_sigla' => 'CVA',
             ]
         );
 

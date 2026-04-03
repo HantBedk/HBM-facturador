@@ -185,7 +185,8 @@ async function onSubmit() {
         </h1>
         <p class="lede">
           Elija empresa y periodo (mes de prestación), luego marque los servicios a incluir. El total se calcula de los
-          servicios seleccionados.
+          servicios seleccionados. Al crear el borrador se asigna
+          <strong>FAC-YYMMDD-SIGLA</strong> (fecha de creación; máximo 1 factura por empresa y día).
         </p>
       </div>
     </header>

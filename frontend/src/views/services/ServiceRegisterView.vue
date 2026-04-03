@@ -208,7 +208,7 @@ async function onSubmit() {
         Registrar servicio
       </h1>
       <p v-if="!isEmpleadoRegistro" class="muted">
-        Completa los datos del trabajo realizado. El código se genera al guardar.
+        Completa los datos del trabajo realizado. El código se genera al guardar (formato SERV-YYMMDDNN según la fecha del servicio).
       </p>
     </header>
 

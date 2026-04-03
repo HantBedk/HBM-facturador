@@ -91,7 +91,7 @@ async function onRead(n) {
       n.read = true
       await refreshCount()
     }
-    const path = n.meta?.link
+    const path = n.link ?? n.meta?.link
     if (path && typeof path === 'string') {
       open.value = false
       await router.push(path)
@@ -219,7 +219,9 @@ onUnmounted(() => {
             :class="[
               { 'bg-slate-800/25': !n.read },
               rowBarClass[categoryKey(n)] || 'border-l-amber-500',
+              (n.link || n.meta?.link) ? 'cursor-pointer' : '',
             ]"
+            :title="(n.link || n.meta?.link) ? 'Abrir en el panel' : undefined"
             @click="onRead(n)"
           >
             <div class="flex items-start justify-between gap-2">

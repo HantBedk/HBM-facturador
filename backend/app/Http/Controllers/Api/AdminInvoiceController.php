@@ -134,6 +134,12 @@ class AdminInvoiceController extends Controller
                 'company_id' => ['La empresa debe estar activa para generar facturas.'],
             ]);
         }
+        $sigla = strtoupper(preg_replace('/[^A-Za-z]/', '', (string) $company->factura_sigla) ?? '');
+        if (strlen($sigla) !== 3) {
+            throw ValidationException::withMessages([
+                'company_id' => ['La empresa debe tener una sigla de facturación de 3 letras (A-Z). Edítela en Empresas.'],
+            ]);
+        }
 
         $this->assertServicesAttachable(
             $data['company_id'],
@@ -145,8 +151,14 @@ class AdminInvoiceController extends Controller
 
         $total = $this->sumServiceAmounts($data['service_ids']);
 
-        $invoice = DB::transaction(function () use ($data, $total, $codes) {
-            $code = $codes->nextForYearMonth((int) $data['period_year'], (int) $data['period_month']);
+        $invoice = DB::transaction(function () use ($data, $total, $codes, $company) {
+            try {
+                $code = $codes->nextForCompanyOnDate($company, Carbon::now(config('app.timezone')));
+            } catch (\InvalidArgumentException $e) {
+                throw ValidationException::withMessages(['company_id' => [$e->getMessage()]]);
+            } catch (\RuntimeException $e) {
+                throw ValidationException::withMessages(['company_id' => [$e->getMessage()]]);
+            }
 
             $inv = Invoice::query()->create([
                 'code' => $code,

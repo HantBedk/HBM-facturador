@@ -151,7 +151,7 @@ async function exportInvoicesCsv() {
     <div class="filters card">
       <label class="grow">
         <span>Búsqueda por código</span>
-        <input v-model="filters.q" type="search" class="input" placeholder="FAC-2026-…" @keydown.enter.prevent="applySearch" />
+        <input v-model="filters.q" type="search" class="input" placeholder="FAC-260318-…" @keydown.enter.prevent="applySearch" />
       </label>
       <label>
         <span>Empresa</span>

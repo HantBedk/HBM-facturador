@@ -22,6 +22,7 @@ const fieldErrors = ref({})
 
 const form = ref({
   nombre: '',
+  factura_sigla: '',
   nit: '',
   telefono: '',
   correo: '',
@@ -76,6 +77,7 @@ function openCreate() {
   fieldErrors.value = {}
   form.value = {
     nombre: '',
+    factura_sigla: '',
     nit: '',
     telefono: '',
     correo: '',
@@ -91,6 +93,7 @@ function openEdit(row) {
   fieldErrors.value = {}
   form.value = {
     nombre: row.nombre || '',
+    factura_sigla: (row.factura_sigla || '').toString().toUpperCase().slice(0, 3),
     nit: row.nit || '',
     telefono: row.telefono || '',
     correo: row.correo || '',
@@ -119,6 +122,7 @@ async function onSubmitModal() {
   try {
     const payload = {
       nombre: form.value.nombre.trim(),
+      factura_sigla: form.value.factura_sigla.trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3),
       nit: form.value.nit.trim() || null,
       telefono: form.value.telefono.trim() || null,
       correo: form.value.correo.trim() || null,
@@ -190,6 +194,7 @@ async function onToggleEstado(row) {
           <thead>
             <tr>
               <th>Empresa</th>
+              <th>Sigla factura</th>
               <th>NIT / ID</th>
               <th>Contacto</th>
               <th>Estado</th>
@@ -201,6 +206,10 @@ async function onToggleEstado(row) {
             <tr v-for="c in rows" :key="c.id">
               <td>
                 <span class="name">{{ c.nombre }}</span>
+              </td>
+              <td>
+                <code v-if="c.factura_sigla" class="sigla">{{ c.factura_sigla }}</code>
+                <span v-else class="muted">—</span>
               </td>
               <td class="muted">{{ c.nit || '—' }}</td>
               <td>
@@ -225,7 +234,7 @@ async function onToggleEstado(row) {
               </td>
             </tr>
             <tr v-if="!rows.length">
-              <td colspan="6" class="empty muted">No hay empresas con estos criterios.</td>
+              <td colspan="7" class="empty muted">No hay empresas con estos criterios.</td>
             </tr>
           </tbody>
         </table>
@@ -242,6 +251,22 @@ async function onToggleEstado(row) {
               <span>Nombre <abbr title="obligatorio">*</abbr></span>
               <input v-model="form.nombre" class="input" required maxlength="255" placeholder="Ej. Tech Solutions" />
               <small v-if="fieldErrors.nombre" class="err">{{ fieldErrors.nombre[0] }}</small>
+            </label>
+            <label class="field">
+              <span>Sigla en factura (3 letras) <abbr title="obligatorio">*</abbr></span>
+              <input
+                v-model="form.factura_sigla"
+                class="input sigla-input"
+                required
+                maxlength="3"
+                pattern="[A-Za-z]{3}"
+                title="Tres letras A-Z"
+                placeholder="Ej. SYF"
+                autocapitalize="characters"
+                autocomplete="off"
+              />
+              <small class="muted">En facturas: <strong>FAC-YYMMDD-XXX</strong> (1 por día y empresa). Debe ser única entre empresas.</small>
+              <small v-if="fieldErrors.factura_sigla" class="err">{{ fieldErrors.factura_sigla[0] }}</small>
             </label>
             <label class="field">
               <span>NIT / identificación</span>
@@ -394,6 +419,22 @@ h1 {
 .name {
   font-weight: 600;
   color: #f1f5f9;
+}
+
+.sigla {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #7dd3fc;
+  background: rgba(56, 189, 248, 0.1);
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+}
+
+.sigla-input {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 600;
 }
 
 .cell-sm {

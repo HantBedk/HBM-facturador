@@ -8,7 +8,9 @@ import CompaniesListView from '@/views/admin/CompaniesListView.vue'
 import InvoicesListView from '@/views/admin/InvoicesListView.vue'
 import InvoiceEditorView from '@/views/admin/InvoiceEditorView.vue'
 import InvoiceDetailView from '@/views/admin/InvoiceDetailView.vue'
+import AdminConfiguracionLayout from '@/layouts/AdminConfiguracionLayout.vue'
 import AdminEmpleadoNotificacionesView from '@/views/admin/AdminEmpleadoNotificacionesView.vue'
+import AdminHistorialMovimientosView from '@/views/admin/AdminHistorialMovimientosView.vue'
 import AdminEmpleadoPerfilView from '@/views/admin/AdminEmpleadoPerfilView.vue'
 import EmpleadosListView from '@/views/admin/EmpleadosListView.vue'
 import EmpleadoDashboardView from '@/views/empleado/EmpleadoDashboardView.vue'
@@ -63,17 +65,27 @@ const routes = [
       },
       { path: 'facturas', name: 'admin-facturas', component: InvoicesListView },
       { path: 'empresas', name: 'admin-empresas', component: CompaniesListView },
-      { path: 'empleados', name: 'admin-empleados-list', component: EmpleadosListView },
       {
-        path: 'configuracion/notificaciones-tecnicos',
-        name: 'admin-notificaciones-tecnicos',
-        component: AdminEmpleadoNotificacionesView,
-      },
-      {
-        path: 'empleados/:userId(\\d+)/perfil',
-        name: 'admin-empleado-perfil',
-        component: AdminEmpleadoPerfilView,
-        props: true,
+        path: 'configuracion',
+        component: AdminConfiguracionLayout,
+        redirect: { name: 'admin-config-cuentas' },
+        children: [
+          {
+            path: 'cuentas',
+            name: 'admin-config-cuentas',
+            component: EmpleadosListView,
+          },
+          {
+            path: 'notificaciones-tecnicos',
+            name: 'admin-notificaciones-tecnicos',
+            component: AdminEmpleadoNotificacionesView,
+          },
+          {
+            path: 'historial',
+            name: 'admin-config-historial',
+            component: AdminHistorialMovimientosView,
+          },
+        ],
       },
       {
         path: 'empleados/rendimiento/:userId(\\d+)',
@@ -86,6 +98,13 @@ const routes = [
         name: 'admin-emp-rendimiento',
         component: EmployeeHistorialView,
       },
+      {
+        path: 'empleados/:userId(\\d+)/perfil',
+        name: 'admin-empleado-perfil',
+        component: AdminEmpleadoPerfilView,
+        props: true,
+      },
+      { path: 'empleados', redirect: '/admin/configuracion/cuentas' },
     ],
   },
   {

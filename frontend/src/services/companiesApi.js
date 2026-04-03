@@ -14,6 +14,7 @@ export function fetchAdminCompanies(params = {}) {
 /**
  * @param {{
  *   nombre: string,
+ *   factura_sigla: string,
  *   nit?: string | null,
  *   telefono?: string | null,
  *   correo?: string | null,
@@ -31,6 +32,7 @@ export function createCompany(payload) {
  * @param {number|string} id
  * @param {{
  *   nombre: string,
+ *   factura_sigla: string,
  *   nit?: string | null,
  *   telefono?: string | null,
  *   correo?: string | null,

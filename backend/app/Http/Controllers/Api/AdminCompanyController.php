@@ -41,6 +41,7 @@ class AdminCompanyController extends Controller
     {
         $data = $request->validate([
             'nombre' => ['required', 'string', 'max:255'],
+            'factura_sigla' => ['required', 'string', 'size:3', 'regex:/^[A-Za-z]{3}$/', Rule::unique('companies', 'factura_sigla')],
             'nit' => ['nullable', 'string', 'max:100', Rule::unique('companies', 'nit')],
             'telefono' => ['nullable', 'string', 'max:64'],
             'correo' => ['nullable', 'string', 'email', 'max:255'],
@@ -52,6 +53,7 @@ class AdminCompanyController extends Controller
 
         $company = Company::query()->create([
             'nombre' => $nombre,
+            'factura_sigla' => strtoupper($data['factura_sigla']),
             'nit' => isset($data['nit']) && $data['nit'] !== '' ? trim($data['nit']) : null,
             'telefono' => isset($data['telefono']) && $data['telefono'] !== '' ? trim($data['telefono']) : null,
             'correo' => isset($data['correo']) && $data['correo'] !== '' ? trim($data['correo']) : null,
@@ -65,6 +67,13 @@ class AdminCompanyController extends Controller
     {
         $data = $request->validate([
             'nombre' => ['required', 'string', 'max:255'],
+            'factura_sigla' => [
+                'required',
+                'string',
+                'size:3',
+                'regex:/^[A-Za-z]{3}$/',
+                Rule::unique('companies', 'factura_sigla')->ignore($company->id),
+            ],
             'nit' => [
                 'nullable',
                 'string',
@@ -80,6 +89,7 @@ class AdminCompanyController extends Controller
         $this->assertNombreUnique($nombre, $company->id);
 
         $company->nombre = $nombre;
+        $company->factura_sigla = strtoupper($data['factura_sigla']);
         $company->nit = isset($data['nit']) && $data['nit'] !== '' ? trim($data['nit']) : null;
         $company->telefono = isset($data['telefono']) && $data['telefono'] !== '' ? trim($data['telefono']) : null;
         $company->correo = isset($data['correo']) && $data['correo'] !== '' ? trim($data['correo']) : null;

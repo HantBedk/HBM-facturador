@@ -73,6 +73,53 @@ class PanelNotification extends Model
     /**
      * @return list<string>
      */
+    /**
+     * Ruta del panel admin (Vue Router) al hacer clic en una notificación.
+     * Usa `meta.link` si existe; si no, infiere por tipo e IDs en `meta`.
+     *
+     * @param  array<string, mixed>|null  $meta
+     */
+    public static function resolveAdminPanelLink(string $type, ?array $meta): ?string
+    {
+        $meta = $meta ?? [];
+
+        if (in_array($type, [self::TYPE_EMPLEADO_PERFIL_COMPLETADO, self::TYPE_EMAIL_CHANGE_REQUEST], true)
+            && isset($meta['empleado_id']) && is_numeric($meta['empleado_id'])) {
+            return '/admin/empleados/'.(int) $meta['empleado_id'].'/perfil';
+        }
+
+        if (isset($meta['link']) && is_string($meta['link']) && $meta['link'] !== '') {
+            return $meta['link'];
+        }
+
+        $invoiceId = isset($meta['invoice_id']) && is_numeric($meta['invoice_id'])
+            ? (int) $meta['invoice_id']
+            : null;
+        $serviceId = isset($meta['service_id']) && is_numeric($meta['service_id'])
+            ? (int) $meta['service_id']
+            : null;
+
+        return match ($type) {
+            self::TYPE_INVOICE_DRAFT,
+            self::TYPE_INVOICE_PENDING_APPROVAL,
+            self::TYPE_INVOICE_PENDING_SEND,
+            self::TYPE_INVOICE_PARTIAL_PAYMENT => $invoiceId !== null
+                ? '/admin/facturas/'.$invoiceId
+                : '/admin/facturas',
+            self::TYPE_SERVICE_CREATED => $serviceId !== null
+                ? '/admin/servicios/'.$serviceId
+                : '/admin/servicios',
+            self::TYPE_ALERT_SERVICES_ZERO => '/admin/servicios',
+            self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
+            self::TYPE_EMAIL_CHANGE_REQUEST => '/admin/configuracion/cuentas',
+            self::TYPE_CUTOFF_APPROACHING,
+            self::TYPE_ALERT_DRAFTS_PENDING,
+            self::TYPE_ALERT_APPROVED_UNSENT,
+            self::TYPE_CUTOFF_AUTO_SENT => '/admin/facturas',
+            default => null,
+        };
+    }
+
     public static function typesInCategory(string $category): array
     {
         return match ($category) {

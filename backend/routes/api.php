@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AdminActivityLogController;
 use App\Http\Controllers\Api\AdminCompanyController;
 use App\Http\Controllers\Api\AdminDashboardController;
 use App\Http\Controllers\Api\AdminExportController;
@@ -74,6 +75,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
 
         Route::get('/admin/export/services', [AdminExportController::class, 'services']);
         Route::get('/admin/export/invoices', [AdminExportController::class, 'invoices']);
+        Route::get('/admin/activity-logs', [AdminActivityLogController::class, 'index']);
 
         Route::get('/admin/invoices/available-services', [AdminInvoiceController::class, 'availableServices']);
         Route::get('/admin/invoices', [AdminInvoiceController::class, 'index']);

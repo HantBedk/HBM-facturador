@@ -29,6 +29,10 @@ class ServiceResource extends JsonResource
                 : ($this->resource->relationLoaded('invoices')
                     ? $this->resource->invoices->isNotEmpty()
                     : false),
+            'invoices' => $this->whenLoaded('invoices', fn () => $this->invoices->map(fn ($inv) => [
+                'id' => $inv->id,
+                'code' => $inv->code,
+            ])->values()->all()),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
             'catalog' => $this->whenLoaded('catalog', fn () => $this->catalog ? [

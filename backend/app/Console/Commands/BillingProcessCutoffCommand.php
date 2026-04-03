@@ -49,7 +49,7 @@ class BillingProcessCutoffCommand extends Command
             $dispatcher->notifyAdmins(
                 PanelNotification::TYPE_CUTOFF_AUTO_SENT,
                 "Corte automático: se marcaron {$count} factura(s) aprobada(s) como enviadas.",
-                ['count' => $count],
+                ['count' => $count, 'link' => '/admin/facturas'],
                 'cutoff_auto_'.$today->format('Y-m-d')
             );
             $this->info("Marcadas {$count} factura(s) como enviadas.");

@@ -28,13 +28,17 @@ class ServiceController extends Controller
         $this->authorize('viewAny', Service::class);
 
         $user = $request->user();
-        $q = Service::query()->with(['company', 'user'])->withCount('invoices');
+        $q = Service::query()
+            ->with(['company', 'user'])
+            ->withCount('invoices')
+            ->with(['invoices' => function ($rel) {
+                $rel->select('invoices.id', 'invoices.code');
+            }]);
 
-        if ($user->isAdminEquipo() && $request->boolean('incluir_eliminados')) {
-            // sin filtrar por estado
-        } else {
+        if (! $user->isAdminEquipo()) {
             $q->visibles();
         }
+        // Admin: listado completo (activo, corregido, eliminado) para auditoría
 
         if (! $user->isAdminEquipo()) {
             $q->where('user_id', $user->id);
@@ -67,7 +71,46 @@ class ServiceController extends Controller
             });
         }
 
-        $q->orderByDesc('service_date')->orderByDesc('id');
+        $sort = $request->query('sort');
+        $sortDir = strtolower((string) $request->query('sort_dir', 'asc')) === 'desc' ? 'desc' : 'asc';
+        $allowedSorts = [
+            'code',
+            'service_date',
+            'company_nombre',
+            'client_name',
+            'description',
+            'user_nombre',
+            'amount',
+            'status',
+        ];
+        if (is_string($sort) && in_array($sort, $allowedSorts, true)) {
+            if ($sort === 'company_nombre') {
+                $q->leftJoin('companies', 'services.company_id', '=', 'companies.id')
+                    ->select('services.*')
+                    ->orderBy('companies.nombre', $sortDir)
+                    ->orderBy('services.id', $sortDir);
+            } elseif ($sort === 'user_nombre') {
+                $q->leftJoin('users', 'services.user_id', '=', 'users.id')
+                    ->select('services.*')
+                    ->orderBy('users.nombre', $sortDir)
+                    ->orderBy('services.id', $sortDir);
+            } else {
+                $col = match ($sort) {
+                    'code' => 'services.code',
+                    'service_date' => 'services.service_date',
+                    'client_name' => 'services.client_name',
+                    'description' => 'services.description',
+                    'amount' => 'services.amount',
+                    'status' => 'services.status',
+                    default => null,
+                };
+                if ($col !== null) {
+                    $q->orderBy($col, $sortDir)->orderBy('services.id', $sortDir);
+                }
+            }
+        } else {
+            $q->orderByDesc('services.service_date')->orderByDesc('services.id');
+        }
 
         return ServiceResource::collection(
             $q->paginate(Pagination::perPage($request))->withQueryString()
@@ -109,7 +152,13 @@ class ServiceController extends Controller
             ]);
         }
 
-        $code = $codes->nextForDate($serviceDate);
+        try {
+            $code = $codes->nextForDate($serviceDate);
+        } catch (\RuntimeException $e) {
+            throw ValidationException::withMessages([
+                'service_date' => [$e->getMessage()],
+            ]);
+        }
 
         $service = Service::create([
             'code' => $code,

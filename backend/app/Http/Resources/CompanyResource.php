@@ -13,6 +13,7 @@ class CompanyResource extends JsonResource
         return [
             'id' => $this->id,
             'nombre' => $this->nombre,
+            'factura_sigla' => $this->factura_sigla,
             'nit' => $this->nit,
             'estado' => $this->estado ?? 'activo',
             'telefono' => $this->telefono,

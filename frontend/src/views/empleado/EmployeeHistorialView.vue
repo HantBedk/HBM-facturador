@@ -374,7 +374,7 @@ function clip(s, n = 64) {
             v-model="filterSearch"
             type="search"
             class="input"
-            placeholder="Ej. mantenimiento, FAC-…"
+            placeholder="Ej. mantenimiento, SERV-…, FAC-…"
             autocomplete="off"
             @input="scheduleSearchReload"
           />

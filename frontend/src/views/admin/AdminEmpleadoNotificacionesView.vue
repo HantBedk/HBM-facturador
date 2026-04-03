@@ -67,7 +67,7 @@ onMounted(load)
     <header class="head">
       <div>
         <p class="crumb">
-          <RouterLink to="/admin/empleados">Configuración</RouterLink>
+          <RouterLink to="/admin/configuracion/cuentas">Cuentas del equipo</RouterLink>
         </p>
         <h1>Notificaciones para técnicos</h1>
         <p class="lede">

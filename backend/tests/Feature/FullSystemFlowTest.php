@@ -22,6 +22,7 @@ class FullSystemFlowTest extends TestCase
     {
         $company = Company::query()->create([
             'nombre' => 'Empresa Flujo',
+            'factura_sigla' => 'EFL',
             'nit' => '900555666-1',
             'estado' => Company::ESTADO_ACTIVO,
         ]);
@@ -88,6 +89,7 @@ class FullSystemFlowTest extends TestCase
     {
         $company = Company::query()->create([
             'nombre' => 'Co',
+            'factura_sigla' => 'COA',
             'nit' => '900111222-3',
             'estado' => Company::ESTADO_ACTIVO,
         ]);
@@ -128,6 +130,7 @@ class FullSystemFlowTest extends TestCase
     {
         $company = Company::query()->create([
             'nombre' => 'Co2',
+            'factura_sigla' => 'COD',
             'nit' => '900111222-4',
             'estado' => Company::ESTADO_ACTIVO,
         ]);

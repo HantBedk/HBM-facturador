@@ -1,11 +1,8 @@
 <script setup>
 import { onMounted, ref, computed } from 'vue'
 import { RouterLink } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
 import { api } from '@/services/api.js'
 import VueApexCharts from 'vue3-apexcharts'
-
-const auth = useAuthStore()
 
 const loading = ref(true)
 const loadError = ref('')
@@ -67,10 +64,10 @@ const mockServices = [
 ]
 
 const mockInvoices = [
-  { id: 1, code: 'FAC-2023-0045', company_name: 'Innova Corp', total: 1200, status_label: 'Pendiente' },
-  { id: 2, code: 'FAC-2023-0044', company_name: 'Green Energy', total: 4120, status_label: 'Pagado' },
-  { id: 3, code: 'FAC-2023-0043', company_name: 'Tech Solutions', total: 2500, status_label: 'Pagado' },
-  { id: 4, code: 'FAC-2023-0042', company_name: 'Global L.', total: 850, status_label: 'Vencida' }
+  { id: 1, code: 'FAC-231015-INV', company_name: 'Innova Corp', total: 1200, status_label: 'Pendiente' },
+  { id: 2, code: 'FAC-231014-GRE', company_name: 'Green Energy', total: 4120, status_label: 'Pagado' },
+  { id: 3, code: 'FAC-231013-TEC', company_name: 'Tech Solutions', total: 2500, status_label: 'Pagado' },
+  { id: 4, code: 'FAC-231012-GLO', company_name: 'Global L.', total: 850, status_label: 'Vencida' }
 ]
 
 async function loadDashboard() {
@@ -130,16 +127,7 @@ function getStatusClasses(status) {
 </script>
 
 <template>
-  <div class="h-full w-full p-6 sm:p-8 text-slate-200">
-    
-    <!-- ENCABEZADO -->
-    <header class="mb-8">
-      <h1 class="text-[2.1rem] font-bold text-white tracking-tight mb-1">Hola, {{ auth.user?.nombre || 'Javier' }}!</h1>
-      <p class="text-sm text-slate-400">
-        Octubre 15, 2023, Octubre 15, 2023
-      </p>
-    </header>
-
+  <div class="h-full w-full -mt-2 px-4 pb-6 pt-0 text-slate-200 sm:-mt-3 sm:px-6 sm:pb-8">
     <div v-if="loadError && !data" class="rounded-xl bg-red-500/10 border border-red-500/20 p-4 mb-8 text-sm text-red-400">
       Error: {{ loadError }}
     </div>

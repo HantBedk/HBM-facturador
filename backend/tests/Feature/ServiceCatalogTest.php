@@ -58,12 +58,13 @@ class ServiceCatalogTest extends TestCase
 
         $company = Company::query()->create([
             'nombre' => 'Emp',
+            'factura_sigla' => 'EMP',
             'nit' => '901-1',
             'estado' => Company::ESTADO_ACTIVO,
         ]);
         $emp = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
 
-        $this->postJson('/api/services', [
+        $r = $this->postJson('/api/services', [
             'company_id' => $company->id,
             'catalog_id' => $id,
             'client_name' => 'Cliente X',
@@ -72,6 +73,7 @@ class ServiceCatalogTest extends TestCase
             'amount' => 260000,
             'service_date' => '2026-04-15',
         ])->assertCreated();
+        $this->assertMatchesRegularExpression('/^SERV-260415\d{2}$/', (string) $r->json('data.code'));
 
         $svc = Service::query()->first();
         $this->assertSame($id, $svc->catalog_id);
@@ -99,6 +101,7 @@ class ServiceCatalogTest extends TestCase
 
         $company = Company::query()->create([
             'nombre' => 'Emp',
+            'factura_sigla' => 'EMQ',
             'nit' => '902-2',
             'estado' => Company::ESTADO_ACTIVO,
         ]);

@@ -74,6 +74,32 @@ class AdminPanelNotificationTest extends TestCase
             ->assertJsonPath('data.0.type', PanelNotification::TYPE_SERVICE_CREATED);
     }
 
+    public function test_notification_list_resolves_link_from_type_and_meta_ids(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        PanelNotification::query()->create([
+            'user_id' => $admin->id,
+            'type' => PanelNotification::TYPE_EMPLEADO_PERFIL_COMPLETADO,
+            'message' => 'Perfil',
+            'read' => false,
+            'meta' => ['empleado_id' => 7],
+        ]);
+        PanelNotification::query()->create([
+            'user_id' => $admin->id,
+            'type' => PanelNotification::TYPE_INVOICE_DRAFT,
+            'message' => 'Factura sin link explícito',
+            'read' => false,
+            'meta' => ['invoice_id' => 42],
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $r = $this->getJson('/api/admin/notifications')->assertOk();
+        $links = collect($r->json('data'))->pluck('link')->filter()->values()->all();
+        $this->assertContains('/admin/facturas/42', $links);
+        $this->assertContains('/admin/empleados/7/perfil', $links);
+    }
+
     public function test_empleado_first_profile_completion_notifies_admins(): void
     {
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
@@ -135,6 +161,7 @@ class AdminPanelNotificationTest extends TestCase
     {
         $company = Company::query()->create([
             'nombre' => 'Co',
+            'factura_sigla' => 'CNO',
             'nit' => '9001-1',
             'estado' => Company::ESTADO_ACTIVO,
         ]);
@@ -183,6 +210,7 @@ class AdminPanelNotificationTest extends TestCase
 
         $company = Company::query()->create([
             'nombre' => 'Co Cut',
+            'factura_sigla' => 'CCU',
             'nit' => '9002-2',
             'estado' => Company::ESTADO_ACTIVO,
         ]);
