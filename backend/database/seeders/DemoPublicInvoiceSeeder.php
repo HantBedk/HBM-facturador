@@ -7,6 +7,7 @@ use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\Service;
 use App\Models\User;
+use App\Services\InvoicePublicAccessService;
 use Illuminate\Database\Seeder;
 
 class DemoPublicInvoiceSeeder extends Seeder
@@ -62,6 +63,8 @@ class DemoPublicInvoiceSeeder extends Seeder
         );
 
         $invoice->services()->sync([$s1->id, $s2->id]);
+
+        app(InvoicePublicAccessService::class)->setPlainToken($invoice, 'DEMO-PUB-2026-FAC');
 
         if ($invoice->payments()->count() === 0) {
             Payment::query()->create([

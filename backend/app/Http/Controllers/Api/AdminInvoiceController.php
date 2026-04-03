@@ -6,10 +6,15 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\AdminInvoiceResource;
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Models\PanelNotification;
 use App\Models\Payment;
 use App\Models\Service;
+use App\Services\ActivityLogger;
 use App\Services\InvoiceCodeGenerator;
+use App\Services\InvoicePublicAccessService;
+use App\Services\PanelNotificationDispatcher;
 use App\Support\InvoicePdfPayload;
+use App\Support\Pagination;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +22,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\Response;
 
 class AdminInvoiceController extends Controller
 {
@@ -47,13 +53,13 @@ class AdminInvoiceController extends Controller
         }
 
         return AdminInvoiceResource::collection(
-            $q->paginate($request->integer('per_page', 15))->withQueryString()
+            $q->paginate(Pagination::perPage($request))->withQueryString()
         );
     }
 
     public function show(Invoice $invoice): AdminInvoiceResource
     {
-        $invoice->load(['company:id,nombre,nit', 'services.user', 'payments' => fn ($q) => $q->orderBy('payment_date')]);
+        $invoice->load(['company:id,nombre,nit', 'services.user', 'services.catalog:id,name', 'payments' => fn ($q) => $q->orderBy('payment_date')]);
 
         return new AdminInvoiceResource($invoice);
     }
@@ -117,7 +123,7 @@ class AdminInvoiceController extends Controller
             'company_id' => ['required', 'exists:companies,id'],
             'period_year' => ['required', 'integer', 'min:2000', 'max:2100'],
             'period_month' => ['required', 'integer', 'min:1', 'max:12'],
-            'service_ids' => ['required', 'array', 'min:1'],
+            'service_ids' => ['required', 'array', 'min:1', 'distinct'],
             'service_ids.*' => ['integer', 'exists:services,id'],
         ]);
 
@@ -137,9 +143,10 @@ class AdminInvoiceController extends Controller
         );
 
         $total = $this->sumServiceAmounts($data['service_ids']);
-        $code = $codes->nextForYear((int) $data['period_year']);
 
-        $invoice = DB::transaction(function () use ($data, $total, $code) {
+        $invoice = DB::transaction(function () use ($data, $total, $codes) {
+            $code = $codes->nextForYearMonth((int) $data['period_year'], (int) $data['period_month']);
+
             $inv = Invoice::query()->create([
                 'code' => $code,
                 'company_id' => $data['company_id'],
@@ -155,7 +162,22 @@ class AdminInvoiceController extends Controller
             return $inv;
         });
 
-        $invoice->load(['company:id,nombre,nit', 'services.user', 'payments']);
+        $invoice->load(['company:id,nombre,nit', 'services.user', 'services.catalog:id,name', 'payments']);
+
+        app(PanelNotificationDispatcher::class)->notifyAdmins(
+            PanelNotification::TYPE_INVOICE_DRAFT,
+            'Factura borrador '.$invoice->code.' creada; pendiente de aprobación.',
+            [
+                'invoice_id' => $invoice->id,
+                'link' => '/admin/facturas/'.$invoice->id,
+            ]
+        );
+
+        ActivityLogger::log(
+            $request->user(),
+            'factura_creada',
+            'Creó factura borrador '.$invoice->code.' (ID '.$invoice->id.').'
+        );
 
         return (new AdminInvoiceResource($invoice))->response()->setStatusCode(201);
     }
@@ -172,7 +194,7 @@ class AdminInvoiceController extends Controller
             'company_id' => ['required', 'exists:companies,id'],
             'period_year' => ['required', 'integer', 'min:2000', 'max:2100'],
             'period_month' => ['required', 'integer', 'min:1', 'max:12'],
-            'service_ids' => ['required', 'array', 'min:1'],
+            'service_ids' => ['required', 'array', 'min:1', 'distinct'],
             'service_ids.*' => ['integer', 'exists:services,id'],
         ]);
 
@@ -203,7 +225,13 @@ class AdminInvoiceController extends Controller
             $invoice->services()->sync($data['service_ids']);
         });
 
-        $invoice->refresh()->load(['company:id,nombre,nit', 'services.user', 'payments']);
+        $invoice->refresh()->load(['company:id,nombre,nit', 'services.user', 'services.catalog:id,name', 'payments']);
+
+        ActivityLogger::log(
+            $request->user(),
+            'factura_editada',
+            'Editó borrador de factura '.$invoice->code.' (ID '.$invoice->id.').'
+        );
 
         return new AdminInvoiceResource($invoice);
     }
@@ -263,11 +291,23 @@ class AdminInvoiceController extends Controller
         return (string) $sum;
     }
 
-    public function pdf(Invoice $invoice): \Symfony\Component\HttpFoundation\Response|\Illuminate\Http\JsonResponse
+    public function pdf(Request $request, Invoice $invoice): Response|JsonResponse
     {
+        $previewQuery = $request->boolean('preview');
+
+        if ($invoice->status === Invoice::STATUS_BORRADOR && ! $previewQuery) {
+            return response()->json([
+                'message' => 'No se puede descargar el PDF oficial en borrador. Use vista previa (?preview=1) o apruebe la factura.',
+            ], 422);
+        }
+
         try {
-            $data = InvoicePdfPayload::build($invoice);
-            $filename = 'factura-'.preg_replace('/[^a-zA-Z0-9_-]/', '_', $invoice->code).'.pdf';
+            $isDraft = $invoice->status === Invoice::STATUS_BORRADOR;
+            $data = InvoicePdfPayload::build($invoice, [
+                'preview' => $isDraft,
+            ]);
+            $suffix = $isDraft ? '-vista-previa' : '';
+            $filename = 'factura-'.preg_replace('/[^a-zA-Z0-9_-]/', '_', $invoice->code).$suffix.'.pdf';
 
             return Pdf::loadView('pdf.public_invoice', ['data' => $data])->download($filename);
         } catch (\Throwable) {
@@ -277,15 +317,24 @@ class AdminInvoiceController extends Controller
         }
     }
 
-    public function updateStatus(Request $request, Invoice $invoice): AdminInvoiceResource|\Illuminate\Http\JsonResponse
+    public function updateStatus(Request $request, Invoice $invoice, InvoicePublicAccessService $publicAccess): AdminInvoiceResource|JsonResponse
     {
         $data = $request->validate([
             'status' => ['required', 'in:'.Invoice::STATUS_APROBADA.','.Invoice::STATUS_ENVIADA],
         ]);
 
+        $plainVerification = null;
+
         if ($data['status'] === Invoice::STATUS_APROBADA) {
             if ($invoice->status !== Invoice::STATUS_BORRADOR) {
                 return response()->json(['message' => 'Solo se puede aprobar una factura en borrador.'], 422);
+            }
+            $invoice->loadCount('services');
+            if ($invoice->services_count < 1) {
+                return response()->json(['message' => 'No se puede aprobar una factura sin servicios.'], 422);
+            }
+            if ((float) $invoice->total <= 0) {
+                return response()->json(['message' => 'No se puede aprobar una factura con total en cero.'], 422);
             }
             $invoice->status = Invoice::STATUS_APROBADA;
         } else {
@@ -297,15 +346,87 @@ class AdminInvoiceController extends Controller
         }
 
         $invoice->save();
-        $invoice->load(['company:id,nombre,nit', 'services.user', 'payments']);
 
-        return new AdminInvoiceResource($invoice);
+        if ($data['status'] === Invoice::STATUS_APROBADA) {
+            $plainVerification = $publicAccess->ensureToken($invoice->fresh());
+            $invoice->refresh();
+        }
+
+        $invoice->load(['company:id,nombre,nit', 'services.user', 'services.catalog:id,name', 'payments']);
+
+        if ($data['status'] === Invoice::STATUS_APROBADA) {
+            app(PanelNotificationDispatcher::class)->notifyAdmins(
+                PanelNotification::TYPE_INVOICE_PENDING_SEND,
+                'Factura '.$invoice->code.' aprobada; pendiente de envío o de corte automático.',
+                [
+                    'invoice_id' => $invoice->id,
+                    'link' => '/admin/facturas/'.$invoice->id,
+                ]
+            );
+        }
+
+        $actor = $request->user();
+        $actionLabel = $data['status'] === Invoice::STATUS_APROBADA ? 'factura_aprobada' : 'factura_enviada';
+        ActivityLogger::log(
+            $actor,
+            $actionLabel,
+            ($data['status'] === Invoice::STATUS_APROBADA ? 'Aprobó' : 'Marcó como enviada').' factura '.$invoice->code.' (ID '.$invoice->id.').'
+        );
+
+        $resource = new AdminInvoiceResource($invoice);
+        if ($plainVerification !== null) {
+            return $resource->additional([
+                'public_verification_code' => $plainVerification,
+                'public_verification_notice' => 'Comparta este código con el cliente junto al código de factura. No se volverá a mostrar; puede generar uno nuevo desde el detalle.',
+            ]);
+        }
+
+        return $resource;
     }
 
-    public function storePayment(Request $request, Invoice $invoice): AdminInvoiceResource|\Illuminate\Http\JsonResponse
+    /**
+     * Nuevo código de verificación para consulta pública (invalida el anterior).
+     */
+    public function regeneratePublicAccess(Request $request, Invoice $invoice, InvoicePublicAccessService $publicAccess): AdminInvoiceResource|JsonResponse
     {
         if ($invoice->status === Invoice::STATUS_BORRADOR) {
-            return response()->json(['message' => 'No se registran pagos mientras la factura está en borrador.'], 422);
+            return response()->json([
+                'message' => 'Apruebe la factura antes de habilitar la consulta pública.',
+            ], 422);
+        }
+
+        $plain = $publicAccess->regenerate($invoice);
+        $invoice->refresh()->load(['company:id,nombre,nit', 'services.user', 'services.catalog:id,name', 'payments']);
+
+        ActivityLogger::log(
+            $request->user(),
+            'factura_token_publico_regenerado',
+            'Regeneró código de consulta pública para factura '.$invoice->code.' (ID '.$invoice->id.').'
+        );
+
+        return (new AdminInvoiceResource($invoice))->additional([
+            'public_verification_code' => $plain,
+            'public_verification_notice' => 'El código anterior deja de ser válido.',
+        ]);
+    }
+
+    public function storePayment(Request $request, Invoice $invoice): AdminInvoiceResource|JsonResponse
+    {
+        if (! in_array($invoice->status, [
+            Invoice::STATUS_ENVIADA,
+            Invoice::STATUS_PARCIALMENTE_PAGADA,
+        ], true)) {
+            if ($invoice->status === Invoice::STATUS_BORRADOR) {
+                return response()->json(['message' => 'No se registran pagos mientras la factura está en borrador.'], 422);
+            }
+            if ($invoice->status === Invoice::STATUS_APROBADA) {
+                return response()->json(['message' => 'Marque la factura como enviada antes de registrar pagos.'], 422);
+            }
+            if ($invoice->status === Invoice::STATUS_PAGADA) {
+                return response()->json(['message' => 'La factura ya está pagada en su totalidad.'], 422);
+            }
+
+            return response()->json(['message' => 'No se pueden registrar pagos en este estado de la factura.'], 422);
         }
 
         $data = $request->validate([
@@ -314,6 +435,17 @@ class AdminInvoiceController extends Controller
             'method' => ['required', 'string', 'max:64'],
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
+
+        $existingPaid = (float) Payment::query()->where('invoice_id', $invoice->id)->sum('amount');
+        $balance = (float) $invoice->total - $existingPaid;
+        $amount = round((float) $data['amount'], 2);
+        if ($amount > round(max(0, $balance), 2) + 0.009) {
+            throw ValidationException::withMessages([
+                'amount' => ['El monto excede el saldo pendiente ('.number_format(max(0, $balance), 2, '.', '').').'],
+            ]);
+        }
+
+        $statusBeforePayment = $invoice->status;
 
         Payment::query()->create([
             'invoice_id' => $invoice->id,
@@ -325,25 +457,54 @@ class AdminInvoiceController extends Controller
 
         $invoice->refresh();
         $this->syncInvoiceStatusFromPayments($invoice);
-        $invoice->load(['company:id,nombre,nit', 'services.user', 'payments']);
+        $invoice->load(['company:id,nombre,nit', 'services.user', 'services.catalog:id,name', 'payments']);
+
+        if ($invoice->status === Invoice::STATUS_PARCIALMENTE_PAGADA) {
+            app(PanelNotificationDispatcher::class)->notifyAdmins(
+                PanelNotification::TYPE_INVOICE_PARTIAL_PAYMENT,
+                'Abono registrado en factura '.$invoice->code.'; aún hay saldo pendiente.',
+                [
+                    'invoice_id' => $invoice->id,
+                    'link' => '/admin/facturas/'.$invoice->id,
+                    'previous_status' => $statusBeforePayment,
+                ],
+                'partial_inv_'.$invoice->id
+            );
+        }
+
+        ActivityLogger::log(
+            $request->user(),
+            'pago_registrado',
+            'Registró pago en factura '.$invoice->code.' (ID '.$invoice->id.'). Estado: '.$invoice->status.'.'
+        );
 
         return new AdminInvoiceResource($invoice);
     }
 
-    public function destroyPayment(Invoice $invoice, Payment $payment): AdminInvoiceResource|\Illuminate\Http\JsonResponse
+    public function destroyPayment(Request $request, Invoice $invoice, Payment $payment): AdminInvoiceResource|JsonResponse
     {
         if ((int) $payment->invoice_id !== (int) $invoice->id) {
             return response()->json(['message' => 'El pago no pertenece a esta factura.'], 404);
         }
 
-        if ($invoice->status === Invoice::STATUS_BORRADOR) {
-            return response()->json(['message' => 'Factura en borrador.'], 422);
+        if (! in_array($invoice->status, [
+            Invoice::STATUS_ENVIADA,
+            Invoice::STATUS_PARCIALMENTE_PAGADA,
+            Invoice::STATUS_PAGADA,
+        ], true)) {
+            return response()->json(['message' => 'No se pueden modificar pagos en este estado de la factura.'], 422);
         }
 
         $payment->delete();
         $invoice->refresh();
         $this->syncInvoiceStatusFromPayments($invoice);
-        $invoice->load(['company:id,nombre,nit', 'services.user', 'payments']);
+        $invoice->load(['company:id,nombre,nit', 'services.user', 'services.catalog:id,name', 'payments']);
+
+        ActivityLogger::log(
+            $request->user(),
+            'pago_eliminado',
+            'Eliminó un pago de la factura '.$invoice->code.' (ID '.$invoice->id.').'
+        );
 
         return new AdminInvoiceResource($invoice);
     }

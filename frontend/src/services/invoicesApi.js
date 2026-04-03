@@ -69,7 +69,22 @@ export function patchInvoiceStatus(id, status) {
   return api(`/admin/invoices/${id}/status`, {
     method: 'PATCH',
     body: JSON.stringify({ status }),
-  }).then((r) => r.data)
+  }).then((r) => ({
+    ...r.data,
+    public_verification_code: r.public_verification_code,
+    public_verification_notice: r.public_verification_notice,
+  }))
+}
+
+/** Nuevo código de verificación para consulta pública del cliente (invalida el anterior). */
+export function regenerateInvoicePublicAccess(id) {
+  return api(`/admin/invoices/${id}/public-access-token`, {
+    method: 'POST',
+  }).then((r) => ({
+    ...r.data,
+    public_verification_code: r.public_verification_code,
+    public_verification_notice: r.public_verification_notice,
+  }))
 }
 
 /**
@@ -89,10 +104,14 @@ export function deleteInvoicePayment(invoiceId, paymentId) {
 }
 
 /**
+ * @param {number|string} id
+ * @param {{ preview?: boolean }} [opts] preview=true → borrador (marca de agua); oficial sin query.
  * @returns {Promise<Blob>}
  */
-export async function downloadInvoicePdfBlob(id) {
-  const res = await fetch(`${apiBaseUrl()}/api/admin/invoices/${id}/pdf`, {
+export async function downloadInvoicePdfBlob(id, opts = {}) {
+  const preview = Boolean(opts.preview)
+  const q = preview ? '?preview=1' : ''
+  const res = await fetch(`${apiBaseUrl()}/api/admin/invoices/${id}/pdf${q}`, {
     headers: {
       Authorization: `Bearer ${getToken()}`,
       Accept: 'application/pdf',
@@ -103,4 +122,36 @@ export async function downloadInvoicePdfBlob(id) {
     throw new Error(data.message || `Error ${res.status}`)
   }
   return res.blob()
+}
+
+/**
+ * Exportación CSV (Excel). `path` ej. `/admin/export/invoices`.
+ * @param {string} path
+ * @param {Record<string, string|number|boolean|undefined|null>} [params]
+ */
+export async function downloadAdminExportCsv(path, params = {}) {
+  const qs = new URLSearchParams()
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== '' && v !== null && v !== undefined) qs.set(k, String(v))
+  })
+  const s = qs.toString()
+  const res = await fetch(`${apiBaseUrl()}/api${path}${s ? `?${s}` : ''}`, {
+    headers: {
+      Authorization: `Bearer ${getToken()}`,
+      Accept: 'text/csv,*/*',
+    },
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.message || `Error ${res.status}`)
+  }
+  const blob = await res.blob()
+  let filename = 'export.csv'
+  const cd = res.headers.get('Content-Disposition')
+  if (cd) {
+    const m = cd.match(/filename\*=UTF-8''([^;\n]+)|filename="([^"]+)"|filename=([^;\n]+)/i)
+    const raw = m ? decodeURIComponent((m[1] || m[2] || m[3] || '').trim()) : ''
+    if (raw) filename = raw.replace(/^["']|["']$/g, '')
+  }
+  return { blob, filename }
 }

@@ -2,11 +2,12 @@
 
 namespace App\Http\Resources;
 
+use App\Models\Service;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Storage;
 
-/** @mixin \App\Models\Service */
+/** @mixin Service */
 class ServiceResource extends JsonResource
 {
     public function toArray(Request $request): array
@@ -16,6 +17,7 @@ class ServiceResource extends JsonResource
             'code' => $this->code,
             'company_id' => $this->company_id,
             'user_id' => $this->user_id,
+            'catalog_id' => $this->catalog_id,
             'client_name' => $this->client_name,
             'service_type' => $this->service_type,
             'description' => $this->description,
@@ -29,6 +31,10 @@ class ServiceResource extends JsonResource
                     : false),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
+            'catalog' => $this->whenLoaded('catalog', fn () => $this->catalog ? [
+                'id' => $this->catalog->id,
+                'name' => $this->catalog->name,
+            ] : null),
             'company' => $this->whenLoaded('company', fn () => [
                 'id' => $this->company->id,
                 'nombre' => $this->company->nombre,

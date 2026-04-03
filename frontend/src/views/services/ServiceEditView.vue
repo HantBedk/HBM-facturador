@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ServiceCorrectionFields from '@/components/services/ServiceCorrectionFields.vue'
-import { fetchService, updateService } from '@/services/servicesApi.js'
+import { fetchService, fetchServiceCatalogActive, updateService } from '@/services/servicesApi.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,7 +13,10 @@ const saving = ref(false)
 const fieldErrors = ref({})
 const globalError = ref('')
 
+const catalogItems = ref([])
+
 const form = ref({
+  catalog_id: '',
   client_name: '',
   service_type: '',
   description: '',
@@ -45,6 +48,7 @@ function syncForm() {
   const s = service.value
   if (!s) return
   form.value = {
+    catalog_id: s.catalog_id != null ? s.catalog_id : '',
     client_name: s.client_name || '',
     service_type: s.service_type || '',
     description: s.description || '',
@@ -68,6 +72,11 @@ function validateLocal() {
 }
 
 onMounted(async () => {
+  try {
+    catalogItems.value = await fetchServiceCatalogActive()
+  } catch {
+    catalogItems.value = []
+  }
   try {
     service.value = await fetchService(route.params.id)
   } catch (e) {
@@ -95,12 +104,18 @@ async function onSubmit() {
   }
   saving.value = true
   try {
-    await updateService(route.params.id, {
+    const payload = {
       client_name: f.client_name.trim(),
       service_type: f.service_type.trim(),
       description: f.description.trim(),
       amount: Number(f.amount),
-    })
+    }
+    if (f.catalog_id !== '' && f.catalog_id != null) {
+      payload.catalog_id = Number(f.catalog_id)
+    } else {
+      payload.catalog_id = null
+    }
+    await updateService(route.params.id, payload)
     window.alert('Cambios guardados.')
     await router.push(`/admin/servicios/${route.params.id}`)
   } catch (e) {
@@ -161,7 +176,12 @@ async function onSubmit() {
 
       <form v-if="canEdit" class="card form-card" @submit.prevent="onSubmit">
         <h2 class="h2">Datos corregibles</h2>
-        <ServiceCorrectionFields v-model="form" :field-errors="fieldErrors" :disabled="saving" />
+        <ServiceCorrectionFields
+          v-model="form"
+          :catalog-items="catalogItems"
+          :field-errors="fieldErrors"
+          :disabled="saving"
+        />
         <div class="actions">
           <RouterLink class="btn secondary" :to="`/admin/servicios/${route.params.id}`">Cancelar</RouterLink>
           <button class="btn primary" type="submit" :disabled="saving">

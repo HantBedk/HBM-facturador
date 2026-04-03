@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
+import AdminNotificationBell from '@/components/AdminNotificationBell.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -68,6 +69,16 @@ async function salir() {
             <svg class="h-[1.15rem] w-[1.15rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
           </div>
           <span>Servicios</span>
+        </RouterLink>
+
+        <RouterLink
+          to="/admin/catalogo-servicios"
+          :class="['group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors', route.path.startsWith('/admin/catalogo-servicios') ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20' : 'text-slate-300 hover:bg-slate-800/50 hover:text-white']"
+        >
+          <div :class="['flex items-center justify-center p-1', route.path.startsWith('/admin/catalogo-servicios') ? 'text-white' : 'text-teal-400 group-hover:text-teal-300']">
+            <svg class="h-[1.15rem] w-[1.15rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+          </div>
+          <span>Catálogo</span>
         </RouterLink>
 
         <!-- Facturas (Cyan) -->
@@ -144,11 +155,7 @@ async function salir() {
         <div class="flex items-center gap-4">
           <!-- Íconos de Control -->
           <div class="hidden sm:flex items-center gap-5 text-slate-400 border-r border-slate-700/50 pr-5">
-            <button class="hover:text-white transition-colors relative">
-              <svg class="h-[1.3rem] w-[1.3rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-              <!-- Punto Rojo (Notificación) -->
-              <span class="absolute -top-0.5 -right-0.5 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-[#13161f]"></span>
-            </button>
+            <AdminNotificationBell />
             <button class="hover:text-white transition-colors">
               <svg class="h-[1.3rem] w-[1.3rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
             </button>

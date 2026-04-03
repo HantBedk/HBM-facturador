@@ -9,6 +9,7 @@ import {
   clearServiceDraft,
   createService,
   fetchCompanies,
+  fetchServiceCatalogActive,
   getRecentClientNames,
   loadServiceDraft,
   pushRecentClientName,
@@ -20,6 +21,7 @@ const router = useRouter()
 const route = useRoute()
 
 const companies = ref([])
+const catalogItems = ref([])
 const clientSuggestions = ref([])
 const loading = ref(false)
 const fieldErrors = ref({})
@@ -34,6 +36,7 @@ const today = new Date().toISOString().slice(0, 10)
 
 const form = ref({
   company_id: '',
+  catalog_id: '',
   client_name: '',
   service_type: '',
   description: '',
@@ -71,6 +74,7 @@ function resetFormToDefaults() {
   const d = new Date().toISOString().slice(0, 10)
   form.value = {
     company_id: '',
+    catalog_id: '',
     client_name: '',
     service_type: '',
     description: '',
@@ -114,6 +118,7 @@ onMounted(async () => {
     if (draft && typeof draft === 'object') {
       form.value = {
         company_id: draft.company_id ?? '',
+        catalog_id: draft.catalog_id ?? '',
         client_name: draft.client_name ?? '',
         service_type: draft.service_type ?? '',
         description: draft.description ?? '',
@@ -126,6 +131,11 @@ onMounted(async () => {
     companies.value = await fetchCompanies()
   } catch (e) {
     globalError.value = e.data?.message || 'No se pudieron cargar las empresas.'
+  }
+  try {
+    catalogItems.value = await fetchServiceCatalogActive()
+  } catch {
+    catalogItems.value = []
   }
 })
 
@@ -150,6 +160,9 @@ async function onSubmit() {
       description: form.value.description.trim(),
       amount: Number(form.value.amount),
       service_date: form.value.service_date,
+    }
+    if (form.value.catalog_id !== '' && form.value.catalog_id != null) {
+      payload.catalog_id = Number(form.value.catalog_id)
     }
     const created = await createService(
       payload,
@@ -224,6 +237,7 @@ async function onSubmit() {
         v-model="form"
         v-model:photos="photoFiles"
         :companies="companies"
+        :catalog-items="catalogItems"
         :client-suggestions="clientSuggestions"
         :field-errors="fieldErrors"
         :disabled="loading"
@@ -233,6 +247,7 @@ async function onSubmit() {
         <ServiceFormFields
           v-model="form"
           :companies="companies"
+          :catalog-items="catalogItems"
           :client-suggestions="clientSuggestions"
           :field-errors="fieldErrors"
           :disabled="loading"

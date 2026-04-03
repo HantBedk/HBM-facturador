@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\Company;
+use App\Models\ServiceCatalog;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 
@@ -67,6 +68,23 @@ class DatabaseSeeder extends Seeder
                 'estado' => User::ESTADO_ACTIVO,
             ]
         );
+
+        $catalogSeeds = [
+            ['name' => 'Revisión de equipo', 'description' => 'Inspección y diagnóstico inicial del equipo o instalación.', 'base_price' => 75000],
+            ['name' => 'Formateo', 'description' => 'Respaldo opcional, formateo de disco e instalación de sistema operativo base.', 'base_price' => 120000],
+            ['name' => 'Instalación de software', 'description' => 'Instalación y configuración de aplicaciones según licencias del cliente.', 'base_price' => 85000],
+            ['name' => 'Mantenimiento preventivo', 'description' => 'Limpieza, actualizaciones de seguridad y verificación de funcionamiento.', 'base_price' => 95000],
+        ];
+        foreach ($catalogSeeds as $row) {
+            ServiceCatalog::query()->updateOrCreate(
+                ['name' => $row['name']],
+                [
+                    'description' => $row['description'],
+                    'base_price' => $row['base_price'],
+                    'status' => ServiceCatalog::STATUS_ACTIVO,
+                ]
+            );
+        }
 
         $this->call(DemoPublicInvoiceSeeder::class);
     }

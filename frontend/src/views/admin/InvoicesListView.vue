@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { fetchCompanies } from '@/services/servicesApi.js'
-import { fetchAdminInvoices } from '@/services/invoicesApi.js'
+import { downloadAdminExportCsv, fetchAdminInvoices } from '@/services/invoicesApi.js'
 
 const router = useRouter()
 
@@ -11,6 +11,7 @@ const rows = ref([])
 const meta = ref(null)
 const links = ref(null)
 const loading = ref(false)
+const exportBusy = ref(false)
 const error = ref('')
 
 const filters = ref({
@@ -107,6 +108,29 @@ const pageSummary = computed(() => {
   if (!m || !m.total) return ''
   return `${m.from ?? 0}–${m.to ?? 0} de ${m.total} factura(s)`
 })
+
+async function exportInvoicesCsv() {
+  error.value = ''
+  exportBusy.value = true
+  try {
+    const params = {}
+    if (filters.value.company_id) params.company_id = filters.value.company_id
+    if (filters.value.status) params.status = filters.value.status
+    if (filters.value.period_year) params.period_year = filters.value.period_year
+    if (filters.value.period_month) params.period_month = filters.value.period_month
+    if (filters.value.q.trim()) params.q = filters.value.q.trim()
+    const { blob, filename } = await downloadAdminExportCsv('/admin/export/invoices', params)
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(a.href)
+  } catch (e) {
+    error.value = e.message || 'No se pudo exportar.'
+  } finally {
+    exportBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -116,7 +140,12 @@ const pageSummary = computed(() => {
         <h1>Facturas</h1>
         <p class="lede">Listado y gestión. Clic en una fila o en Ver para el detalle; los borradores también se editan con Editar.</p>
       </div>
-      <RouterLink class="btn primary" to="/admin/facturas/nueva">+ Nueva factura</RouterLink>
+      <div class="head-btns">
+        <button type="button" class="btn secondary" :disabled="exportBusy" @click="exportInvoicesCsv">
+          {{ exportBusy ? 'Exportando…' : 'Exportar CSV (Excel)' }}
+        </button>
+        <RouterLink class="btn primary" to="/admin/facturas/nueva">+ Nueva factura</RouterLink>
+      </div>
     </header>
 
     <div class="filters card">
@@ -236,6 +265,13 @@ const pageSummary = computed(() => {
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 1rem;
+}
+
+.head-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 h1 {

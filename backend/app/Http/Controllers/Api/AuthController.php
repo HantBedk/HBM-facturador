@@ -35,7 +35,8 @@ class AuthController extends Controller
         }
 
         $device = $data['device_name'] ?? 'web';
-        $token = $user->createToken($device)->plainTextToken;
+        $expiresAt = now()->addDays(7);
+        $token = $user->createToken($device, ['*'], $expiresAt)->plainTextToken;
 
         return response()->json([
             'token' => $token,

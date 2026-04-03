@@ -5,14 +5,20 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ServiceResource;
 use App\Models\Company;
+use App\Models\PanelNotification;
 use App\Models\Service;
+use App\Models\ServiceCatalog;
 use App\Models\ServicePhoto;
 use App\Models\User;
+use App\Services\ActivityLogger;
+use App\Services\PanelNotificationDispatcher;
 use App\Services\ServiceCodeGenerator;
+use App\Support\Pagination;
 use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
 
 class ServiceController extends Controller
@@ -64,17 +70,18 @@ class ServiceController extends Controller
         $q->orderByDesc('service_date')->orderByDesc('id');
 
         return ServiceResource::collection(
-            $q->paginate($request->integer('per_page', 15))->withQueryString()
+            $q->paginate(Pagination::perPage($request))->withQueryString()
         );
     }
 
-    public function store(Request $request, ServiceCodeGenerator $codes): \Illuminate\Http\JsonResponse
+    public function store(Request $request, ServiceCodeGenerator $codes): JsonResponse
     {
         $this->authorize('create', Service::class);
 
         $user = $request->user();
         $rules = [
             'company_id' => ['required', 'exists:companies,id'],
+            'catalog_id' => ['nullable', 'integer', 'exists:service_catalog,id'],
             'client_name' => ['required', 'string', 'max:255'],
             'service_type' => ['required', 'string', 'max:255'],
             'description' => ['required', 'string', 'min:8'],
@@ -85,6 +92,7 @@ class ServiceController extends Controller
         ];
 
         $data = $request->validate($rules);
+        $this->assertCatalogActive(isset($data['catalog_id']) ? (int) $data['catalog_id'] : null);
 
         $company = Company::query()->findOrFail($data['company_id']);
         if ($company->estado !== Company::ESTADO_ACTIVO) {
@@ -107,6 +115,7 @@ class ServiceController extends Controller
             'code' => $code,
             'company_id' => $data['company_id'],
             'user_id' => $request->user()->id,
+            'catalog_id' => isset($data['catalog_id']) ? (int) $data['catalog_id'] : null,
             'client_name' => $data['client_name'] ?? null,
             'service_type' => $data['service_type'] ?? null,
             'description' => $data['description'],
@@ -132,7 +141,22 @@ class ServiceController extends Controller
             ]);
         }
 
-        $service->load(['company', 'user', 'photos']);
+        $service->load(['company', 'user', 'photos', 'catalog:id,name']);
+
+        app(PanelNotificationDispatcher::class)->notifyAdmins(
+            PanelNotification::TYPE_SERVICE_CREATED,
+            'Nuevo servicio '.$service->code.' registrado ('.($service->company?->nombre ?? 'empresa').').',
+            [
+                'service_id' => $service->id,
+                'link' => '/admin/servicios/'.$service->id,
+            ]
+        );
+
+        ActivityLogger::log(
+            $request->user(),
+            'servicio_creado',
+            'Creó servicio '.$service->code.' (ID '.$service->id.').'
+        );
 
         return (new ServiceResource($service))->response()->setStatusCode(201);
     }
@@ -141,12 +165,12 @@ class ServiceController extends Controller
     {
         $this->authorize('view', $service);
         $service->loadCount('invoices');
-        $service->load(['company', 'user', 'photos']);
+        $service->load(['company', 'user', 'photos', 'catalog:id,name']);
 
         return new ServiceResource($service);
     }
 
-    public function update(Request $request, Service $service): ServiceResource|\Illuminate\Http\JsonResponse
+    public function update(Request $request, Service $service): ServiceResource|JsonResponse
     {
         $this->authorize('update', $service);
 
@@ -161,12 +185,16 @@ class ServiceController extends Controller
         }
 
         $data = $request->validate([
+            'catalog_id' => ['nullable', 'integer', 'exists:service_catalog,id'],
             'client_name' => ['required', 'string', 'max:255'],
             'service_type' => ['required', 'string', 'max:255'],
             'description' => ['required', 'string', 'min:8'],
             'amount' => ['required', 'numeric', 'min:0.01'],
         ]);
 
+        $this->assertCatalogActive(isset($data['catalog_id']) ? (int) $data['catalog_id'] : null);
+
+        $service->catalog_id = isset($data['catalog_id']) ? (int) $data['catalog_id'] : null;
         $service->client_name = $data['client_name'];
         $service->service_type = $data['service_type'];
         $service->description = $data['description'];
@@ -178,12 +206,18 @@ class ServiceController extends Controller
         }
 
         $service->loadCount('invoices');
-        $service->load(['company', 'user', 'photos']);
+        $service->load(['company', 'user', 'photos', 'catalog:id,name']);
+
+        ActivityLogger::log(
+            $request->user(),
+            'servicio_editado',
+            'Editó servicio '.$service->code.' (ID '.$service->id.').'
+        );
 
         return new ServiceResource($service);
     }
 
-    public function archive(Service $service): ServiceResource|\Illuminate\Http\JsonResponse
+    public function archive(Request $request, Service $service): ServiceResource|JsonResponse
     {
         $this->authorize('delete', $service);
 
@@ -199,9 +233,29 @@ class ServiceController extends Controller
 
         $service->status = Service::STATUS_ELIMINADO;
         $service->save();
-        $service->load(['company', 'user', 'photos']);
+        $service->load(['company', 'user', 'photos', 'catalog:id,name']);
+
+        ActivityLogger::log(
+            $request->user(),
+            'servicio_archivado',
+            'Marcó como eliminado el servicio '.$service->code.' (ID '.$service->id.').'
+        );
 
         return new ServiceResource($service);
+    }
+
+    private function assertCatalogActive(?int $catalogId): void
+    {
+        if ($catalogId === null) {
+            return;
+        }
+
+        $row = ServiceCatalog::query()->find($catalogId);
+        if ($row === null || $row->status !== ServiceCatalog::STATUS_ACTIVO) {
+            throw ValidationException::withMessages([
+                'catalog_id' => ['El ítem de catálogo no existe o no está activo.'],
+            ]);
+        }
     }
 
     private function isDuplicate(User $user, array $data, Carbon $serviceDate): bool

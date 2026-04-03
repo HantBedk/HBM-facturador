@@ -19,6 +19,7 @@ class Service extends Model
         'code',
         'company_id',
         'user_id',
+        'catalog_id',
         'client_name',
         'service_type',
         'description',
@@ -33,6 +34,11 @@ class Service extends Model
             'service_date' => 'date',
             'amount' => 'decimal:2',
         ];
+    }
+
+    public function catalog(): BelongsTo
+    {
+        return $this->belongsTo(ServiceCatalog::class, 'catalog_id');
     }
 
     public function company(): BelongsTo

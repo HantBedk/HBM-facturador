@@ -7,6 +7,8 @@ const props = defineProps({
     required: true,
   },
   companies: { type: Array, default: () => [] },
+  /** Ítems de GET /service-catalog/active */
+  catalogItems: { type: Array, default: () => [] },
   clientSuggestions: { type: Array, default: () => [] },
   fieldErrors: { type: Object, default: () => ({}) },
   disabled: { type: Boolean, default: false },
@@ -22,10 +24,53 @@ const inner = computed({
 function patch(partial) {
   emit('update:modelValue', { ...props.modelValue, ...partial })
 }
+
+function moneyShort(v) {
+  const n = Number(v)
+  if (Number.isNaN(n)) return v
+  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
+}
+
+function descFromCatalog(c) {
+  const d = (c.description || '').trim()
+  if (d.length >= 8) return d
+  return `Servicio estándar: ${c.name}. Detalle del trabajo realizado según visita en sitio.`
+}
+
+function onCatalogChange(ev) {
+  const v = ev.target.value
+  if (!v) {
+    patch({ catalog_id: '' })
+    return
+  }
+  const item = props.catalogItems.find((x) => String(x.id) === v)
+  if (!item) return
+  patch({
+    catalog_id: item.id,
+    service_type: item.name,
+    description: descFromCatalog(item),
+    amount: String(item.base_price),
+  })
+}
 </script>
 
 <template>
   <div class="grid">
+    <label v-if="catalogItems.length" class="field wide">
+      <span>Catálogo (opcional)</span>
+      <select
+        :value="modelValue.catalog_id != null && modelValue.catalog_id !== '' ? String(modelValue.catalog_id) : ''"
+        :disabled="disabled"
+        @change="onCatalogChange"
+      >
+        <option value="">— Personalizado (sin catálogo) —</option>
+        <option v-for="c in catalogItems" :key="c.id" :value="String(c.id)">
+          {{ c.name }} — {{ moneyShort(c.base_price) }}
+        </option>
+      </select>
+      <small class="hint">Al elegir un ítem se rellenan tipo, descripción y valor; puede editarlos antes de guardar.</small>
+    </label>
+
     <label class="field">
       <span>Empresa <abbr title="obligatorio">*</abbr></span>
       <select
@@ -152,5 +197,13 @@ textarea:focus {
   color: #fecaca;
   display: block;
   margin-top: 0.25rem;
+}
+
+.hint {
+  display: block;
+  margin-top: 0.35rem;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 </style>

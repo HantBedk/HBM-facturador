@@ -171,4 +171,16 @@ return [
 
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Respaldo (comando `php artisan db:backup`)
+    |--------------------------------------------------------------------------
+    */
+    'backup' => [
+        'enabled' => env('DB_BACKUP_ENABLED', false),
+        'path' => env('DB_BACKUP_PATH', storage_path('app/backups')),
+        'mysqldump_binary' => env('MYSQLDUMP_PATH', 'mysqldump'),
+        'retain_days' => (int) env('DB_BACKUP_RETAIN_DAYS', 14),
+    ],
+
 ];

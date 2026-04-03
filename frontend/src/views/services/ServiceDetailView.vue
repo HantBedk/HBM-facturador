@@ -195,6 +195,10 @@ async function onSaveCorrections() {
               <dt>Tipo de servicio</dt>
               <dd>{{ service.service_type || '—' }}</dd>
             </div>
+            <div v-if="service.catalog?.name" class="wide">
+              <dt>Referencia catálogo</dt>
+              <dd>{{ service.catalog.name }}</dd>
+            </div>
             <div class="wide">
               <dt>Descripción</dt>
               <dd class="pre">{{ service.description }}</dd>

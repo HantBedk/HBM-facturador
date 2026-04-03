@@ -1,9 +1,9 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
-import { fetchEmpleados } from '@/services/servicesApi.js'
+import { fetchCompanies, fetchEmpleados } from '@/services/servicesApi.js'
 import { fetchEmpleadoHistorialAdmin, fetchMyHistorial } from '@/services/employeeHistorialApi.js'
 
 const props = defineProps({
@@ -27,6 +27,12 @@ const periodMonth = ref(now.getMonth() + 1)
 const loading = ref(false)
 const error = ref('')
 const payload = ref(null)
+
+const companies = ref([])
+/** Filtro etapa 3: empresa y texto (query al API, mes ya acotado) */
+const filterCompanyId = ref('')
+const filterSearch = ref('')
+let searchDebounce = null
 
 const employee = computed(() => payload.value?.employee)
 const period = computed(() => payload.value?.period)
@@ -70,6 +76,27 @@ function syncPeriodFromRoute() {
   if (periodMonth.value > 12) periodMonth.value = 12
 }
 
+function syncFiltersFromRoute() {
+  const q = route.query
+  if (q.company_id != null && String(q.company_id).trim() !== '') {
+    filterCompanyId.value = String(q.company_id)
+  } else {
+    filterCompanyId.value = ''
+  }
+  filterSearch.value = q.q != null ? String(q.q) : ''
+}
+
+function historialParams() {
+  const p = {
+    year: periodYear.value,
+    month: periodMonth.value,
+  }
+  if (filterCompanyId.value) p.company_id = filterCompanyId.value
+  const t = filterSearch.value.trim()
+  if (t) p.q = t
+  return p
+}
+
 function adminTargetUserId() {
   const fromProp = props.userId?.trim()
   if (fromProp) return fromProp
@@ -89,6 +116,14 @@ async function loadEmpleados() {
   }
 }
 
+async function loadCompaniesList() {
+  try {
+    companies.value = await fetchCompanies()
+  } catch {
+    companies.value = []
+  }
+}
+
 async function loadHistorial() {
   error.value = ''
   payload.value = null
@@ -103,7 +138,7 @@ async function loadHistorial() {
 
   loading.value = true
   try {
-    const p = { year: periodYear.value, month: periodMonth.value }
+    const p = historialParams()
     if (isAdmin.value) {
       payload.value = await fetchEmpleadoHistorialAdmin(adminTargetUserId(), p)
     } else {
@@ -116,11 +151,20 @@ async function loadHistorial() {
   }
 }
 
-function updateRouteQuery() {
+/** Query string alineado con filtros (URL compartible). */
+function buildQueryFromState() {
   const q = {
     year: String(periodYear.value),
     month: String(periodMonth.value),
   }
+  if (filterCompanyId.value) q.company_id = filterCompanyId.value
+  const t = filterSearch.value.trim()
+  if (t) q.q = t
+  return q
+}
+
+function updateRouteQuery() {
+  const q = buildQueryFromState()
   if (isAdmin.value && props.userId) {
     router.replace({ name: 'admin-emp-rendimiento-user', params: { userId: props.userId }, query: q })
   } else if (isAdmin.value && selectedEmpleadoId.value) {
@@ -156,8 +200,21 @@ function onEmpleadoChange() {
   router.push({
     name: 'admin-emp-rendimiento-user',
     params: { userId: selectedEmpleadoId.value },
-    query: { year: String(periodYear.value), month: String(periodMonth.value) },
+    query: buildQueryFromState(),
   })
+}
+
+function onFilterCompanyChange() {
+  updateRouteQuery()
+  loadHistorial()
+}
+
+function scheduleSearchReload() {
+  clearTimeout(searchDebounce)
+  searchDebounce = setTimeout(() => {
+    updateRouteQuery()
+    loadHistorial()
+  }, 400)
 }
 
 function onYearMonthSelectChange() {
@@ -167,6 +224,8 @@ function onYearMonthSelectChange() {
 
 onMounted(async () => {
   syncPeriodFromRoute()
+  syncFiltersFromRoute()
+  await loadCompaniesList()
   if (isAdmin.value) {
     await loadEmpleados()
     if (!props.userId && empleados.value.length === 1) {
@@ -174,14 +233,14 @@ onMounted(async () => {
       await router.replace({
         name: 'admin-emp-rendimiento-user',
         params: { userId: only },
-        query: { year: String(periodYear.value), month: String(periodMonth.value) },
+        query: buildQueryFromState(),
       })
       return
     }
   } else if (route.path === '/empleado/historial' && (route.query.year == null || route.query.month == null)) {
     await router.replace({
       path: '/empleado/historial',
-      query: { year: String(periodYear.value), month: String(periodMonth.value) },
+      query: buildQueryFromState(),
     })
     return
   }
@@ -197,6 +256,10 @@ watch(
     loadHistorial()
   }
 )
+
+onUnmounted(() => {
+  clearTimeout(searchDebounce)
+})
 
 function formatMoney(value) {
   if (value === undefined || value === null) return '—'
@@ -294,6 +357,31 @@ function clip(s, n = 64) {
       </div>
     </div>
 
+    <div v-if="!isAdmin || adminTargetUserId()" class="card block-c">
+      <h2 class="h2">C. Filtros del listado</h2>
+      <p class="hint">Opcional. Afinan la tabla y las métricas del mes (no cargan otros meses).</p>
+      <div class="filters-grid">
+        <label class="field grow">
+          <span>Empresa</span>
+          <select v-model="filterCompanyId" class="input" @change="onFilterCompanyChange">
+            <option value="">Todas</option>
+            <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
+          </select>
+        </label>
+        <label class="field grow">
+          <span>Búsqueda (código, descripción, tipo, cliente)</span>
+          <input
+            v-model="filterSearch"
+            type="search"
+            class="input"
+            placeholder="Ej. mantenimiento, FAC-…"
+            autocomplete="off"
+            @input="scheduleSearchReload"
+          />
+        </label>
+      </div>
+    </div>
+
     <p v-if="error" class="banner err" role="alert">{{ error }}</p>
 
     <template v-if="!isAdmin || adminTargetUserId()">
@@ -317,10 +405,26 @@ function clip(s, n = 64) {
             <h3>Días con actividad</h3>
             <p class="num">{{ summary?.distinct_service_days ?? 0 }}</p>
           </article>
+          <article class="kpi">
+            <h3>Mayor valor (un servicio)</h3>
+            <p class="num">{{ formatMoney(summary?.max_service_amount) }}</p>
+          </article>
+          <article class="kpi">
+            <h3>Día con más servicios</h3>
+            <p v-if="summary?.busiest_day" class="num small-kpi">
+              {{ formatDate(summary.busiest_day.date) }}
+              <span class="sub">({{ summary.busiest_day.services_count }})</span>
+            </p>
+            <p v-else class="num muted">—</p>
+          </article>
         </div>
 
-        <div v-if="isAdmin && employee" class="card who">
-          <strong>{{ employee.nombre }}</strong>
+        <div v-if="employee" class="card who">
+          <div class="who-main">
+            <strong>{{ employee.nombre }}</strong>
+            <span class="pill pill-rol">{{ employee.rol_label || employee.rol }}</span>
+            <span class="pill" :data-st="employee.estado">{{ employee.estado_label || employee.estado }}</span>
+          </div>
           <span class="muted">{{ employee.correo }}</span>
         </div>
 
@@ -531,12 +635,71 @@ h1 {
   color: #38bdf8;
 }
 
+.filters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  align-items: end;
+}
+
+.block-c .field.grow .input {
+  max-width: none;
+}
+
 .who {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  align-items: baseline;
+  flex-direction: column;
+  gap: 0.5rem;
   margin-bottom: 1rem;
+}
+
+.who-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.who-main strong {
+  font-size: 1.05rem;
+  color: #f8fafc;
+}
+
+.pill {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: #cbd5e1;
+}
+
+.pill-rol {
+  border-color: rgba(129, 140, 248, 0.45);
+  color: #c7d2fe;
+}
+
+.pill[data-st='activo'] {
+  border-color: rgba(52, 211, 153, 0.45);
+  color: #6ee7b7;
+}
+
+.pill[data-st='inactivo'] {
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fecaca;
+}
+
+.kpi .num.small-kpi {
+  font-size: 1.05rem;
+}
+
+.kpi .sub {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #94a3b8;
 }
 
 .table-wrap {

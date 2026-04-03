@@ -1,3 +1,5 @@
+# Desarrollo: backend + MySQL + Nginx + Adminer. El frontend (Vite) corre en el host: `cd frontend && npm run dev`.
+# Build de producción del SPA: `cd frontend && npm run build` (servir estáticos con Nginx o CDN cuando corresponda).
 services:
   mysql:
     image: mysql:8.0
