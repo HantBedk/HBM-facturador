@@ -8,17 +8,21 @@ use App\Models\Company;
 use App\Models\PanelNotification;
 use App\Models\Service;
 use App\Models\ServiceCatalog;
+use App\Models\ServiceCatalogSuggestion;
+use App\Models\ServiceItem;
 use App\Models\ServicePhoto;
 use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Services\PanelNotificationDispatcher;
 use App\Services\ServiceCodeGenerator;
+use App\Support\DecimalMath;
 use App\Support\Pagination;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class ServiceController extends Controller
@@ -124,20 +128,37 @@ class ServiceController extends Controller
         $user = $request->user();
         $rules = [
             'company_id' => ['required', 'exists:companies,id'],
-            'catalog_id' => ['nullable', 'integer', 'exists:service_catalog,id'],
             'client_name' => ['required', 'string', 'max:255'],
             'service_type' => ['required', 'string', 'max:255'],
             'description' => ['required', 'string', 'min:8'],
-            'amount' => ['required', 'numeric', 'min:0.01'],
             'service_date' => ['required', 'date'],
             'photos' => ['sometimes', 'array', 'max:4'],
             'photos.*' => ['file', 'image', 'mimes:jpeg,jpg,png,gif,webp', 'max:8192'],
+            'catalog_id' => ['nullable', 'integer', 'exists:service_catalog,id'],
+            'amount' => ['nullable', 'numeric', 'min:0.01'],
         ];
 
         $data = $request->validate($rules);
-        $this->assertCatalogActive(isset($data['catalog_id']) ? (int) $data['catalog_id'] : null);
 
-        $company = Company::query()->findOrFail($data['company_id']);
+        $itemsPayload = $this->parseItemsFromRequest($request);
+        if ($itemsPayload === []) {
+            if (! isset($data['amount'])) {
+                throw ValidationException::withMessages([
+                    'items' => ['Añade líneas del servicio (catálogo o «Otro») o indica un valor único.'],
+                ]);
+            }
+            $itemsPayload = [[
+                'catalog_id' => isset($data['catalog_id']) ? (int) $data['catalog_id'] : null,
+                'custom_name' => null,
+                'custom_description' => null,
+                'amount' => $data['amount'],
+            ]];
+        }
+
+        $companyId = (int) $data['company_id'];
+        $normalized = $this->validateAndNormalizeServiceItems($itemsPayload, $companyId);
+
+        $company = Company::query()->findOrFail($companyId);
         if ($company->estado !== Company::ESTADO_ACTIVO) {
             throw ValidationException::withMessages([
                 'company_id' => ['Solo se pueden registrar servicios para empresas activas.'],
@@ -146,7 +167,14 @@ class ServiceController extends Controller
 
         $serviceDate = Carbon::parse($data['service_date'], config('app.timezone'))->startOfDay();
 
-        if ($this->isDuplicate($request->user(), $data, $serviceDate)) {
+        $totalAmount = '0.00';
+        foreach ($normalized as $row) {
+            $a = number_format((float) $row['amount'], 2, '.', '');
+            $totalAmount = DecimalMath::add($totalAmount, $a, 2);
+        }
+
+        $dupData = array_merge($data, ['amount' => $totalAmount]);
+        if ($this->isDuplicate($request->user(), $dupData, $serviceDate)) {
             throw ValidationException::withMessages([
                 'description' => ['Ya existe un servicio muy similar para la misma empresa y fecha.'],
             ]);
@@ -160,18 +188,68 @@ class ServiceController extends Controller
             ]);
         }
 
-        $service = Service::create([
-            'code' => $code,
-            'company_id' => $data['company_id'],
-            'user_id' => $request->user()->id,
-            'catalog_id' => isset($data['catalog_id']) ? (int) $data['catalog_id'] : null,
-            'client_name' => $data['client_name'] ?? null,
-            'service_type' => $data['service_type'] ?? null,
-            'description' => $data['description'],
-            'amount' => $data['amount'],
-            'service_date' => $serviceDate->toDateString(),
-            'status' => Service::STATUS_ACTIVO,
-        ]);
+        $firstCatalogId = null;
+        foreach ($normalized as $row) {
+            if ($row['catalog_id'] !== null) {
+                $firstCatalogId = $row['catalog_id'];
+                break;
+            }
+        }
+
+        $pendingSuggestions = 0;
+
+        $service = DB::transaction(function () use (
+            $code,
+            $companyId,
+            $user,
+            $data,
+            $totalAmount,
+            $serviceDate,
+            $normalized,
+            $firstCatalogId,
+            &$pendingSuggestions
+        ) {
+            $service = Service::create([
+                'code' => $code,
+                'company_id' => $companyId,
+                'user_id' => $user->id,
+                'catalog_id' => $firstCatalogId,
+                'client_name' => $data['client_name'],
+                'service_type' => $data['service_type'],
+                'description' => $data['description'],
+                'amount' => $totalAmount,
+                'service_date' => $serviceDate->toDateString(),
+                'status' => Service::STATUS_ACTIVO,
+            ]);
+
+            foreach ($normalized as $sort => $row) {
+                $suggestionId = null;
+                if ($row['is_custom']) {
+                    $s = ServiceCatalogSuggestion::query()->create([
+                        'company_id' => $companyId,
+                        'user_id' => $user->id,
+                        'name' => $row['custom_name'],
+                        'description' => $row['custom_description'],
+                        'suggested_price' => $row['amount'],
+                        'status' => ServiceCatalogSuggestion::STATUS_PENDING,
+                    ]);
+                    $suggestionId = $s->id;
+                    $pendingSuggestions++;
+                }
+
+                ServiceItem::query()->create([
+                    'service_id' => $service->id,
+                    'catalog_id' => $row['catalog_id'],
+                    'catalog_suggestion_id' => $suggestionId,
+                    'label' => $row['label'],
+                    'line_description' => $row['line_description'],
+                    'amount' => $row['amount'],
+                    'sort_order' => $sort,
+                ]);
+            }
+
+            return $service;
+        });
 
         $uploaded = $request->file('photos', []);
         if (! is_array($uploaded)) {
@@ -190,7 +268,7 @@ class ServiceController extends Controller
             ]);
         }
 
-        $service->load(['company', 'user', 'photos', 'catalog:id,name']);
+        $service->load(['company', 'user', 'photos', 'catalog:id,name', 'items.catalogSuggestion']);
 
         app(PanelNotificationDispatcher::class)->notifyAdmins(
             PanelNotification::TYPE_SERVICE_CREATED,
@@ -200,6 +278,17 @@ class ServiceController extends Controller
                 'link' => '/admin/servicios/'.$service->id,
             ]
         );
+
+        if ($pendingSuggestions > 0) {
+            app(PanelNotificationDispatcher::class)->notifyAdmins(
+                PanelNotification::TYPE_CATALOG_SUGGESTION_PENDING,
+                'El servicio '.$service->code.' incluye '.$pendingSuggestions.' propuesta(s) de catálogo «Otro» pendiente(s) de revisión.',
+                [
+                    'service_id' => $service->id,
+                    'link' => '/admin/catalogo-servicios?pendientes=1',
+                ]
+            );
+        }
 
         ActivityLogger::log(
             $request->user(),
@@ -214,7 +303,7 @@ class ServiceController extends Controller
     {
         $this->authorize('view', $service);
         $service->loadCount('invoices');
-        $service->load(['company', 'user', 'photos', 'catalog:id,name']);
+        $service->load(['company', 'user', 'photos', 'catalog:id,name', 'items.catalogSuggestion']);
 
         return new ServiceResource($service);
     }
@@ -241,7 +330,9 @@ class ServiceController extends Controller
             'amount' => ['required', 'numeric', 'min:0.01'],
         ]);
 
-        $this->assertCatalogActive(isset($data['catalog_id']) ? (int) $data['catalog_id'] : null);
+        if (isset($data['catalog_id'])) {
+            $this->assertCatalogAllowedForCompany((int) $data['catalog_id'], (int) $service->company_id);
+        }
 
         $service->catalog_id = isset($data['catalog_id']) ? (int) $data['catalog_id'] : null;
         $service->client_name = $data['client_name'];
@@ -255,7 +346,7 @@ class ServiceController extends Controller
         }
 
         $service->loadCount('invoices');
-        $service->load(['company', 'user', 'photos', 'catalog:id,name']);
+        $service->load(['company', 'user', 'photos', 'catalog:id,name', 'items.catalogSuggestion']);
 
         ActivityLogger::log(
             $request->user(),
@@ -293,16 +384,121 @@ class ServiceController extends Controller
         return new ServiceResource($service);
     }
 
-    private function assertCatalogActive(?int $catalogId): void
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function parseItemsFromRequest(Request $request): array
     {
-        if ($catalogId === null) {
-            return;
+        $raw = $request->input('items');
+        if ($raw === null || $raw === '') {
+            return [];
+        }
+        if (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+
+            return is_array($decoded) ? $decoded : [];
         }
 
+        return is_array($raw) ? $raw : [];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows
+     * @return list<array{catalog_id: ?int, custom_name: ?string, custom_description: ?string, amount: string, label: string, line_description: ?string, is_custom: bool}>
+     */
+    private function validateAndNormalizeServiceItems(array $rows, int $companyId): array
+    {
+        if ($rows === []) {
+            throw ValidationException::withMessages(['items' => ['Añade al menos una línea.']]);
+        }
+        if (count($rows) > 80) {
+            throw ValidationException::withMessages(['items' => ['Demasiadas líneas (máx. 80).']]);
+        }
+
+        $out = [];
+        foreach ($rows as $i => $row) {
+            if (! is_array($row)) {
+                throw ValidationException::withMessages(['items' => ['Formato de líneas inválido.']]);
+            }
+            $cid = isset($row['catalog_id']) && $row['catalog_id'] !== '' && $row['catalog_id'] !== null
+                ? (int) $row['catalog_id'] : null;
+            $cname = isset($row['custom_name']) ? trim((string) $row['custom_name']) : '';
+            $cdesc = isset($row['custom_description']) ? trim((string) $row['custom_description']) : null;
+            if ($cdesc === '') {
+                $cdesc = null;
+            }
+            $lineDescRaw = isset($row['line_description']) ? trim((string) $row['line_description']) : '';
+            $lineDescOverride = $lineDescRaw !== '' ? $lineDescRaw : null;
+
+            $amt = $row['amount'] ?? null;
+            if ($amt === null || ! is_numeric($amt) || (float) $amt < 0.01) {
+                throw ValidationException::withMessages([
+                    'items' => ['Línea '.($i + 1).': indica un importe válido (mín. 0,01).'],
+                ]);
+            }
+            $amtStr = number_format((float) $amt, 2, '.', '');
+
+            $isCustom = $cname !== '';
+            if ($cid === null && ! $isCustom) {
+                throw ValidationException::withMessages([
+                    'items' => ['Línea '.($i + 1).': elige un ítem del catálogo o usa «Otro» con nombre.'],
+                ]);
+            }
+            if ($cid !== null && $isCustom) {
+                throw ValidationException::withMessages([
+                    'items' => ['Línea '.($i + 1).': no combines catálogo y «Otro» en la misma línea.'],
+                ]);
+            }
+
+            if ($cid !== null) {
+                $this->assertCatalogAllowedForCompany($cid, $companyId);
+                $cat = ServiceCatalog::query()->find($cid);
+                if ($cat === null) {
+                    throw ValidationException::withMessages(['items' => ['Ítem de catálogo no encontrado.']]);
+                }
+                $lineDesc = $lineDescOverride ?? $cat->description;
+                $out[] = [
+                    'catalog_id' => $cid,
+                    'custom_name' => null,
+                    'custom_description' => null,
+                    'amount' => $amtStr,
+                    'label' => $cat->name,
+                    'line_description' => $lineDesc,
+                    'is_custom' => false,
+                ];
+            } else {
+                if (mb_strlen($cname) < 2) {
+                    throw ValidationException::withMessages([
+                        'items' => ['Línea «Otro» '.($i + 1).': indica un nombre (mín. 2 caracteres).'],
+                    ]);
+                }
+                $lineDesc = $lineDescOverride ?? $cdesc;
+                $out[] = [
+                    'catalog_id' => null,
+                    'custom_name' => $cname,
+                    'custom_description' => $cdesc,
+                    'amount' => $amtStr,
+                    'label' => $cname,
+                    'line_description' => $lineDesc,
+                    'is_custom' => true,
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    private function assertCatalogAllowedForCompany(int $catalogId, int $companyId): void
+    {
         $row = ServiceCatalog::query()->find($catalogId);
         if ($row === null || $row->status !== ServiceCatalog::STATUS_ACTIVO) {
             throw ValidationException::withMessages([
-                'catalog_id' => ['El ítem de catálogo no existe o no está activo.'],
+                'items' => ['Un ítem de catálogo no existe o no está activo.'],
+            ]);
+        }
+        if ($row->company_id !== null && (int) $row->company_id !== $companyId) {
+            throw ValidationException::withMessages([
+                'items' => ['Hay un ítem de catálogo que no corresponde a la empresa del servicio.'],
             ]);
         }
     }

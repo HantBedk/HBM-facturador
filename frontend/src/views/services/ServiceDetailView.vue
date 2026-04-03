@@ -1,12 +1,13 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
-import { fetchService, updateService } from '@/services/servicesApi.js'
+import { archiveService, fetchService, updateService } from '@/services/servicesApi.js'
 import ServiceCorrectionFields from '@/components/services/ServiceCorrectionFields.vue'
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 
 const service = ref(null)
@@ -32,6 +33,14 @@ const backHref = computed(() =>
 const canAdminEdit = computed(
   () =>
     isAdmin.value &&
+    service.value &&
+    !service.value.invoiced &&
+    service.value.status !== 'eliminado'
+)
+
+const canEmpleadoManage = computed(
+  () =>
+    !isAdmin.value &&
     service.value &&
     !service.value.invoiced &&
     service.value.status !== 'eliminado'
@@ -137,6 +146,25 @@ async function onSaveCorrections() {
     saving.value = false
   }
 }
+
+async function onEmpleadoArchive() {
+  const s = service.value
+  if (!s || s.invoiced || s.status === 'eliminado') return
+  const typed = window.prompt(
+    `Para eliminar este registro, escribe exactamente el código del servicio (${s.code}):`
+  )
+  if (typed?.trim() !== s.code) {
+    if (typed != null && typed.trim() !== '') window.alert('El código no coincide.')
+    return
+  }
+  try {
+    await archiveService(s.id)
+    window.alert('Servicio marcado como eliminado.')
+    await router.push(`${base.value}/listado-servicios`)
+  } catch (e) {
+    window.alert(e.data?.message || e.message || 'No se pudo eliminar.')
+  }
+}
 </script>
 
 <template>
@@ -153,6 +181,10 @@ async function onSaveCorrections() {
         <RouterLink class="btn secondary" :to="`${base}/servicios/${service.id}/editar`">
           Editar en vista ampliada
         </RouterLink>
+      </div>
+      <div v-else-if="service && canEmpleadoManage" class="actions actions-emp">
+        <RouterLink class="btn primary" :to="`${base}/servicio/${service.id}/editar`">Editar</RouterLink>
+        <button type="button" class="btn danger" @click="onEmpleadoArchive">Eliminar</button>
       </div>
     </header>
 
@@ -608,6 +640,24 @@ dd {
 .btn.primary:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+.btn.secondary {
+  border-color: rgba(148, 163, 184, 0.45);
+}
+
+.btn.danger {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(127, 29, 29, 0.35);
+  color: #fecaca;
+}
+
+.btn.danger:hover {
+  background: rgba(153, 27, 27, 0.45);
+}
+
+.actions-emp {
+  align-items: center;
 }
 
 .photo-grid {

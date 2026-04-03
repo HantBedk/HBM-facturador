@@ -1,6 +1,6 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   approveCorreoSolicitud,
   createUser,
@@ -9,6 +9,11 @@ import {
   rejectCorreoSolicitud,
   updateUser,
 } from '@/services/usersApi.js'
+import { useAuthStore } from '@/stores/auth'
+
+const route = useRoute()
+const auth = useAuthStore()
+const router = useRouter()
 
 const rows = ref([])
 const meta = ref(null)
@@ -35,12 +40,33 @@ const form = ref({
   estado: 'activo',
 })
 
-const ROL_OPTIONS = [
-  { value: '', label: 'Todos' },
-  { value: 'empleado', label: 'Empleado' },
-  { value: 'admin', label: 'Admin' },
-  { value: 'super_admin', label: 'Super admin' },
-]
+const isAdminNotSuper = computed(() => auth.user?.rol === 'admin')
+
+const ROL_OPTIONS = computed(() => {
+  if (isAdminNotSuper.value) {
+    return [
+      { value: '', label: 'Todos' },
+      { value: 'empleado', label: 'Empleado' },
+    ]
+  }
+  return [
+    { value: '', label: 'Todos' },
+    { value: 'empleado', label: 'Empleado' },
+    { value: 'admin', label: 'Admin' },
+    { value: 'super_admin', label: 'Super admin' },
+  ]
+})
+
+const ROL_FORM_OPTIONS = computed(() => {
+  if (isAdminNotSuper.value) {
+    return [{ value: 'empleado', label: 'Empleado' }]
+  }
+  return [
+    { value: 'empleado', label: 'Empleado' },
+    { value: 'admin', label: 'Administrador' },
+    { value: 'super_admin', label: 'Super administrador' },
+  ]
+})
 
 const ROL_LABEL = {
   empleado: 'Empleado',
@@ -50,14 +76,26 @@ const ROL_LABEL = {
 
 let searchTimer = null
 
+/** Desde notificación de cambio de correo: ?usuario_id= */
+const filterUsuarioId = computed(() => {
+  const raw = route.query.usuario_id
+  if (raw == null || raw === '') return null
+  const n = Number.parseInt(String(raw), 10)
+  return Number.isFinite(n) && n > 0 ? n : null
+})
+
 async function load() {
   error.value = ''
   loading.value = true
   try {
     const params = { page: filtersPage.value, per_page: 15 }
-    if (search.value.trim()) params.q = search.value.trim()
-    if (rolFilter.value) params.rol = rolFilter.value
-    if (estadoFilter.value) params.estado = estadoFilter.value
+    if (filterUsuarioId.value != null) {
+      params.user_id = filterUsuarioId.value
+    } else {
+      if (search.value.trim()) params.q = search.value.trim()
+      if (rolFilter.value) params.rol = rolFilter.value
+      if (estadoFilter.value) params.estado = estadoFilter.value
+    }
     const res = await fetchAdminUsers(params)
     rows.value = res.data
     meta.value = res.meta
@@ -67,9 +105,29 @@ async function load() {
   } finally {
     loading.value = false
   }
+  if (filterUsuarioId.value != null) {
+    await nextTick()
+    const el = document.querySelector(`tr[data-user-id="${filterUsuarioId.value}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }
+}
+
+function clearUsuarioNotificationFilter() {
+  router.replace({ path: '/admin/configuracion/cuentas' })
 }
 
 const filtersPage = ref(1)
+
+watch(
+  () => auth.user?.rol,
+  () => {
+    if (auth.user?.rol === 'admin' && (rolFilter.value === 'admin' || rolFilter.value === 'super_admin')) {
+      rolFilter.value = ''
+      filtersPage.value = 1
+      load()
+    }
+  }
+)
 
 watch([rolFilter, estadoFilter], () => {
   filtersPage.value = 1
@@ -79,11 +137,20 @@ watch([rolFilter, estadoFilter], () => {
 watch(
   () => search.value,
   () => {
+    if (filterUsuarioId.value != null) return
     clearTimeout(searchTimer)
     searchTimer = setTimeout(() => {
       filtersPage.value = 1
       load()
     }, 320)
+  }
+)
+
+watch(
+  () => route.query.usuario_id,
+  () => {
+    filtersPage.value = 1
+    load()
   }
 )
 
@@ -234,10 +301,22 @@ const pageSummary = computed(() => {
     <header class="head">
       <div>
         <h1>Empleados y usuarios</h1>
-        <p class="lede">Alta y edición de cuentas. El equipo usa el rol «empleado» para registrar servicios.</p>
+        <p class="lede">
+          Alta y edición de cuentas. El equipo usa el rol «empleado» para registrar servicios.
+          <template v-if="isAdminNotSuper">
+            Con su rol solo puede ver y gestionar técnicos; las cuentas administrador las gestiona un super
+            administrador.
+          </template>
+        </p>
       </div>
       <button type="button" class="btn primary" @click="openCreate">+ Nuevo usuario</button>
     </header>
+
+    <p v-if="filterUsuarioId != null" class="banner focus">
+      Vista filtrada por la notificación (solicitud de correo). Usa
+      <button type="button" class="link-btn" @click="clearUsuarioNotificationFilter">ver todos los usuarios</button>
+      para volver al listado completo.
+    </p>
 
     <div class="toolbar card">
       <label class="grow">
@@ -278,7 +357,12 @@ const pageSummary = computed(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="u in rows" :key="u.id">
+            <tr
+              v-for="u in rows"
+              :key="u.id"
+              :data-user-id="u.id"
+              :class="{ 'row--focus': filterUsuarioId != null && filterUsuarioId === u.id }"
+            >
               <td>
                 <span class="name">{{ u.nombre }}</span>
               </td>
@@ -381,9 +465,7 @@ const pageSummary = computed(() => {
             <label class="field">
               <span>Rol</span>
               <select v-model="form.rol" class="input" required>
-                <option value="empleado">Empleado</option>
-                <option value="admin">Administrador</option>
-                <option value="super_admin">Super administrador</option>
+                <option v-for="o in ROL_FORM_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
               </select>
               <small v-if="fieldErrors.rol" class="err">{{ fieldErrors.rol[0] }}</small>
             </label>
@@ -490,6 +572,39 @@ h1 {
   border: 1px solid rgba(56, 189, 248, 0.35);
   color: #e0f2fe;
   margin-bottom: 1rem;
+}
+
+.banner.focus {
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #bae6fd;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.link-btn {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #7dd3fc;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.link-btn:hover {
+  color: #bae6fd;
+}
+
+.row--focus {
+  background: rgba(56, 189, 248, 0.08);
+  box-shadow: inset 0 0 0 2px rgba(56, 189, 248, 0.45);
 }
 
 .correo-solicitado {

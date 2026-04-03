@@ -42,6 +42,8 @@ const form = ref({
   description: '',
   amount: '',
   service_date: today,
+  /** Solo registro empleado: líneas de catálogo / Otro */
+  lines: [],
 })
 
 const isEmpleadoRegistro = computed(() => route.name === 'emp-registro-servicio')
@@ -80,9 +82,31 @@ function resetFormToDefaults() {
     description: '',
     amount: '',
     service_date: d,
+    lines: [],
   }
   photoFiles.value = []
   formResetKey.value += 1
+}
+
+function buildPayloadItemsFromLines(rawLines) {
+  return rawLines.map((row) => {
+    if (row.catalog_id != null && row.catalog_id !== '') {
+      const o = { catalog_id: Number(row.catalog_id), amount: Number(row.amount) }
+      const d = String(row.line_description || '').trim()
+      if (d) o.line_description = d
+      return o
+    }
+    const o = {
+      custom_name: String(row.custom_name || '').trim(),
+      amount: Number(row.amount),
+    }
+    const d = String(row.line_description || '').trim()
+    if (d) {
+      o.custom_description = d
+      o.line_description = d
+    }
+    return o
+  })
 }
 
 function validateBeforeSubmit() {
@@ -100,15 +124,52 @@ function validateBeforeSubmit() {
   else if (desc.length < 8) {
     e.description = ['Describe el trabajo con más detalle (mínimo 8 caracteres).']
   }
-  const amt = Number(form.value.amount)
-  if (Number.isNaN(amt) || amt < 0.01) {
-    e.amount = ['Indica un valor numérico mayor a cero.']
-  }
   if (!form.value.service_date) {
     e.service_date = ['Indica la fecha del servicio.']
   }
+
+  if (isEmpleadoRegistro.value) {
+    const ls = Array.isArray(form.value.lines) ? form.value.lines : []
+    if (!ls.length) {
+      e.items = ['Añade al menos un ítem del catálogo o «Otro».']
+    }
+    for (let i = 0; i < ls.length; i++) {
+      const row = ls[i]
+      const amt = Number(row.amount)
+      if (Number.isNaN(amt) || amt < 0.01) {
+        e.items = [`Revisa el importe de la línea ${i + 1}.`]
+        break
+      }
+      if (row.catalog_id == null || row.catalog_id === '') {
+        const name = String(row.custom_name || '').trim()
+        if (name.length < 2) {
+          e.items = [`Indica el nombre del servicio en la línea ${i + 1} («Otro»).`]
+          break
+        }
+      }
+    }
+  } else {
+    const amt = Number(form.value.amount)
+    if (Number.isNaN(amt) || amt < 0.01) {
+      e.amount = ['Indica un valor numérico mayor a cero.']
+    }
+  }
+
   fieldErrors.value = e
   return Object.keys(e).length === 0
+}
+
+async function refreshCatalogForCompany(cid) {
+  const id = Number(cid)
+  if (!id) {
+    catalogItems.value = []
+    return
+  }
+  try {
+    catalogItems.value = await fetchServiceCatalogActive(id)
+  } catch {
+    catalogItems.value = []
+  }
 }
 
 onMounted(async () => {
@@ -124,6 +185,7 @@ onMounted(async () => {
         description: draft.description ?? '',
         amount: draft.amount ?? '',
         service_date: draft.service_date || today,
+        lines: [],
       }
     }
   }
@@ -132,12 +194,20 @@ onMounted(async () => {
   } catch (e) {
     globalError.value = e.data?.message || 'No se pudieron cargar las empresas.'
   }
-  try {
-    catalogItems.value = await fetchServiceCatalogActive()
-  } catch {
-    catalogItems.value = []
-  }
+  await refreshCatalogForCompany(form.value.company_id)
 })
+
+watch(
+  () => form.value.company_id,
+  async (cid, prev) => {
+    await refreshCatalogForCompany(cid)
+    if (isEmpleadoRegistro.value && prev !== undefined && String(cid) !== String(prev)) {
+      form.value.lines = []
+      form.value.amount = ''
+      form.value.catalog_id = ''
+    }
+  }
+)
 
 watch(form, () => scheduleDraftPersist(), { deep: true })
 
@@ -161,7 +231,16 @@ async function onSubmit() {
       amount: Number(form.value.amount),
       service_date: form.value.service_date,
     }
-    if (form.value.catalog_id !== '' && form.value.catalog_id != null) {
+    if (isEmpleadoRegistro.value) {
+      const ls = Array.isArray(form.value.lines) ? form.value.lines : []
+      payload.items = buildPayloadItemsFromLines(ls)
+      let t = 0
+      for (const row of ls) {
+        const n = Number(row.amount)
+        if (!Number.isNaN(n)) t += n
+      }
+      payload.amount = Number(t.toFixed(2))
+    } else if (form.value.catalog_id !== '' && form.value.catalog_id != null) {
       payload.catalog_id = Number(form.value.catalog_id)
     }
     const created = await createService(

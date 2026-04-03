@@ -44,6 +44,9 @@ class PanelNotification extends Model
     /** Admin borró datos de pago del técnico (p. ej. fallo al abonar). */
     public const TYPE_EMP_DATOS_PAGO_REQUIEREN_ACTUALIZACION = 'emp_datos_pago_actualizar';
 
+    /** Técnico registró ítem «Otro» pendiente de alta en catálogo. */
+    public const TYPE_CATALOG_SUGGESTION_PENDING = 'catalog_suggestion_pending';
+
     protected $table = 'panel_notifications';
 
     /**
@@ -63,7 +66,8 @@ class PanelNotification extends Model
     {
         return match ($type) {
             self::TYPE_SERVICE_CREATED,
-            self::TYPE_ALERT_SERVICES_ZERO => 'servicios',
+            self::TYPE_ALERT_SERVICES_ZERO,
+            self::TYPE_CATALOG_SUGGESTION_PENDING => 'servicios',
             self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
             self::TYPE_EMAIL_CHANGE_REQUEST => 'empleados',
             default => 'facturas',
@@ -83,7 +87,16 @@ class PanelNotification extends Model
     {
         $meta = $meta ?? [];
 
-        if (in_array($type, [self::TYPE_EMPLEADO_PERFIL_COMPLETADO, self::TYPE_EMAIL_CHANGE_REQUEST], true)
+        // Cambio de correo: la acción (aprobar/rechazar) está en Configuración → cuentas, no en el perfil.
+        if ($type === self::TYPE_EMAIL_CHANGE_REQUEST) {
+            if (isset($meta['empleado_id']) && is_numeric($meta['empleado_id'])) {
+                return '/admin/configuracion/cuentas?usuario_id='.(int) $meta['empleado_id'];
+            }
+
+            return '/admin/configuracion/cuentas';
+        }
+
+        if ($type === self::TYPE_EMPLEADO_PERFIL_COMPLETADO
             && isset($meta['empleado_id']) && is_numeric($meta['empleado_id'])) {
             return '/admin/empleados/'.(int) $meta['empleado_id'].'/perfil';
         }
@@ -110,6 +123,7 @@ class PanelNotification extends Model
                 ? '/admin/servicios/'.$serviceId
                 : '/admin/servicios',
             self::TYPE_ALERT_SERVICES_ZERO => '/admin/servicios',
+            self::TYPE_CATALOG_SUGGESTION_PENDING => '/admin/catalogo-servicios?pendientes=1',
             self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
             self::TYPE_EMAIL_CHANGE_REQUEST => '/admin/configuracion/cuentas',
             self::TYPE_CUTOFF_APPROACHING,
@@ -123,7 +137,11 @@ class PanelNotification extends Model
     public static function typesInCategory(string $category): array
     {
         return match ($category) {
-            'servicios' => [self::TYPE_SERVICE_CREATED, self::TYPE_ALERT_SERVICES_ZERO],
+            'servicios' => [
+                self::TYPE_SERVICE_CREATED,
+                self::TYPE_ALERT_SERVICES_ZERO,
+                self::TYPE_CATALOG_SUGGESTION_PENDING,
+            ],
             'empleados' => [self::TYPE_EMPLEADO_PERFIL_COMPLETADO, self::TYPE_EMAIL_CHANGE_REQUEST],
             'facturas' => [
                 self::TYPE_INVOICE_DRAFT,

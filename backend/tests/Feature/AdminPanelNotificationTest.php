@@ -100,6 +100,26 @@ class AdminPanelNotificationTest extends TestCase
         $this->assertContains('/admin/empleados/7/perfil', $links);
     }
 
+    public function test_email_change_request_resolves_link_to_cuentas_with_usuario_id(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        PanelNotification::query()->create([
+            'user_id' => $admin->id,
+            'type' => PanelNotification::TYPE_EMAIL_CHANGE_REQUEST,
+            'message' => 'Solicitud de correo',
+            'read' => false,
+            'meta' => [
+                'empleado_id' => 12,
+                'link' => '/admin/empleados/12/perfil',
+            ],
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/admin/notifications')->assertOk()
+            ->assertJsonPath('data.0.link', '/admin/configuracion/cuentas?usuario_id=12');
+    }
+
     public function test_empleado_first_profile_completion_notifies_admins(): void
     {
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);

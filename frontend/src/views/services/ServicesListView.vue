@@ -45,6 +45,11 @@ const filters = ref({
 })
 
 const isAdmin = computed(() => isAdminPanelRole(auth.user?.rol))
+/** Técnico: editar / eliminar propios servicios (misma columna que admin). */
+const showServiceActions = computed(
+  () => isAdmin.value || auth.user?.rol === 'empleado'
+)
+const tableColspan = computed(() => (isAdmin.value ? 9 : showServiceActions.value ? 8 : 7))
 
 /** Columnas ordenables (coinciden con `sort` en la API). */
 const SORT_DEFAULT_DIR = {
@@ -72,7 +77,7 @@ function detailPath(id) {
 }
 
 function editPath(id) {
-  return `/admin/servicios/${id}/editar`
+  return isAdmin.value ? `/admin/servicios/${id}/editar` : `/empleado/servicio/${id}/editar`
 }
 
 function invoiceDetailPath(invoiceId) {
@@ -416,7 +421,7 @@ async function exportServicesCsv() {
                   Estado<span class="sort-ind" aria-hidden="true">{{ sortIndicator('status') }}</span>
                 </button>
               </th>
-              <th v-if="isAdmin" scope="col" class="actions-col">Acciones</th>
+              <th v-if="showServiceActions" scope="col" class="actions-col">Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -454,7 +459,7 @@ async function exportServicesCsv() {
               <td v-if="isAdmin">{{ s.empleado?.nombre || '—' }}</td>
               <td class="num">{{ money(s.amount) }}</td>
               <td><span class="pill" :data-st="s.status">{{ estadoLabel(s.status) }}</span></td>
-              <td v-if="isAdmin" class="actions-col actions-icons" @click.stop>
+              <td v-if="showServiceActions" class="actions-col actions-icons" @click.stop>
                 <RouterLink
                   class="icon-act"
                   :to="editPath(s.id)"
@@ -490,7 +495,7 @@ async function exportServicesCsv() {
               </td>
             </tr>
             <tr v-if="!rows.length">
-              <td :colspan="isAdmin ? 9 : 7" class="muted center empty-msg">
+              <td :colspan="tableColspan" class="muted center empty-msg">
                 No hay servicios con los filtros actuales. Prueba ampliar fechas o limpiar la búsqueda.
               </td>
             </tr>

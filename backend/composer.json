@@ -72,5 +72,8 @@
         }
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "suggest": {
+        "ext-bcmath": "Suma decimal más rápida; sin extensión se usa aritmética entera en App\\Support\\DecimalMath."
+    }
 }

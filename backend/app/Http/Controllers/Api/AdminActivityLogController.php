@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -42,6 +43,21 @@ class AdminActivityLogController extends Controller
         }
 
         $logs = $q->limit($limit)->get();
+
+        $actor = $request->user();
+        if ($actor !== null && $actor->rol === User::ROL_ADMIN) {
+            $logs = $logs->filter(function (ActivityLog $l) use ($actor) {
+                $u = $l->user;
+                if ($u === null) {
+                    return true;
+                }
+                if (! $u->isAdminEquipo()) {
+                    return true;
+                }
+
+                return $u->id === $actor->id;
+            })->values();
+        }
 
         $groups = $logs->groupBy(fn (ActivityLog $l) => (string) ($l->user_id ?? '0'));
 

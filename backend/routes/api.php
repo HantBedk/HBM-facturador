@@ -7,6 +7,8 @@ use App\Http\Controllers\Api\AdminExportController;
 use App\Http\Controllers\Api\AdminInvoiceController;
 use App\Http\Controllers\Api\AdminPanelNotificationController;
 use App\Http\Controllers\Api\AdminServiceCatalogController;
+use App\Http\Controllers\Api\AdminServiceCatalogSuggestionController;
+use App\Http\Controllers\Api\AdminTechnicianCatalogPricingController;
 use App\Http\Controllers\Api\AdminCorreoSolicitudController;
 use App\Http\Controllers\Api\AdminEmpleadoNotificacionSettingsController;
 use App\Http\Controllers\Api\AdminEmpleadoPerfilController;
@@ -65,8 +67,14 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
 
         Route::get('/admin/service-catalog', [AdminServiceCatalogController::class, 'index']);
         Route::post('/admin/service-catalog', [AdminServiceCatalogController::class, 'store']);
+        Route::get('/admin/service-catalog/technician-pricing', [AdminTechnicianCatalogPricingController::class, 'show']);
+        Route::put('/admin/service-catalog/technician-pricing', [AdminTechnicianCatalogPricingController::class, 'update']);
         Route::put('/admin/service-catalog/{service_catalog}', [AdminServiceCatalogController::class, 'update']);
         Route::patch('/admin/service-catalog/{service_catalog}/estado', [AdminServiceCatalogController::class, 'updateEstado']);
+
+        Route::get('/admin/service-catalog-suggestions', [AdminServiceCatalogSuggestionController::class, 'index']);
+        Route::post('/admin/service-catalog-suggestions/{service_catalog_suggestion}/approve', [AdminServiceCatalogSuggestionController::class, 'approve']);
+        Route::post('/admin/service-catalog-suggestions/{service_catalog_suggestion}/reject', [AdminServiceCatalogSuggestionController::class, 'reject']);
 
         Route::get('/admin/notifications/unread-count', [AdminPanelNotificationController::class, 'unreadCount']);
         Route::get('/admin/notifications', [AdminPanelNotificationController::class, 'index']);
@@ -112,6 +120,6 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::get('/services', [ServiceController::class, 'index']);
     Route::post('/services', [ServiceController::class, 'store']);
     Route::get('/services/{service}', [ServiceController::class, 'show']);
-    Route::put('/services/{service}', [ServiceController::class, 'update'])->middleware('role:admin,super_admin');
-    Route::patch('/services/{service}/archive', [ServiceController::class, 'archive'])->middleware('role:admin,super_admin');
+    Route::put('/services/{service}', [ServiceController::class, 'update']);
+    Route::patch('/services/{service}/archive', [ServiceController::class, 'archive']);
 });

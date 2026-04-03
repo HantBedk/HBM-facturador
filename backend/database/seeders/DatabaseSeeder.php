@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\AppSetting;
 use App\Models\Company;
 use App\Models\ServiceCatalog;
 use App\Models\User;
@@ -71,6 +72,8 @@ class DatabaseSeeder extends Seeder
                 'estado' => User::ESTADO_ACTIVO,
             ]
         );
+
+        AppSetting::setValue(AppSetting::KEY_TECHNICIAN_CATALOG_DISCOUNT_PERCENT, '10');
 
         $catalogSeeds = [
             ['name' => 'Revisión de equipo', 'description' => 'Inspección y diagnóstico inicial del equipo o instalación.', 'base_price' => 75000],

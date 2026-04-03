@@ -4,9 +4,11 @@ export function fetchCompanies() {
   return api('/companies').then((r) => r.data)
 }
 
-/** Catálogo activo (autocompletado registro de servicios). */
-export function fetchServiceCatalogActive() {
-  return api('/service-catalog/active').then((r) => r.data ?? [])
+/** Catálogo activo para una empresa (ítems globales + de esa empresa). */
+export function fetchServiceCatalogActive(companyId) {
+  const id = Number(companyId)
+  if (!id) return Promise.resolve([])
+  return api(`/service-catalog/active?company_id=${encodeURIComponent(id)}`).then((r) => r.data ?? [])
 }
 
 /** @param {Record<string, string|number>} [params] */
@@ -40,6 +42,42 @@ export function patchServiceCatalogEstado(id, status) {
   }).then((r) => r.data)
 }
 
+/** Descuento % sobre precio de lista del catálogo que ve el técnico (solo admin). */
+export function fetchTechnicianCatalogDiscount() {
+  return api('/admin/service-catalog/technician-pricing').then((r) => r.data)
+}
+
+export function updateTechnicianCatalogDiscount(technician_catalog_discount_percent) {
+  return api('/admin/service-catalog/technician-pricing', {
+    method: 'PUT',
+    body: JSON.stringify({ technician_catalog_discount_percent }),
+  }).then((r) => r.data)
+}
+
+/** @param {Record<string, string|number|boolean>} [params] */
+export function fetchServiceCatalogSuggestions(params = {}) {
+  const qs = new URLSearchParams()
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== '' && v !== null && v !== undefined) qs.set(k, String(v))
+  })
+  const s = qs.toString()
+  return api(`/admin/service-catalog-suggestions${s ? `?${s}` : ''}`)
+}
+
+export function approveServiceCatalogSuggestion(id, payload = {}) {
+  return api(`/admin/service-catalog-suggestions/${id}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }).then((r) => r.data)
+}
+
+export function rejectServiceCatalogSuggestion(id) {
+  return api(`/admin/service-catalog-suggestions/${id}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }).then((r) => r.data)
+}
+
 export function fetchEmpleados() {
   return api('/empleados').then((r) => r.data)
 }
@@ -63,6 +101,7 @@ export function fetchService(id) {
  */
 export function createService(payload, photoFiles = []) {
   const files = Array.isArray(photoFiles) ? photoFiles.filter((f) => f instanceof File) : []
+  const hasItems = Array.isArray(payload.items) && payload.items.length > 0
   if (files.length > 0) {
     const fd = new FormData()
     fd.append('company_id', String(payload.company_id))
@@ -71,7 +110,9 @@ export function createService(payload, photoFiles = []) {
     fd.append('description', String(payload.description ?? ''))
     fd.append('amount', String(payload.amount))
     fd.append('service_date', String(payload.service_date ?? ''))
-    if (payload.catalog_id != null && payload.catalog_id !== '') {
+    if (hasItems) {
+      fd.append('items', JSON.stringify(payload.items))
+    } else if (payload.catalog_id != null && payload.catalog_id !== '') {
       fd.append('catalog_id', String(payload.catalog_id))
     }
     for (const f of files.slice(0, 4)) {
@@ -84,6 +125,7 @@ export function createService(payload, photoFiles = []) {
   }
   const body = { ...payload }
   if (body.catalog_id === '' || body.catalog_id == null) delete body.catalog_id
+  if (!hasItems) delete body.items
   return api('/services', {
     method: 'POST',
     body: JSON.stringify(body),

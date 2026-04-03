@@ -131,6 +131,7 @@ const routes = [
       { path: 'registro-servicio', name: 'emp-registro-servicio', component: ServiceRegisterView },
       { path: 'listado-servicios', name: 'emp-listado-servicios', component: ServicesListView },
       { path: 'servicio/:id(\\d+)', name: 'emp-servicio-detalle', component: ServiceDetailView, props: true },
+      { path: 'servicio/:id(\\d+)/editar', name: 'emp-servicio-editar', component: ServiceEditView, props: true },
       { path: 'servicios/nuevo', redirect: '/empleado/registro-servicio' },
       {
         path: 'servicios/:id(\\d+)',

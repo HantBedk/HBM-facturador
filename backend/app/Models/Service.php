@@ -61,6 +61,11 @@ class Service extends Model
         return $this->belongsToMany(Invoice::class)->withTimestamps();
     }
 
+    public function items(): HasMany
+    {
+        return $this->hasMany(ServiceItem::class)->orderBy('sort_order');
+    }
+
     public function scopeVisibles($query)
     {
         return $query->whereIn('status', [self::STATUS_ACTIVO, self::STATUS_CORREGIDO]);

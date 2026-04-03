@@ -54,6 +54,18 @@ class ServiceResource extends JsonResource
                 'url' => Storage::disk('public')->url($p->path),
                 'sort_order' => $p->sort_order,
             ])->values()->all()),
+            'items' => $this->whenLoaded('items', fn () => $this->items->map(fn ($it) => [
+                'id' => $it->id,
+                'catalog_id' => $it->catalog_id,
+                'catalog_suggestion_id' => $it->catalog_suggestion_id,
+                'label' => $it->label,
+                'line_description' => $it->line_description,
+                'amount' => (string) $it->amount,
+                'sort_order' => (int) $it->sort_order,
+                'suggestion_status' => $it->relationLoaded('catalogSuggestion') && $it->catalogSuggestion
+                    ? $it->catalogSuggestion->status
+                    : null,
+            ])->values()->all()),
         ];
     }
 }
