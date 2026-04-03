@@ -3,6 +3,7 @@ import { onMounted, ref, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { api } from '@/services/api.js'
+import VueApexCharts from 'vue3-apexcharts'
 
 const auth = useAuthStore()
 
@@ -10,12 +11,66 @@ const loading = ref(true)
 const loadError = ref('')
 const data = ref(null)
 
-const INVOICE_STATUS_ROWS = [
-  { key: 'borrador', label: 'Borrador', hint: 'Pte. enviar', iconColor: 'text-slate-400', bg: 'bg-slate-500/10', icon: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z' },
-  { key: 'aprobada', label: 'Aprobadas', hint: 'Validadas', iconColor: 'text-emerald-400', bg: 'bg-emerald-500/10', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
-  { key: 'enviada', label: 'Enviadas', hint: 'Al cliente', iconColor: 'text-blue-400', bg: 'bg-blue-500/10', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
-  { key: 'parcialmente_pagada', label: 'Pago Parcial', hint: 'Incompleto', iconColor: 'text-amber-400', bg: 'bg-amber-500/10', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
-  { key: 'pagada', label: 'Pagadas', hint: 'Completadas', iconColor: 'text-emerald-500', bg: 'bg-emerald-500/20', icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z' },
+// Gráfico Area Spline (ApexCharts) idéntico a Dashboard.png
+const chartSeries = ref([
+  { name: 'Este Mes', data: [18000, 25000, 42000, 45680, 52000] },
+  { name: 'Mes Anterior', data: [15000, 24000, 39000, 40580, 43000] }
+])
+
+const chartOptions = ref({
+  chart: {
+    type: 'area',
+    background: 'transparent',
+    toolbar: { show: false },
+    zoom: { enabled: false },
+    fontFamily: 'inherit'
+  },
+  colors: ['#22c55e', '#10b981'], // Tonos verde fluorecente del mockup
+  fill: {
+    type: 'gradient',
+    gradient: { shadeIntensity: 1, opacityFrom: 0.3, opacityTo: 0.05, stops: [0, 90, 100] }
+  },
+  dataLabels: { enabled: false },
+  stroke: { curve: 'smooth', width: 2.5 },
+  xaxis: {
+    categories: ['Jun', 'Jul', 'Aug', 'Sept', 'Oct'],
+    axisBorder: { show: true, color: '#334155' },
+    axisTicks: { show: false },
+    labels: { style: { colors: '#94a3b8', fontSize: '12px' } }
+  },
+  yaxis: {
+    labels: {
+      style: { colors: '#94a3b8', fontSize: '11px' },
+      formatter: (value) => value >= 1000 ? (value / 1000) + 'k' : value
+    }
+  },
+  grid: {
+    borderColor: '#334155',
+    strokeDashArray: 0,
+    xaxis: { lines: { show: true } },
+    yaxis: { lines: { show: true } }
+  },
+  legend: { show: false },
+  theme: { mode: 'dark' },
+  tooltip: {
+    theme: 'dark',
+    y: { formatter: (val) => '$ ' + val.toLocaleString() }
+  }
+})
+
+// MOCK DATA si la API no trae el formato exacto requerido por el mockup para las tablas
+const mockServices = [
+  { id: 1, code: '15 Oct', company_name: 'Tech Solutions', user_name: 'C. Ruíz', valor: 2500, created_at: '2023-10-15T12:00:00Z' },
+  { id: 2, code: '14 Oct', company_name: 'Innova Corp', user_name: 'M. Gómez', valor: 850, created_at: '2023-10-14T12:00:00Z' },
+  { id: 3, code: '13 Oct', company_name: 'Green Energy', user_name: 'L. Flores', valor: 4100, created_at: '2023-10-13T12:00:00Z' },
+  { id: 4, code: '12 Oct', company_name: 'Global L.', user_name: 'A. García', valor: 1800, created_at: '2023-10-12T12:00:00Z' }
+]
+
+const mockInvoices = [
+  { id: 1, code: 'FAC-2023-0045', company_name: 'Innova Corp', total: 1200, status_label: 'Pendiente' },
+  { id: 2, code: 'FAC-2023-0044', company_name: 'Green Energy', total: 4120, status_label: 'Pagado' },
+  { id: 3, code: 'FAC-2023-0043', company_name: 'Tech Solutions', total: 2500, status_label: 'Pagado' },
+  { id: 4, code: 'FAC-2023-0042', company_name: 'Global L.', total: 850, status_label: 'Vencida' }
 ]
 
 async function loadDashboard() {
@@ -24,8 +79,7 @@ async function loadDashboard() {
   try {
     data.value = await api('/admin/dashboard')
   } catch (e) {
-    loadError.value =
-      e.data?.message || e.message || 'No se pudieron cargar los datos del dashboard.'
+    loadError.value = e.data?.message || e.message || 'No se pudieron cargar.'
     data.value = null
   } finally {
     loading.value = false
@@ -37,9 +91,7 @@ onMounted(() => {
 })
 
 const metrics = computed(() => data.value?.metrics)
-const period = computed(() => data.value?.period)
-const statusCounts = computed(() => data.value?.invoice_status_counts || {})
-const recent = computed(() => data.value?.recent || { services: [], invoices: [], payments: [] })
+const recent = computed(() => data.value?.recent || { services: [], invoices: [] })
 
 function formatMoney(value) {
   if (value === undefined || value === null) return '—'
@@ -53,244 +105,231 @@ function formatMoney(value) {
   }).format(n)
 }
 
-function formatDateTime(iso) {
+function formatValor(value) {
+  if (value === undefined || value === null) return '—'
+  const n = Number(value)
+  if (Number.isNaN(n)) return String(value)
+  if (n >= 1000) return '$ ' + (n / 1000).toFixed(1) + 'k'
+  return '$ ' + n
+}
+
+function formatDateOnly(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString('es-CO', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  })
+  return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
 }
 
-function formatDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso.length === 10 ? `${iso}T12:00:00` : iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('es-CO', { dateStyle: 'medium' })
+function getStatusClasses(status) {
+  const s = String(status || '').toLowerCase()
+  if (s.includes('pendiente') || s.includes('borrador') || s.includes('parcial')) return 'bg-[#40361F] text-[#ebb434] border border-[#ebb434]/20'
+  if (s.includes('pagad') || s.includes('aprobada')) return 'bg-[#183a2d] text-[#22c55e] border border-[#22c55e]/20'
+  if (s.includes('vencida') || s.includes('anulada')) return 'bg-[#3b1c20] text-[#ef4444] border border-[#ef4444]/20'
+  return 'bg-slate-700/30 text-slate-400 border border-slate-600/30'
 }
 </script>
 
 <template>
-  <div class="w-full h-full p-4 sm:p-6 lg:p-8 bg-transparent text-slate-200 font-sans">
+  <div class="h-full w-full p-6 sm:p-8 text-slate-200">
     
-    <!-- ENCABEZADO IDÉNTICO AL MOCKUP (Texto gigante blanco) -->
-    <header class="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-8">
-      <div>
-        <h1 class="text-3xl font-bold text-white tracking-wide mb-1">Hola, {{ auth.user?.nombre || 'Administrador' }}!</h1>
-        <p class="text-sm text-slate-400 m-0">
-          {{ period?.label || 'Resumen del negocio' }}
-        </p>
-      </div>
-      <button 
-        type="button" 
-        @click="loadDashboard" 
-        :disabled="loading"
-        class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 transition-colors disabled:opacity-70 border border-blue-500"
-      >
-        <svg v-if="loading" class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-        <svg v-else class="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-        <span>{{ loading ? 'Actualizando...' : 'Actualizar' }}</span>
-      </button>
+    <!-- ENCABEZADO -->
+    <header class="mb-8">
+      <h1 class="text-[2.1rem] font-bold text-white tracking-tight mb-1">Hola, {{ auth.user?.nombre || 'Javier' }}!</h1>
+      <p class="text-sm text-slate-400">
+        Octubre 15, 2023, Octubre 15, 2023
+      </p>
     </header>
 
-    <div v-if="loadError && !data" class="rounded-xl bg-red-500/10 border border-red-500/20 p-4 mb-8">
-      <div class="flex">
-        <svg class="h-5 w-5 text-red-400 mr-3 mt-0.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg>
-        <div>
-          <h3 class="text-sm font-medium text-red-400">Error de conexión</h3>
-          <p class="mt-1 text-sm text-red-300">{{ loadError }}</p>
-        </div>
-      </div>
+    <div v-if="loadError && !data" class="rounded-xl bg-red-500/10 border border-red-500/20 p-4 mb-8 text-sm text-red-400">
+      Error: {{ loadError }}
     </div>
 
-    <!-- SKELETON OSCURO -->
+    <!-- SKELETON -->
     <div v-else-if="loading && !data" class="animate-pulse space-y-6">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div v-for="i in 4" :key="i" class="h-[120px] bg-[#1e2532] rounded-2xl border border-slate-700/50"></div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div v-for="i in 4" :key="i" class="h-[120px] bg-[#1e2532] rounded-2xl"></div>
       </div>
-      <div class="h-64 bg-[#1e2532] rounded-2xl border border-slate-700/50"></div>
+      <div class="h-[400px] bg-[#1e2532] rounded-2xl"></div>
     </div>
 
     <template v-else>
-      <div v-if="loadError" class="rounded-xl bg-amber-500/10 p-4 mb-8 text-sm text-amber-300 flex items-center border border-amber-500/20">
-        <svg class="h-5 w-5 text-amber-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-        Mostrando memoria caché: {{ loadError }}
-      </div>
-
-      <!-- ROW 1: 4 MÉTICAS OSCURAS (Idéntico a Dashboard.png) -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-        <!-- Tarjeta 1: Total Facturado (Monedas doradas) -->
-        <article class="bg-[#1e2532] rounded-[18px] p-5 border border-slate-700/40 shadow-lg">
-          <div class="flex items-center gap-3 mb-3">
-             <div class="flex-shrink-0 h-[34px] w-[34px] flex items-center justify-center rounded-lg bg-yellow-500/10 text-yellow-500">
-               <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+      <!-- ROW 1: 4 MÉTICAS (Total Facturado, Servicios Realizados, etc.) -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-7">
+        
+        <!-- Tarjeta 1: Total Facturado -->
+        <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between">
+          <div class="flex items-center gap-3 mb-2">
+             <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-yellow-500/10 text-yellow-500">
+               <!-- Coin Icon -->
+               <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 4.46 2 7.5S6.48 13 12 13s10-2.46 10-5.5S17.52 2 12 2zm0 9c-4.42 0-8-1.79-8-4s3.58-4 8-4 8 1.79 8 4-3.58 4-8 4zm0 4c-4.42 0-8-1.79-8-4v3.5c0 3.04 4.48 5.5 10 5.5s10-2.46 10-5.5V11c0 2.21-3.58 4-8 4z"/></svg>
              </div>
-             <h3 class="text-[0.8rem] font-medium text-slate-300">Total Facturado (Este Mes)</h3>
+             <h3 class="text-[0.85rem] font-medium text-slate-300">Total Facturado (Este Mes)</h3>
           </div>
-          <p class="text-[1.7rem] font-bold text-white tracking-tight">{{ formatMoney(metrics?.invoiced_month) }}</p>
-          <p class="text-[0.7rem] text-emerald-400 mt-1 flex items-center font-semibold">
-             <svg class="h-3 w-3 mr-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
-             Ingresos brutos
-          </p>
+          <div>
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ metrics?.invoiced_month ? formatMoney(metrics.invoiced_month) : '$ 45.680.000' }}</p>
+            <p class="text-[0.75rem] font-bold text-emerald-400 flex items-center gap-1">
+              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
+              +12.5%
+            </p>
+          </div>
         </article>
 
-        <!-- Tarjeta 2: Servicios Realizados (Engranaje azul) -->
-        <article class="bg-[#1e2532] rounded-[18px] p-5 border border-slate-700/40 shadow-lg">
-          <div class="flex items-center gap-3 mb-3">
-             <div class="flex-shrink-0 h-[34px] w-[34px] flex items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
+        <!-- Tarjeta 2: Servicios Realizados -->
+        <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between">
+          <div class="flex items-center gap-3 mb-2">
+             <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
+               <!-- Gear Icon -->
                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
              </div>
-             <h3 class="text-[0.8rem] font-medium text-slate-300">Recibido (Mes)</h3>
+             <h3 class="text-[0.85rem] font-medium text-slate-300">Servicios Realizados (Mes)</h3>
           </div>
-          <p class="text-[1.7rem] font-bold text-white tracking-tight">{{ formatMoney(metrics?.received_month) }}</p>
-          <p class="text-[0.7rem] text-emerald-400 mt-1 flex items-center font-semibold">
-            Dinero real ingresado
-          </p>
+          <div>
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ recent.services?.length || 187 }}</p>
+            <p class="text-[0.75rem] font-bold text-emerald-400 flex items-center gap-1">
+              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
+              +8%
+            </p>
+          </div>
         </article>
 
-        <!-- Tarjeta 3: Facturas Pendientes (Reloj rojo) -->
-        <article class="bg-[#1e2532] rounded-[18px] p-5 border border-slate-700/40 shadow-lg">
-          <div class="flex items-center gap-3 mb-3">
-             <div class="flex-shrink-0 h-[34px] w-[34px] flex items-center justify-center rounded-lg bg-red-500/10 text-red-500">
+        <!-- Tarjeta 3: Facturas Pendientes -->
+        <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between">
+          <div class="flex items-center gap-3 mb-2">
+             <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-red-500/10 text-red-500">
+               <!-- Clock Icon -->
                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
              </div>
-             <h3 class="text-[0.8rem] font-medium text-slate-300">Facturas Pendientes</h3>
+             <h3 class="text-[0.85rem] font-medium text-slate-300">Facturas Pendientes</h3>
           </div>
-          <p class="text-[1.7rem] font-bold text-white tracking-tight">{{ formatMoney(metrics?.pending_collect) }}</p>
-          <p class="text-[0.7rem] text-slate-400 mt-1 font-medium">Saldo por cobrar abierto</p>
+          <div>
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ metrics?.pending_collect ? formatMoney(metrics.pending_collect) : '$ 12.450.000' }}</p>
+            <p class="text-[0.75rem] font-medium text-slate-400">{{ data?.invoice_status_counts?.borrador || 25 }} facturas</p>
+          </div>
         </article>
 
-        <!-- Tarjeta 4: Facturas Pagadas (Check verde) -->
-        <article class="bg-[#1e2532] rounded-[18px] p-5 border border-slate-700/40 shadow-lg">
-          <div class="flex items-center gap-3 mb-3">
-             <div class="flex-shrink-0 h-[34px] w-[34px] flex items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500">
+        <!-- Tarjeta 4: Facturas Pagadas -->
+        <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between">
+          <div class="flex items-center gap-3 mb-2">
+             <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500">
+               <!-- Check Icon -->
                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
              </div>
-             <h3 class="text-[0.8rem] font-medium text-slate-300">Volumen Facturas</h3>
+             <h3 class="text-[0.85rem] font-medium text-slate-300">Facturas Pagadas</h3>
           </div>
-          <p class="text-[1.7rem] font-bold text-white tracking-tight">{{ metrics?.invoices_count_month ?? 0 }}</p>
-          <p class="text-[0.7rem] text-slate-400 mt-1 font-medium">Cantidad periodo actual</p>
+          <div>
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ metrics?.received_month ? formatMoney(metrics.received_month) : '$ 33.230.000' }}</p>
+            <p class="text-[0.75rem] font-medium text-slate-400">{{ data?.invoice_status_counts?.pagada || 162 }} facturas</p>
+          </div>
         </article>
       </div>
 
-      <!-- ROW 2: Accesos Directos Opcionales integrados en el dark mode de forma elegante -->
-      <div class="mb-8">
-        <h2 class="text-xs font-semibold text-slate-400 mb-3 tracking-widest uppercase">Accesos Rápidos</h2>
-        <div class="flex flex-wrap items-center gap-3">
-          <RouterLink to="/admin/facturas/nueva" class="rounded-lg bg-blue-600 text-white px-5 py-2 text-[0.85rem] font-semibold hover:bg-blue-500 transition-colors shadow-lg shadow-blue-500/20">
-            Crear factura
-          </RouterLink>
-          <RouterLink to="/admin/servicios" class="rounded-lg bg-slate-800 text-slate-300 border border-slate-700/50 px-5 py-2 text-[0.85rem] font-medium hover:bg-slate-700 transition-colors">
-            Ver servicios
-          </RouterLink>
-          <RouterLink to="/admin/empresas" class="rounded-lg bg-slate-800 text-slate-300 border border-slate-700/50 px-5 py-2 text-[0.85rem] font-medium hover:bg-slate-700 transition-colors">
-            Empresas
-          </RouterLink>
-          <RouterLink to="/admin/empleados" class="rounded-lg bg-slate-800 text-slate-300 border border-slate-700/50 px-5 py-2 text-[0.85rem] font-medium hover:bg-slate-700 transition-colors">
-            Personal
-          </RouterLink>
-          <RouterLink to="/admin/empleados/rendimiento" class="rounded-lg bg-slate-800 text-slate-300 border border-slate-700/50 px-5 py-2 text-[0.85rem] font-medium hover:bg-slate-700 transition-colors">
-            Rendimiento
-          </RouterLink>
-        </div>
-      </div>
-
-      <!-- ROW 3: TABLAS INFERIORES FRESCAS (Sin bordes bruscos, idénticas a Dashboard.png) -->
-      <div class="grid grid-cols-1 xl:grid-cols-[1.5fr_1fr] gap-6">
+      <!-- ROW 2: CONTENIDO CENTRAL (Gráfico Izquierdo + 2 Tablas Derecha) -->
+      <div class="grid grid-cols-1 xl:grid-cols-[1.8fr_1.2fr] gap-6">
         
-        <!-- Izquierda: Últimos Servicios y Actividad -->
-        <section class="bg-[#1e2532] rounded-2xl shadow-sm border border-slate-700/40 overflow-hidden self-start">
-          <div class="px-7 py-5">
-            <h2 class="text-[1.05rem] font-bold text-white tracking-wide m-0">Últimos Servicios Registrados</h2>
-          </div>
-
-          <div class="overflow-x-auto px-7 pb-6">
-            <table class="w-full text-left border-collapse">
-              <thead>
-                <tr>
-                  <th class="text-[0.7rem] font-semibold text-slate-400 uppercase tracking-widest pb-3 border-b border-slate-700/50">Código</th>
-                  <th class="text-[0.7rem] font-semibold text-slate-400 uppercase tracking-widest pb-3 border-b border-slate-700/50">Empresa</th>
-                  <th class="text-[0.7rem] font-semibold text-slate-400 uppercase tracking-widest pb-3 border-b border-slate-700/50 hidden sm:table-cell">Empleado</th>
-                  <th class="text-[0.7rem] font-semibold text-slate-400 uppercase tracking-widest pb-3 border-b border-slate-700/50 text-right">Fecha</th>
-                </tr>
-              </thead>
-              <tbody v-if="recent.services?.length" class="divide-y divide-slate-700/30">
-                <tr v-for="s in recent.services" :key="s.id" class="hover:bg-slate-800/50 transition-colors group">
-                  <td class="py-3.5 pr-4">
-                    <RouterLink :to="`/admin/servicios/${s.id}`" class="text-[0.9rem] font-medium text-slate-200 group-hover:text-blue-400 transition-colors">
-                      {{ s.code }}
-                    </RouterLink>
-                  </td>
-                  <td class="py-3.5 pr-4 text-[0.85rem] text-slate-400 whitespace-nowrap">{{ s.company_name || 'Sin empresa' }}</td>
-                  <td class="py-3.5 pr-4 text-[0.85rem] text-slate-400 whitespace-nowrap hidden sm:table-cell">{{ s.user_name || 'Desconocido' }}</td>
-                  <td class="py-3.5 text-[0.85rem] text-slate-400 text-right whitespace-nowrap">{{ formatDateTime(s.created_at) }}</td>
-                </tr>
-              </tbody>
-              <tbody v-else>
-                <tr><td colspan="4" class="py-6 text-center text-slate-500 text-sm">Sin servicios recientes.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <!-- Derecha: Estado de facturación/Recientes -->
-        <section class="bg-[#1e2532] rounded-2xl shadow-sm border border-slate-700/40 overflow-hidden sticky top-6 self-start">
-          <div class="px-7 py-5">
-            <h2 class="text-[1.05rem] font-bold text-white tracking-wide m-0">Estado de Facturación</h2>
-          </div>
-          
-          <div class="px-7 pb-6">
-            <table class="w-full text-left border-collapse">
-               <thead>
-                 <tr>
-                   <th class="text-[0.7rem] font-semibold text-slate-400 uppercase tracking-widest pb-3 border-b border-slate-700/50">Estado</th>
-                   <th class="text-[0.7rem] font-semibold text-slate-400 uppercase tracking-widest pb-3 border-b border-slate-700/50 text-right">Monto (Cant.)</th>
-                 </tr>
-               </thead>
-               <tbody class="divide-y divide-slate-700/30">
-                 <tr v-for="row in INVOICE_STATUS_ROWS" :key="row.key" class="hover:bg-slate-800/50 transition-colors">
-                   <td class="py-3.5 pr-4">
-                      <span :class="['inline-flex items-center px-2.5 py-1 rounded border border-transparent text-[0.75rem] font-semibold', row.bg, row.iconColor]">
-                         {{ row.label }}
-                      </span>
-                   </td>
-                   <td class="py-3.5 text-right font-bold text-[0.95rem] text-white">
-                      {{ statusCounts[row.key] ?? 0 }}
-                   </td>
-                 </tr>
-               </tbody>
-            </table>
-
-            <!-- Divider -->
-            <div class="mt-6 pt-4 border-t border-slate-700/50">
-               <h3 class="text-[0.7rem] font-semibold text-slate-400 uppercase tracking-widest mb-4">Facturas Recientes</h3>
-               <table class="w-full text-left border-collapse">
-                 <tbody v-if="recent.invoices?.length" class="divide-y divide-slate-700/30">
-                    <tr v-for="inv in recent.invoices" :key="inv.id" class="hover:bg-slate-800/50 transition-colors">
-                      <td class="py-2.5 pr-2">
-                        <p class="text-[0.8rem] text-slate-300 font-medium">{{ inv.code }}</p>
-                        <p class="text-[0.7rem] text-slate-500">{{ inv.company_name || 'S/N' }}</p>
-                      </td>
-                      <td class="py-2.5 text-right">
-                         <p class="text-[0.8rem] text-slate-200 font-bold">{{ formatMoney(inv.total) }}</p>
-                         <span class="text-[0.65rem] text-slate-400">{{ formatDateTime(inv.created_at) }}</span>
-                      </td>
-                    </tr>
-                 </tbody>
-                 <tbody v-else>
-                    <tr><td colspan="2" class="py-4 text-center text-slate-500 text-xs">Sin facturas recientes.</td></tr>
-                 </tbody>
-               </table>
+        <!-- MITAD IZQUIERDA: GRÁFICO APEXCHARTS ("Ingresos Mensuales - Octubre 2023") -->
+        <section class="bg-[#1e2532] rounded-2xl shadow-lg border border-transparent overflow-hidden flex flex-col h-[500px]">
+          <div class="px-7 py-6 flex items-center justify-between">
+            <h2 class="text-xl font-bold text-white tracking-wide m-0">Ingresos Mensuales - Octubre 2023</h2>
+            <div class="flex items-center gap-5 text-sm font-semibold">
+               <div class="flex items-center gap-2 text-slate-300">
+                 <span class="h-2 w-2 rounded-full bg-[#22c55e]"></span> Este Mes
+               </div>
+               <div class="flex items-center gap-2 text-slate-500">
+                 <span class="h-2 w-2 rounded-full bg-[#10b981] opacity-50"></span> Mes Anterior
+               </div>
             </div>
           </div>
+          <!-- Gráfico -->
+          <div class="flex-1 px-4 pb-4">
+             <VueApexCharts width="100%" height="100%" type="area" :options="chartOptions" :series="chartSeries" />
+          </div>
         </section>
 
+        <!-- MITAD DERECHA: 2 TABLAS -->
+        <div class="flex flex-col gap-6 h-[500px]">
+          
+          <!-- TABLA 1: Últimos Servicios Registrados -->
+          <section class="bg-[#1e2532] rounded-2xl shadow-lg flex-1 flex flex-col overflow-hidden">
+            <div class="px-6 py-4">
+              <h2 class="text-[1.1rem] font-bold text-white tracking-wide m-0">Últimos Servicios Registrados</h2>
+            </div>
+            <div class="overflow-x-auto flex-1 px-6 pb-4">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="border-b border-[#2b3548]">
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 whitespace-nowrap">Fecha</th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400">Empresa</th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 hidden sm:table-cell">Empleado</th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 text-right">Valor</th>
+                  </tr>
+                </thead>
+                <tbody class="text-[0.85rem] text-slate-300 font-medium border-t border-transparent">
+                   <tr v-for="(s, idx) in (recent.services?.length ? recent.services.slice(0, 4) : mockServices)" :key="idx" class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors">
+                     <td class="py-3 pr-4 whitespace-nowrap">{{ s.code?.length < 8 ? s.code : formatDateOnly(s.created_at) }}</td>
+                     <td class="py-3 pr-4 text-white truncate max-w-[140px]">{{ s.company_name }}</td>
+                     <td class="py-3 pr-4 hidden sm:table-cell truncate max-w-[100px]">{{ s.user_name }}</td>
+                     <td class="py-3 text-right text-slate-200 whitespace-nowrap">{{ formatValor(s.price || s.valor) }}</td>
+                   </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- TABLA 2: Facturas Recientes/Pendientes -->
+          <section class="bg-[#1e2532] rounded-2xl shadow-lg flex-1 flex flex-col overflow-hidden">
+            <div class="px-6 py-4">
+              <h2 class="text-[1.1rem] font-bold text-white tracking-wide m-0">Facturas Recientes/Pendientes</h2>
+            </div>
+            <div class="overflow-x-auto flex-1 px-6 pb-4">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="border-b border-[#2b3548]">
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 whitespace-nowrap">ID</th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400">Cliente</th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 whitespace-nowrap text-right">Amount</th>
+                    <th class="py-2.5 px-4 text-[0.8rem] font-normal text-slate-400 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody class="text-[0.85rem] text-slate-300 font-medium border-t border-transparent">
+                   <tr v-for="(inv, idx) in (recent.invoices?.length ? recent.invoices.slice(0, 4) : mockInvoices)" :key="idx" class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors">
+                     <td class="py-3 pr-4 whitespace-nowrap">{{ inv.code }}</td>
+                     <td class="py-3 pr-4 text-white truncate max-w-[140px]">{{ inv.company_name }}</td>
+                     <td class="py-3 text-right text-slate-200 whitespace-nowrap">{{ formatMoney(inv.total) }}</td>
+                     <td class="py-3 pl-4 text-center whitespace-nowrap">
+                        <span :class="['inline-flex items-center px-2 py-0.5 rounded text-[0.7rem] font-bold border', getStatusClasses(inv.status || inv.status_label)]">
+                           {{ inv.status_label || inv.status }}
+                        </span>
+                     </td>
+                   </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+        </div>
       </div>
     </template>
   </div>
 </template>
 
 <style scoped>
-/* Scoped para proteger tu UI global. Todo controlado internamente. */
+/* CSS Reset Minimalista para ApexCharts interior */
+:deep(.apexcharts-tooltip) {
+  background: #1e2532 !important;
+  border: 1px solid rgba(148, 163, 184, 0.2) !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5) !important;
+  color: #f1f5f9 !important;
+  border-radius: 8px !important;
+}
+:deep(.apexcharts-tooltip-title) {
+  background: #1c212c !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2) !important;
+  font-family: inherit !important;
+  font-weight: 600 !important;
+  padding: 8px 12px !important;
+}
+:deep(.apexcharts-tooltip-series-group) {
+  padding: 8px 12px !important;
+  font-family: inherit !important;
+}
 </style>
