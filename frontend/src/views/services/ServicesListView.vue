@@ -437,20 +437,22 @@ async function exportServicesCsv() {
               @keydown.enter.prevent="onRowEnter(s.id)"
             >
               <td class="code-cell">
-                <RouterLink v-if="isAdmin" class="link" :to="detailPath(s.id)" @click.stop>{{ s.code }}</RouterLink>
-                <span v-else class="link">{{ s.code }}</span>
-                <template v-if="isAdmin && s.invoices?.length">
-                  <RouterLink
-                    v-for="inv in s.invoices"
-                    :key="inv.id"
-                    class="link link-invoice code-cell__invoice"
-                    :to="invoiceDetailPath(inv.id)"
-                    :title="'Ver factura ' + inv.code"
-                    @click.stop
-                  >
-                    {{ inv.code }}
-                  </RouterLink>
-                </template>
+                <div class="code-cell-inner">
+                  <RouterLink v-if="isAdmin" class="link" :to="detailPath(s.id)" @click.stop>{{ s.code }}</RouterLink>
+                  <span v-else class="link">{{ s.code }}</span>
+                  <template v-if="isAdmin && s.invoices?.length">
+                    <RouterLink
+                      v-for="inv in s.invoices"
+                      :key="inv.id"
+                      class="link link-invoice code-cell__invoice"
+                      :to="invoiceDetailPath(inv.id)"
+                      :title="'Ver factura ' + inv.code"
+                      @click.stop
+                    >
+                      {{ inv.code }}
+                    </RouterLink>
+                  </template>
+                </div>
               </td>
               <td>{{ formatDate(s.service_date) }}</td>
               <td>{{ s.company?.nombre || '—' }}</td>
@@ -459,39 +461,41 @@ async function exportServicesCsv() {
               <td v-if="isAdmin">{{ s.empleado?.nombre || '—' }}</td>
               <td class="num">{{ money(s.amount) }}</td>
               <td><span class="pill" :data-st="s.status">{{ estadoLabel(s.status) }}</span></td>
-              <td v-if="showServiceActions" class="actions-col actions-icons" @click.stop>
-                <RouterLink
-                  class="icon-act"
-                  :to="editPath(s.id)"
-                  title="Editar servicio"
-                  aria-label="Editar servicio"
-                >
-                  <svg class="icon-svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                    />
-                  </svg>
-                </RouterLink>
-                <button
-                  type="button"
-                  class="icon-act icon-act--danger"
-                  :disabled="archivingId === s.id || s.status === 'eliminado'"
-                  title="Eliminar servicio (marcar como eliminado)"
-                  aria-label="Eliminar servicio"
-                  @click="openDeleteModal(s)"
-                >
-                  <svg class="icon-svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
+              <td v-if="showServiceActions" class="actions-col" @click.stop>
+                <div class="actions-icons">
+                  <RouterLink
+                    class="icon-act"
+                    :to="editPath(s.id)"
+                    title="Editar servicio"
+                    aria-label="Editar servicio"
+                  >
+                    <svg class="icon-svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                      />
+                    </svg>
+                  </RouterLink>
+                  <button
+                    type="button"
+                    class="icon-act icon-act--danger"
+                    :disabled="archivingId === s.id || s.status === 'eliminado'"
+                    title="Eliminar servicio (marcar como eliminado)"
+                    aria-label="Eliminar servicio"
+                    @click="openDeleteModal(s)"
+                  >
+                    <svg class="icon-svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      />
+                    </svg>
+                  </button>
+                </div>
               </td>
             </tr>
             <tr v-if="!rows.length">
@@ -684,6 +688,8 @@ async function exportServicesCsv() {
   min-width: 0;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  /* Evita que el borde derecho de la última columna se recorte 1px con el scroll. */
+  padding-inline-end: 2px;
 }
 
 .meta-line {
@@ -694,20 +700,41 @@ async function exportServicesCsv() {
 .table {
   width: 100%;
   border-collapse: collapse;
+  border-spacing: 0;
   font-size: 0.9rem;
 }
 
 .table th,
 .table td {
   padding: 0.55rem 0.45rem;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
   text-align: left;
   vertical-align: top;
+}
+
+/* Una línea continua por fila (evita saltos al usar flex u otros displays en celdas sueltas). */
+.table thead tr {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.42);
+}
+
+.table thead th {
+  border-bottom: none;
+}
+
+.table tbody tr {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.table tbody td {
+  border-bottom: none;
 }
 
 .table th {
   color: #94a3b8;
   font-weight: 600;
+}
+
+.table thead th:first-child {
+  white-space: nowrap;
 }
 
 .th-sort {
@@ -790,25 +817,44 @@ async function exportServicesCsv() {
   text-decoration: underline;
 }
 
+/* No usar flex en el <td>: rompe la altura de fila y desalinea bordes horizontales. */
 .code-cell {
+  vertical-align: top;
+}
+
+.code-cell-inner {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.2rem;
 }
 
+/* Código del servicio en una sola línea (el guion no debe partir SERV-…). */
+.code-cell-inner > :first-child {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .code-cell__invoice {
   font-size: 0.8rem;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .actions-col {
   white-space: nowrap;
+  vertical-align: middle;
+  width: 1%;
+}
+
+.table thead th.actions-col {
+  vertical-align: bottom;
 }
 
 .actions-icons {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.15rem;
 }
 

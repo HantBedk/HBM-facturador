@@ -102,6 +102,9 @@ function buildPayloadItemsFromLines(rawLines) {
       custom_name: String(row.custom_name || '').trim(),
       amount: Number(row.amount),
     }
+    if (row.propose_catalog === true) {
+      o.propose_catalog = true
+    }
     const d = String(row.line_description || '').trim()
     if (d) {
       o.custom_description = d

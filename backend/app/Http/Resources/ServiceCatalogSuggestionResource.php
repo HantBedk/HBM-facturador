@@ -13,7 +13,6 @@ class ServiceCatalogSuggestionResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'company_id' => $this->company_id,
             'user_id' => $this->user_id,
             'name' => $this->name,
             'description' => $this->description,
@@ -22,10 +21,6 @@ class ServiceCatalogSuggestionResource extends JsonResource
             'resolved_catalog_id' => $this->resolved_catalog_id,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
-            'company' => $this->whenLoaded('company', fn () => [
-                'id' => $this->company->id,
-                'nombre' => $this->company->nombre,
-            ]),
             'user' => $this->whenLoaded('user', fn () => [
                 'id' => $this->user->id,
                 'nombre' => $this->user->nombre,

@@ -4,7 +4,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
 import { fetchCompanies, fetchEmpleados } from '@/services/servicesApi.js'
-import { fetchEmpleadoHistorialAdmin, fetchMyHistorial } from '@/services/employeeHistorialApi.js'
+import { fetchEmpleadoHistorialAdmin } from '@/services/employeeHistorialApi.js'
 
 const props = defineProps({
   /** Solo admin: id del empleado en la ruta dinámica */
@@ -128,22 +128,18 @@ async function loadHistorial() {
   error.value = ''
   payload.value = null
 
-  if (isAdmin.value) {
-    const uid = adminTargetUserId()
-    if (!uid) {
-      payload.value = null
-      return
-    }
+  if (!isAdmin.value) return
+
+  const uid = adminTargetUserId()
+  if (!uid) {
+    payload.value = null
+    return
   }
 
   loading.value = true
   try {
     const p = historialParams()
-    if (isAdmin.value) {
-      payload.value = await fetchEmpleadoHistorialAdmin(adminTargetUserId(), p)
-    } else {
-      payload.value = await fetchMyHistorial(p)
-    }
+    payload.value = await fetchEmpleadoHistorialAdmin(uid, p)
   } catch (e) {
     error.value = e.data?.message || e.message || 'No se pudo cargar el historial.'
   } finally {
@@ -173,8 +169,6 @@ function updateRouteQuery() {
       params: { userId: selectedEmpleadoId.value },
       query: q,
     })
-  } else if (!isAdmin.value) {
-    router.replace({ path: '/empleado/historial', query: q })
   }
 }
 
@@ -237,12 +231,6 @@ onMounted(async () => {
       })
       return
     }
-  } else if (route.path === '/empleado/historial' && (route.query.year == null || route.query.month == null)) {
-    await router.replace({
-      path: '/empleado/historial',
-      query: buildQueryFromState(),
-    })
-    return
   }
   await loadHistorial()
 })

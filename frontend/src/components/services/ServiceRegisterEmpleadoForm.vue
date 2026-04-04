@@ -125,6 +125,7 @@ function addCatalogLine(item) {
       custom_name: '',
       line_description: descFromCatalog(item),
       amount: base,
+      propose_catalog: false,
     }
   } else {
     row = {
@@ -134,6 +135,8 @@ function addCatalogLine(item) {
       custom_name: label,
       line_description: descFromCatalog(item),
       amount: base,
+      /** Plantilla sin id de BD: no es «Otro» explícito; no proponer al catálogo. */
+      propose_catalog: false,
     }
   }
   patch(syncTypeAndAmount([...lines.value, row]))
@@ -148,6 +151,8 @@ function addOtherLine() {
     custom_name: '',
     line_description: '',
     amount: '',
+    /** Solo líneas añadidas con «Otro…» generan propuesta de catálogo global. */
+    propose_catalog: true,
   }
   patch(syncTypeAndAmount([...lines.value, row]))
   afterLineAdded()
@@ -389,9 +394,20 @@ const totalDisplay = computed(() => {
         <div class="mb-2 flex items-start justify-between gap-2">
           <div>
             <p class="text-sm font-semibold text-slate-200">
-              {{ row.catalog_id != null ? row.label : 'Otro (catálogo)' }}
+              {{
+                row.catalog_id != null
+                  ? row.label
+                  : row.propose_catalog
+                    ? 'Otro — nuevo ítem'
+                    : 'Plantilla (sin catálogo en servidor)'
+              }}
             </p>
-            <p v-if="row.catalog_id == null" class="mt-1 text-[0.7rem] text-slate-500">Nombre del servicio nuevo</p>
+            <p v-if="row.catalog_id == null" class="mt-1 text-[0.7rem] text-slate-500">
+              <template v-if="row.propose_catalog">
+                Al guardar se puede enviar al administrador como propuesta para el catálogo global.
+              </template>
+              <template v-else> No se genera propuesta de catálogo; elige «Otro…» en el panel si es un servicio nuevo para todos. </template>
+            </p>
           </div>
           <button
             v-if="!disabled"

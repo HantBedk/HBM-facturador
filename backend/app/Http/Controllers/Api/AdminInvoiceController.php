@@ -228,6 +228,8 @@ class AdminInvoiceController extends Controller
 
         $total = $this->sumServiceAmounts($data['service_ids']);
 
+        $prevServiceIds = $invoice->services()->pluck('id')->all();
+
         DB::transaction(function () use ($invoice, $data, $total) {
             $invoice->company_id = $data['company_id'];
             $invoice->period_month = $data['period_month'];
@@ -239,6 +241,31 @@ class AdminInvoiceController extends Controller
         });
 
         $invoice->refresh()->load(['company:id,nombre,nit', 'services.user', 'services.catalog:id,name', 'payments']);
+
+        $removedIds = array_values(array_diff($prevServiceIds, $data['service_ids']));
+        if ($removedIds !== []) {
+            $dispatcher = app(PanelNotificationDispatcher::class);
+            foreach ($removedIds as $sid) {
+                $svc = Service::query()->with('user')->find((int) $sid);
+                if ($svc === null) {
+                    continue;
+                }
+                $owner = $svc->user;
+                if ($owner === null || $owner->rol !== User::ROL_EMPLEADO) {
+                    continue;
+                }
+                $dispatcher->notifyUser(
+                    (int) $owner->id,
+                    PanelNotification::TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR,
+                    'Se quitó su servicio '.$svc->code.' del borrador de factura '.$invoice->code.'.',
+                    [
+                        'invoice_id' => $invoice->id,
+                        'service_id' => $svc->id,
+                        'link' => '/empleado/servicio/'.$svc->id,
+                    ]
+                );
+            }
+        }
 
         ActivityLogger::log(
             $request->user(),
@@ -368,7 +395,8 @@ class AdminInvoiceController extends Controller
         $invoice->load(['company:id,nombre,nit', 'services.user', 'services.catalog:id,name', 'payments']);
 
         if ($data['status'] === Invoice::STATUS_APROBADA) {
-            app(PanelNotificationDispatcher::class)->notifyAdmins(
+            $dispatcher = app(PanelNotificationDispatcher::class);
+            $dispatcher->notifyAdmins(
                 PanelNotification::TYPE_INVOICE_PENDING_SEND,
                 'Factura '.$invoice->code.' aprobada; pendiente de envío o de corte automático.',
                 [
@@ -376,6 +404,31 @@ class AdminInvoiceController extends Controller
                     'link' => '/admin/facturas/'.$invoice->id,
                 ]
             );
+
+            $techFirstServiceId = [];
+            foreach ($invoice->services as $svc) {
+                $u = $svc->user;
+                if ($u === null || $u->rol !== User::ROL_EMPLEADO) {
+                    continue;
+                }
+                $uid = (int) $u->id;
+                if (! isset($techFirstServiceId[$uid])) {
+                    $techFirstServiceId[$uid] = (int) $svc->id;
+                }
+            }
+            foreach ($techFirstServiceId as $uid => $firstSid) {
+                $dispatcher->notifyUser(
+                    $uid,
+                    PanelNotification::TYPE_EMP_SERVICIO_FACTURA_APROBADA,
+                    'La factura '.$invoice->code.' fue aprobada e incluye sus servicios (periodo '.$invoice->period_month.'/'.$invoice->period_year.').',
+                    [
+                        'invoice_id' => $invoice->id,
+                        'service_id' => $firstSid,
+                        'link' => '/empleado/servicio/'.$firstSid,
+                    ],
+                    'emp_inv_appr_'.$invoice->id
+                );
+            }
         }
 
         $actor = $request->user();
@@ -497,7 +550,7 @@ class AdminInvoiceController extends Controller
                 PanelNotification::TYPE_EMP_PAGO_FACTURA,
                 'Se registró un pago en la factura '.$invoice->code.' (periodo '.$invoice->period_month.'/'.$invoice->period_year.').',
                 [
-                    'link' => '/empleado/historial?year='.$invoice->period_year.'&month='.$invoice->period_month,
+                    'link' => '/empleado',
                     'invoice_id' => $invoice->id,
                 ],
                 'pago_'.$payment->id.'_u_'.$uid

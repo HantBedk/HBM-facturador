@@ -42,6 +42,18 @@ export function patchServiceCatalogEstado(id, status) {
   }).then((r) => r.data)
 }
 
+export function deleteServiceCatalogItem(id) {
+  return api(`/admin/service-catalog/${id}`, { method: 'DELETE' }).then((r) => r.data)
+}
+
+/** @param {number[]} ids */
+export function bulkDestroyServiceCatalogItems(ids) {
+  return api('/admin/service-catalog/bulk-destroy', {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  }).then((r) => r.data)
+}
+
 /** Descuento % sobre precio de lista del catálogo que ve el técnico (solo admin). */
 export function fetchTechnicianCatalogDiscount() {
   return api('/admin/service-catalog/technician-pricing').then((r) => r.data)

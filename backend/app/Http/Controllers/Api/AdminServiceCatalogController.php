@@ -9,13 +9,23 @@ use App\Support\Pagination;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class AdminServiceCatalogController extends Controller
 {
     public function index(Request $request): AnonymousResourceCollection
     {
-        $q = ServiceCatalog::query()->with('company')->orderBy('name');
+        $q = ServiceCatalog::query()->with('company');
+
+        $sortField = $request->query('sort', 'name');
+        $sortField = is_string($sortField) ? $sortField : 'name';
+        if (! in_array($sortField, ['name', 'base_price'], true)) {
+            $sortField = 'name';
+        }
+        $direction = strtolower((string) $request->query('direction', 'asc')) === 'desc' ? 'desc' : 'asc';
+
+        $q->orderBy($sortField, $direction)->orderBy('id');
 
         if ($request->filled('status')) {
             $q->where('status', $request->string('status')->toString());
@@ -114,6 +124,35 @@ class AdminServiceCatalogController extends Controller
         $service_catalog->save();
 
         return new ServiceCatalogResource($service_catalog);
+    }
+
+    public function destroy(ServiceCatalog $service_catalog): JsonResponse
+    {
+        $service_catalog->delete();
+
+        return response()->json(['message' => 'Ítem del catálogo eliminado.']);
+    }
+
+    public function bulkDestroy(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'ids' => ['required', 'array', 'min:1', 'max:500'],
+            'ids.*' => ['integer', 'distinct', 'exists:service_catalog,id'],
+        ]);
+
+        $ids = array_values(array_unique(array_map('intval', $data['ids'])));
+        $deleted = 0;
+
+        DB::transaction(function () use ($ids, &$deleted) {
+            $deleted = ServiceCatalog::query()->whereIn('id', $ids)->delete();
+        });
+
+        return response()->json([
+            'message' => $deleted === 1
+                ? 'Se eliminó 1 ítem del catálogo.'
+                : "Se eliminaron {$deleted} ítems del catálogo.",
+            'deleted' => $deleted,
+        ]);
     }
 
     private function resolveCatalogCompanyScope(mixed $raw): ?int

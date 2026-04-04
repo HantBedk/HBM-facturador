@@ -20,17 +20,22 @@ const initials = computed(() => {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 })
 
-/** Ej. "Javier García" → "Historial Javier G." */
-const historialBarLabel = computed(() => {
+/**
+ * Primer nombre + primer apellido desde el nombre completo registrado.
+ * Heurística: 2 palabras → ambas; 3+ → primera + penúltima (apellido paterno típ. antes del materno).
+ */
+const nombreCuentaCorta = computed(() => {
   const n = (auth.user?.nombre || '').trim()
-  if (!n) return 'Historial'
+  if (!n) return ''
   const parts = n.split(/\s+/).filter(Boolean)
-  if (parts.length === 1) return `Historial ${parts[0]}`
-  const first = parts[0]
-  const last = parts[parts.length - 1]
-  const initial = last.charAt(0).toUpperCase()
-  return `Historial ${first} ${initial}.`
+  if (parts.length === 1) return parts[0]
+  if (parts.length === 2) return `${parts[0]} ${parts[1]}`
+  return `${parts[0]} ${parts[parts.length - 2]}`
 })
+
+const menuAriaLabel = computed(() =>
+  nombreCuentaCorta.value ? `Menú de cuenta, ${nombreCuentaCorta.value}` : 'Menú de cuenta'
+)
 
 const isMandatoryProfileGate = computed(
   () => route.path === '/empleado/perfil' && isEmpleadoPerfilIncomplete(auth.user)
@@ -81,17 +86,10 @@ async function salir() {
               <path d="M3 3v18h18M7 16l4-4 4 4 6-6" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </div>
-          <span class="text-sm font-bold tracking-tight text-white sm:text-base">HBM</span>
+          <span class="text-sm font-bold tracking-tight text-white sm:text-base"></span>
         </div>
-        <span v-if="!isMandatoryProfileGate" class="hidden text-slate-600 md:inline" aria-hidden="true">|</span>
-        <p
-          v-if="!isMandatoryProfileGate"
-          class="hidden max-w-[200px] truncate text-sm font-medium text-slate-400 md:block md:max-w-xs lg:max-w-md"
-        >
-          {{ historialBarLabel }}
-        </p>
         <div
-          v-else
+          v-if="isMandatoryProfileGate"
           class="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-sm md:max-w-md"
         >
           <p class="font-medium text-sky-400/95">Datos de contacto y pago</p>
@@ -115,18 +113,11 @@ async function salir() {
             Panel
           </RouterLink>
           <RouterLink
-            to="/empleado/historial"
-            class="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-800/80 hover:text-sky-300"
-            :class="{ 'bg-slate-800/60 text-sky-300': route.path.startsWith('/empleado/historial') }"
-          >
-            Historial
-          </RouterLink>
-          <RouterLink
             to="/empleado/listado-servicios"
             class="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-800/80 hover:text-sky-300"
             :class="{ 'bg-slate-800/60 text-sky-300': route.path.startsWith('/empleado/listado-servicios') }"
           >
-            Listado
+            Historial
           </RouterLink>
           <RouterLink
             to="/empleado/registro-servicio"
@@ -134,13 +125,6 @@ async function salir() {
             :class="{ 'bg-slate-800/60 text-sky-300': route.path.startsWith('/empleado/registro-servicio') }"
           >
             Registrar
-          </RouterLink>
-          <RouterLink
-            to="/empleado/configuracion"
-            class="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-800/80 hover:text-sky-300"
-            :class="{ 'bg-slate-800/60 text-sky-300': configActive }"
-          >
-            Configuración
           </RouterLink>
         </nav>
         <RouterLink
@@ -178,7 +162,7 @@ async function salir() {
             class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-600 to-blue-700 text-xs font-bold uppercase tracking-tight text-white shadow-md ring-2 ring-slate-800 transition hover:ring-sky-500/50 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
             :aria-expanded="menuOpen"
             aria-haspopup="true"
-            aria-label="Menú de cuenta"
+            :aria-label="menuAriaLabel"
             @click.stop="menuOpen = !menuOpen"
           >
             {{ initials }}
@@ -189,6 +173,13 @@ async function salir() {
             class="empleado-user-menu absolute right-0 z-40 mt-2 w-[min(100vw-2rem,15rem)] overflow-hidden rounded-xl border border-slate-700/80 bg-[#1a222d] py-1 shadow-2xl shadow-black/50"
             role="menu"
           >
+            <div
+              v-if="nombreCuentaCorta"
+              class="border-b border-slate-700/80 px-4 py-3"
+              role="presentation"
+            >
+              <p class="truncate text-sm font-semibold text-white">{{ nombreCuentaCorta }}</p>
+            </div>
             <RouterLink
               to="/empleado/perfil"
               :class="itemClass(profileActive)"

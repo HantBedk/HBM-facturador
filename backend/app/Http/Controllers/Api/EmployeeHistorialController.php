@@ -13,18 +13,6 @@ use Illuminate\Support\Facades\DB;
 class EmployeeHistorialController extends Controller
 {
     /**
-     * Historial del técnico autenticado (mes calendario).
-     */
-    public function mine(Request $request): JsonResponse
-    {
-        $user = $request->user();
-        [$year, $month] = $this->validatedYearMonth($request);
-        $filters = $this->validatedHistorialFilters($request);
-
-        return response()->json($this->buildPayload($user, $year, $month, $filters));
-    }
-
-    /**
      * Historial de un empleado concreto (solo administración).
      */
     public function forUser(Request $request, User $user): JsonResponse

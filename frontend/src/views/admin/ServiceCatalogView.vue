@@ -1,9 +1,10 @@
 <script setup>
-import { onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   approveServiceCatalogSuggestion,
+  bulkDestroyServiceCatalogItems,
   createServiceCatalogItem,
+  deleteServiceCatalogItem,
   fetchAdminServiceCatalog,
   fetchCompanies,
   fetchServiceCatalogSuggestions,
@@ -16,8 +17,6 @@ import {
 import { useUiDialogStore } from '@/stores/uiDialog'
 
 const uiDialog = useUiDialogStore()
-
-const route = useRoute()
 
 const rows = ref([])
 const companies = ref([])
@@ -45,7 +44,45 @@ const form = ref({
   status: 'activo',
 })
 
-const showPendientes = () => route.query.pendientes === '1'
+/** Selección multi para borrado masivo (ids en la página cargada). */
+const selectedCatalogIds = ref([])
+const bulkDeleting = ref(false)
+
+const showSuggestionModal = ref(false)
+const suggestionSaving = ref(false)
+const suggestionFieldErrors = ref({})
+const suggestionForm = ref({
+  id: null,
+  name: '',
+  description: '',
+  base_price: '',
+})
+
+const allPageCatalogSelected = computed(
+  () =>
+    rows.value.length > 0 && rows.value.every((r) => selectedCatalogIds.value.includes(Number(r.id)))
+)
+
+const selectedCatalogCount = computed(() => selectedCatalogIds.value.length)
+
+/** Orden del listado: servidor (name | base_price + asc/desc). */
+const catalogSortBy = ref('name')
+const catalogSortDir = ref('asc')
+
+function catalogSortIndicator(field) {
+  if (catalogSortBy.value !== field) return ''
+  return catalogSortDir.value === 'asc' ? '▲' : '▼'
+}
+
+async function setCatalogSort(field) {
+  if (catalogSortBy.value === field) {
+    catalogSortDir.value = catalogSortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    catalogSortBy.value = field
+    catalogSortDir.value = 'asc'
+  }
+  await load()
+}
 
 async function loadCompanies() {
   try {
@@ -59,7 +96,11 @@ async function load() {
   error.value = ''
   loading.value = true
   try {
-    const res = await fetchAdminServiceCatalog({ per_page: 100 })
+    const res = await fetchAdminServiceCatalog({
+      per_page: 100,
+      sort: catalogSortBy.value,
+      direction: catalogSortDir.value,
+    })
     rows.value = res.data || []
   } catch (e) {
     error.value = e.data?.message || e.message || 'No se pudo cargar el catálogo.'
@@ -98,10 +139,6 @@ async function saveTechnicianDiscount() {
 }
 
 async function loadPending() {
-  if (!showPendientes()) {
-    pendingRows.value = []
-    return
-  }
   pendingLoading.value = true
   try {
     const res = await fetchServiceCatalogSuggestions({ pendientes: 1, per_page: 50 })
@@ -121,17 +158,121 @@ onMounted(async () => {
   await loadPending()
 })
 
-watch(
-  () => route.query.pendientes,
-  () => loadPending()
-)
-
 watch(showModal, (open) => {
   if (!open) {
     editingId.value = null
     form.value = { company_id: '', name: '', description: '', base_price: '', status: 'activo' }
   }
 })
+
+watch(rows, (list) => {
+  const allowed = new Set(list.map((r) => Number(r.id)))
+  selectedCatalogIds.value = selectedCatalogIds.value.filter((id) => allowed.has(id))
+})
+
+function isCatalogRowSelected(id) {
+  return selectedCatalogIds.value.includes(Number(id))
+}
+
+function toggleCatalogRowSelect(id) {
+  const n = Number(id)
+  const i = selectedCatalogIds.value.indexOf(n)
+  if (i >= 0) selectedCatalogIds.value.splice(i, 1)
+  else selectedCatalogIds.value.push(n)
+}
+
+function toggleSelectAllCatalogPage() {
+  const pageIds = rows.value.map((r) => Number(r.id))
+  if (!pageIds.length) return
+  if (allPageCatalogSelected.value) {
+    const drop = new Set(pageIds)
+    selectedCatalogIds.value = selectedCatalogIds.value.filter((id) => !drop.has(id))
+  } else {
+    selectedCatalogIds.value = [...new Set([...selectedCatalogIds.value, ...pageIds])]
+  }
+}
+
+async function onDeleteCatalogRow(row) {
+  const ok = await uiDialog.confirm({
+    title: 'Eliminar ítem del catálogo',
+    message: `¿Eliminar «${row.name}»? Los servicios que lo referenciaban quedarán sin vínculo al catálogo (catalog_id en null).`,
+    danger: true,
+    confirmLabel: 'Eliminar',
+  })
+  if (!ok) return
+  error.value = ''
+  try {
+    await deleteServiceCatalogItem(row.id)
+    selectedCatalogIds.value = selectedCatalogIds.value.filter((id) => id !== Number(row.id))
+    await load()
+  } catch (e) {
+    error.value = e.data?.message || e.message || 'No se pudo eliminar.'
+  }
+}
+
+async function onBulkDeleteCatalog() {
+  const n = selectedCatalogIds.value.length
+  if (n < 1) return
+  const ok = await uiDialog.confirm({
+    title: 'Eliminar ítems seleccionados',
+    message: `¿Eliminar ${n} ítem(s) del catálogo? Los servicios afectados perderán la referencia al catálogo.`,
+    danger: true,
+    confirmLabel: `Eliminar ${n}`,
+  })
+  if (!ok) return
+  error.value = ''
+  bulkDeleting.value = true
+  try {
+    await bulkDestroyServiceCatalogItems([...selectedCatalogIds.value])
+    selectedCatalogIds.value = []
+    await load()
+  } catch (e) {
+    error.value = e.data?.message || e.message || 'No se pudo completar el borrado masivo.'
+  } finally {
+    bulkDeleting.value = false
+  }
+}
+
+function openSuggestionApprove(s) {
+  suggestionFieldErrors.value = {}
+  suggestionForm.value = {
+    id: s.id,
+    name: s.name || '',
+    description: s.description || '',
+    base_price: String(s.suggested_price ?? ''),
+  }
+  showSuggestionModal.value = true
+}
+
+watch(showSuggestionModal, (open) => {
+  if (!open) {
+    suggestionForm.value = { id: null, name: '', description: '', base_price: '' }
+    suggestionFieldErrors.value = {}
+  }
+})
+
+async function onSubmitSuggestionApprove() {
+  const id = suggestionForm.value.id
+  if (id == null) return
+  suggestionSaving.value = true
+  error.value = ''
+  suggestionFieldErrors.value = {}
+  try {
+    await approveServiceCatalogSuggestion(id, {
+      name: suggestionForm.value.name.trim(),
+      description: suggestionForm.value.description.trim() || null,
+      base_price: Number(suggestionForm.value.base_price),
+    })
+    showSuggestionModal.value = false
+    await loadPending()
+    await load()
+  } catch (e) {
+    if (e.data?.errors) suggestionFieldErrors.value = e.data.errors
+    error.value = e.data?.message || e.message || 'No se pudo aprobar.'
+  } finally {
+    suggestionSaving.value = false
+  }
+}
 
 function openCreate() {
   editingId.value = null
@@ -155,12 +296,6 @@ function money(v) {
   const n = Number(v)
   if (Number.isNaN(n)) return '—'
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
-}
-
-function empresaLabel(row) {
-  if (row.company?.nombre) return row.company.nombre
-  if (row.company_id != null) return `#${row.company_id}`
-  return 'Global'
 }
 
 async function onSave() {
@@ -206,21 +341,6 @@ async function toggleStatus(row) {
   }
 }
 
-async function onApproveSuggestion(s) {
-  const ok = await uiDialog.confirm({
-    title: 'Aprobar propuesta',
-    message: `¿Aprobar «${s.name}» y darlo de alta en el catálogo de la empresa?`,
-  })
-  if (!ok) return
-  try {
-    await approveServiceCatalogSuggestion(s.id)
-    await loadPending()
-    await load()
-  } catch (e) {
-    error.value = e.data?.message || e.message || 'No se pudo aprobar.'
-  }
-}
-
 async function onRejectSuggestion(s) {
   const ok = await uiDialog.confirm({
     title: 'Descartar propuesta',
@@ -244,11 +364,23 @@ async function onRejectSuggestion(s) {
       <div>
         <h1>Catálogo de servicios</h1>
         <p class="lede">
-          Precios base por empresa o globales. Las propuestas «Otro» de los técnicos aparecen cuando abres el enlace con
-          <code class="code">?pendientes=1</code>.
+          Precios base del catálogo (globales o por empresa en cada ítem). Arriba del listado verás las
+          <strong>propuestas pendientes</strong> cuando un técnico registra un ítem «Otro»; al aprobarlas pasan al catálogo global
+          para todas las empresas.
         </p>
       </div>
-      <button type="button" class="btn primary" @click="openCreate">+ Nuevo ítem</button>
+      <div class="head-actions">
+        <button
+          v-if="selectedCatalogCount > 0"
+          type="button"
+          class="btn danger"
+          :disabled="bulkDeleting"
+          @click="onBulkDeleteCatalog"
+        >
+          {{ bulkDeleting ? 'Eliminando…' : `Eliminar seleccionados (${selectedCatalogCount})` }}
+        </button>
+        <button type="button" class="btn primary" @click="openCreate">+ Nuevo ítem</button>
+      </div>
     </header>
 
     <div class="card pricing-card">
@@ -279,13 +411,15 @@ async function onRejectSuggestion(s) {
 
     <p v-if="error" class="banner err">{{ error }}</p>
 
-    <div v-if="showPendientes()" class="card pending-block">
+    <div class="card pending-block">
       <h2 class="pending-title">Propuestas de catálogo pendientes</h2>
+      <p class="pending-sub muted">
+        Ítems nuevos que proponen los empleados al registrar un servicio con línea «Otro». Revísalos aquí antes de darlos de alta.
+      </p>
       <p v-if="pendingLoading" class="muted pad">Cargando…</p>
       <table v-else-if="pendingRows.length" class="table">
         <thead>
           <tr>
-            <th>Empresa</th>
             <th>Nombre propuesto</th>
             <th class="num">Precio sugerido</th>
             <th class="actions-col">Acciones</th>
@@ -293,14 +427,13 @@ async function onRejectSuggestion(s) {
         </thead>
         <tbody>
           <tr v-for="s in pendingRows" :key="s.id">
-            <td>{{ s.company?.nombre || '—' }}</td>
             <td>
               <strong>{{ s.name }}</strong>
               <p v-if="s.description" class="muted tiny">{{ s.description }}</p>
             </td>
             <td class="num">{{ money(s.suggested_price) }}</td>
             <td class="actions-col">
-              <button type="button" class="link ok" @click="onApproveSuggestion(s)">Aprobar</button>
+              <button type="button" class="link ok" @click="openSuggestionApprove(s)">Revisar y aprobar</button>
               <button type="button" class="link danger" @click="onRejectSuggestion(s)">Descartar</button>
             </td>
           </tr>
@@ -314,20 +447,49 @@ async function onRejectSuggestion(s) {
       <table v-else class="table">
         <thead>
           <tr>
-            <th>Nombre</th>
-            <th>Empresa</th>
-            <th class="num">Precio base</th>
+            <th class="th-check" scope="col">
+              <input
+                type="checkbox"
+                class="check"
+                :checked="allPageCatalogSelected"
+                :disabled="!rows.length"
+                aria-label="Seleccionar todos los ítems de esta página"
+                @click.prevent="toggleSelectAllCatalogPage"
+              />
+            </th>
+            <th scope="col" :aria-sort="catalogSortBy === 'name' ? (catalogSortDir === 'asc' ? 'ascending' : 'descending') : 'none'">
+              <button type="button" class="th-sort" @click="setCatalogSort('name')">
+                Nombre<span class="sort-ind" aria-hidden="true">{{ catalogSortIndicator('name') }}</span>
+              </button>
+            </th>
+            <th
+              scope="col"
+              class="num"
+              :aria-sort="catalogSortBy === 'base_price' ? (catalogSortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+            >
+              <button type="button" class="th-sort th-sort--end" @click="setCatalogSort('base_price')">
+                Precio base<span class="sort-ind" aria-hidden="true">{{ catalogSortIndicator('base_price') }}</span>
+              </button>
+            </th>
             <th>Estado</th>
             <th class="actions-col">Acciones</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="r in rows" :key="r.id">
+            <td class="td-check">
+              <input
+                type="checkbox"
+                class="check"
+                :checked="isCatalogRowSelected(r.id)"
+                :aria-label="'Seleccionar ' + r.name"
+                @click.prevent="toggleCatalogRowSelect(r.id)"
+              />
+            </td>
             <td>
               <strong>{{ r.name }}</strong>
               <p v-if="r.description" class="muted tiny">{{ r.description }}</p>
             </td>
-            <td>{{ empresaLabel(r) }}</td>
             <td class="num">{{ money(r.base_price) }}</td>
             <td>
               <span class="pill" :data-st="r.status">{{ r.status === 'activo' ? 'Activo' : 'Inactivo' }}</span>
@@ -337,6 +499,7 @@ async function onRejectSuggestion(s) {
               <button type="button" class="link" @click="toggleStatus(r)">
                 {{ r.status === 'activo' ? 'Desactivar' : 'Activar' }}
               </button>
+              <button type="button" class="link danger" @click="onDeleteCatalogRow(r)">Eliminar</button>
             </td>
           </tr>
           <tr v-if="!rows.length">
@@ -345,6 +508,39 @@ async function onRejectSuggestion(s) {
         </tbody>
       </table>
     </div>
+
+    <Teleport to="body">
+      <div v-if="showSuggestionModal" class="modal-backdrop" @click.self="showSuggestionModal = false">
+        <div class="modal card" role="dialog" aria-labelledby="sugg-modal-title">
+          <h2 id="sugg-modal-title">Revisar propuesta y dar de alta</h2>
+          <p class="modal-lede">
+            Ajusta nombre, descripción o precio si hace falta. Al confirmar, el ítem queda en el catálogo global (disponible para cualquier empresa).
+          </p>
+          <form class="modal-form" @submit.prevent="onSubmitSuggestionApprove">
+            <label>
+              <span>Nombre del ítem</span>
+              <input v-model="suggestionForm.name" required class="input" maxlength="255" />
+            </label>
+            <p v-if="suggestionFieldErrors.name?.[0]" class="field-err">{{ suggestionFieldErrors.name[0] }}</p>
+            <label>
+              <span>Descripción (opcional)</span>
+              <textarea v-model="suggestionForm.description" class="input" rows="3" />
+            </label>
+            <label>
+              <span>Precio base (COP)</span>
+              <input v-model="suggestionForm.base_price" type="number" min="0.01" step="0.01" required class="input" />
+            </label>
+            <p v-if="suggestionFieldErrors.base_price?.[0]" class="field-err">{{ suggestionFieldErrors.base_price[0] }}</p>
+            <div class="modal-actions">
+              <button type="button" class="btn secondary" @click="showSuggestionModal = false">Cancelar</button>
+              <button type="submit" class="btn primary" :disabled="suggestionSaving">
+                {{ suggestionSaving ? 'Guardando…' : 'Dar de alta en catálogo' }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </Teleport>
 
     <Teleport to="body">
       <div v-if="showModal" class="modal-backdrop" @click.self="showModal = false">
@@ -399,8 +595,15 @@ async function onRejectSuggestion(s) {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 1rem;
   margin-bottom: 1rem;
+}
+.head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
 }
 h1 {
   margin: 0 0 0.35rem;
@@ -473,9 +676,15 @@ h1 {
   margin-bottom: 1rem;
 }
 .pending-title {
-  margin: 0 0 0.75rem;
+  margin: 0 0 0.35rem;
   font-size: 1.05rem;
   color: #e2e8f0;
+}
+.pending-sub {
+  margin: 0 0 0.85rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  max-width: 44rem;
 }
 .table {
   width: 100%;
@@ -487,6 +696,42 @@ h1 {
   padding: 0.55rem 0.45rem;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
   text-align: left;
+}
+.table th {
+  color: #94a3b8;
+  font-weight: 600;
+}
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+  text-align: inherit;
+  border-radius: 6px;
+}
+.th-sort:hover {
+  color: #e2e8f0;
+}
+.th-sort:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline-offset: 2px;
+}
+.th-sort--end {
+  justify-content: flex-end;
+  width: 100%;
+}
+.sort-ind {
+  font-size: 0.7rem;
+  opacity: 0.9;
+  white-space: nowrap;
 }
 .th.num,
 .num {
@@ -567,6 +812,36 @@ h1 {
   border-color: rgba(148, 163, 184, 0.35);
   color: #e2e8f0;
   background: transparent;
+}
+.btn.danger {
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.28);
+}
+.btn.danger:hover:not(:disabled) {
+  background: rgba(153, 27, 27, 0.4);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.th-check,
+.td-check {
+  width: 2.35rem;
+  padding-left: 0.35rem;
+  vertical-align: middle;
+}
+.check {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: #38bdf8;
+  cursor: pointer;
+}
+.modal-lede {
+  font-size: 0.85rem;
+  color: #94a3b8;
+  margin: 0 0 1rem;
+  line-height: 1.45;
 }
 .modal-backdrop {
   position: fixed;

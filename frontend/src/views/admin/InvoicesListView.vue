@@ -1,10 +1,13 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import { fetchCompanies } from '@/services/servicesApi.js'
-import { downloadAdminExportCsv, fetchAdminInvoices } from '@/services/invoicesApi.js'
-
-const router = useRouter()
+import {
+  addInvoicePayment,
+  downloadAdminExportCsv,
+  fetchAdminInvoice,
+  fetchAdminInvoices,
+} from '@/services/invoicesApi.js'
 
 const companies = ref([])
 const rows = ref([])
@@ -61,6 +64,7 @@ async function load() {
 }
 
 onMounted(async () => {
+  document.addEventListener('keydown', onPayModalEscape)
   try {
     companies.value = await fetchCompanies()
   } catch {
@@ -82,25 +86,145 @@ watch(
   }
 )
 
+let qDebounceTimer = null
+const Q_DEBOUNCE_MS = 350
+
+watch(
+  () => filters.value.q,
+  () => {
+    clearTimeout(qDebounceTimer)
+    qDebounceTimer = setTimeout(() => {
+      filters.value.page = 1
+      load()
+    }, Q_DEBOUNCE_MS)
+  }
+)
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', onPayModalEscape)
+  clearTimeout(qDebounceTimer)
+})
+
 function goPage(p) {
   filters.value.page = p
   load()
 }
 
-function applySearch() {
+/** Enter en el campo de búsqueda: ejecutar de inmediato sin esperar el debounce. */
+function flushSearchFromInput() {
+  clearTimeout(qDebounceTimer)
   filters.value.page = 1
   load()
+}
+
+function canPayFromList(inv) {
+  return inv.status === 'enviada' || inv.status === 'parcialmente_pagada'
+}
+
+const payModalOpen = ref(false)
+const payModalLoading = ref(false)
+const paySubmitting = ref(false)
+const payModalError = ref('')
+const payTargetId = ref(null)
+const payInvoice = ref(null)
+const payForm = ref({
+  amount: '',
+  payment_date: new Date().toISOString().slice(0, 10),
+  method: 'Transferencia',
+  notes: '',
+})
+
+const payBalanceNum = computed(() => {
+  const b = payInvoice.value?.financial?.balance
+  if (b === undefined || b === null) return null
+  const n = Number(b)
+  return Number.isNaN(n) ? null : n
+})
+
+const payCanRegister = computed(() => {
+  const st = payInvoice.value?.status
+  if (!st || !['enviada', 'parcialmente_pagada'].includes(st)) return false
+  if (payBalanceNum.value !== null && payBalanceNum.value <= 0) return false
+  return true
+})
+
+function resetPayForm() {
+  payForm.value = {
+    amount: '',
+    payment_date: new Date().toISOString().slice(0, 10),
+    method: 'Transferencia',
+    notes: '',
+  }
+}
+
+async function openPayModal(inv) {
+  payModalError.value = ''
+  payTargetId.value = inv.id
+  payInvoice.value = null
+  resetPayForm()
+  payModalOpen.value = true
+  payModalLoading.value = true
+  try {
+    payInvoice.value = await fetchAdminInvoice(inv.id)
+  } catch (e) {
+    payModalError.value = e.data?.message || e.message || 'No se pudo cargar la factura.'
+  } finally {
+    payModalLoading.value = false
+  }
+}
+
+function closePayModal() {
+  payModalOpen.value = false
+  payTargetId.value = null
+  payInvoice.value = null
+  payModalError.value = ''
+  payModalLoading.value = false
+  paySubmitting.value = false
+}
+
+function fillPayFullBalance() {
+  const b = payBalanceNum.value
+  if (b === null || b <= 0) return
+  payForm.value.amount = String(b)
+}
+
+async function submitPayModal() {
+  payModalError.value = ''
+  const id = payTargetId.value
+  if (id == null) return
+  const amt = Number(payForm.value.amount)
+  if (Number.isNaN(amt) || amt < 0.01) {
+    payModalError.value = 'Indique un monto válido.'
+    return
+  }
+  paySubmitting.value = true
+  try {
+    await addInvoicePayment(id, {
+      amount: amt,
+      payment_date: payForm.value.payment_date,
+      method: payForm.value.method.trim() || 'Otro',
+      notes: payForm.value.notes.trim() || undefined,
+    })
+    closePayModal()
+    await load()
+  } catch (e) {
+    payModalError.value = e.data?.message || e.message || 'No se pudo registrar el pago.'
+  } finally {
+    paySubmitting.value = false
+  }
+}
+
+function onPayModalEscape(ev) {
+  if (ev.key === 'Escape' && payModalOpen.value) {
+    ev.preventDefault()
+    closePayModal()
+  }
 }
 
 function money(v) {
   const n = Number(v)
   if (Number.isNaN(n)) return '—'
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
-}
-
-function openRow(id, ev) {
-  if (ev?.target?.closest?.('a, button')) return
-  router.push(`/admin/facturas/${id}`)
 }
 
 const pageSummary = computed(() => {
@@ -138,7 +262,7 @@ async function exportInvoicesCsv() {
     <header class="head">
       <div>
         <h1>Facturas</h1>
-        <p class="lede">Listado y gestión. Clic en una fila o en Ver para el detalle; los borradores también se editan con Editar.</p>
+        <p class="lede">Listado y gestión. Clic en el <strong>código</strong> de la factura para ver el detalle; los borradores se editan con Editar.</p>
       </div>
       <div class="head-btns">
         <button type="button" class="btn secondary" :disabled="exportBusy" @click="exportInvoicesCsv">
@@ -151,7 +275,14 @@ async function exportInvoicesCsv() {
     <div class="filters card">
       <label class="grow">
         <span>Búsqueda por código</span>
-        <input v-model="filters.q" type="search" class="input" placeholder="FAC-260318-…" @keydown.enter.prevent="applySearch" />
+        <input
+          v-model="filters.q"
+          type="search"
+          class="input"
+          placeholder="FAC-260318-…"
+          autocomplete="off"
+          @keydown.enter.prevent="flushSearchFromInput"
+        />
       </label>
       <label>
         <span>Empresa</span>
@@ -191,7 +322,6 @@ async function exportInvoicesCsv() {
           <option value="12">Diciembre</option>
         </select>
       </label>
-      <button type="button" class="btn secondary" @click="applySearch">Aplicar</button>
     </div>
 
     <p v-if="error" class="banner err">{{ error }}</p>
@@ -212,8 +342,10 @@ async function exportInvoicesCsv() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="inv in rows" :key="inv.id" class="row-data clickable" @click="openRow(inv.id, $event)">
-              <td class="mono">{{ inv.code }}</td>
+            <tr v-for="inv in rows" :key="inv.id" class="row-data">
+              <td class="mono">
+                <RouterLink class="link" :to="`/admin/facturas/${inv.id}`">{{ inv.code }}</RouterLink>
+              </td>
               <td>{{ inv.company?.nombre || '—' }}</td>
               <td>{{ inv.period_label }}</td>
               <td>
@@ -221,10 +353,19 @@ async function exportInvoicesCsv() {
               </td>
               <td class="num">{{ money(inv.total) }}</td>
               <td class="actions-col" @click.stop>
-                <RouterLink class="link" :to="`/admin/facturas/${inv.id}`">Ver</RouterLink>
-                <RouterLink v-if="inv.status === 'borrador'" class="link" :to="`/admin/facturas/${inv.id}/editar`">
-                  Editar
-                </RouterLink>
+                <div class="actions-row">
+                  <RouterLink v-if="inv.status === 'borrador'" class="link" :to="`/admin/facturas/${inv.id}/editar`">
+                    Editar
+                  </RouterLink>
+                  <button
+                    v-if="canPayFromList(inv)"
+                    type="button"
+                    class="link-btn"
+                    @click="openPayModal(inv)"
+                  >
+                    Pagar
+                  </button>
+                </div>
               </td>
             </tr>
             <tr v-if="!rows.length">
@@ -249,6 +390,67 @@ async function exportInvoicesCsv() {
         </div>
       </template>
     </div>
+
+    <Teleport to="body">
+      <div v-if="payModalOpen" class="modal-backdrop" @click.self="closePayModal">
+        <div class="modal card pay-modal" role="dialog" aria-modal="true" aria-labelledby="pay-modal-title">
+          <h2 id="pay-modal-title" class="modal-title">Registrar pago</h2>
+          <p v-if="payInvoice && !payModalLoading" class="pay-modal-meta muted">
+            <span class="mono">{{ payInvoice.code }}</span>
+            <span v-if="payInvoice.company?.nombre"> · {{ payInvoice.company.nombre }}</span>
+          </p>
+          <p v-if="payModalLoading" class="muted">Cargando factura…</p>
+          <p v-else-if="!payInvoice && payModalError" class="banner err">{{ payModalError }}</p>
+          <template v-else-if="payInvoice">
+            <p v-if="payModalError" class="banner err">{{ payModalError }}</p>
+            <div v-if="payCanRegister" class="pay-form">
+              <p class="balance-line">
+                Saldo pendiente: <strong>{{ money(payBalanceNum ?? 0) }}</strong>
+              </p>
+              <button type="button" class="btn secondary fill-balance-btn" @click="fillPayFullBalance">
+                Usar saldo completo
+              </button>
+              <label>
+                <span>Monto</span>
+                <input v-model="payForm.amount" type="number" min="0.01" step="0.01" class="input" />
+              </label>
+              <label>
+                <span>Fecha</span>
+                <input v-model="payForm.payment_date" type="date" class="input" />
+              </label>
+              <label>
+                <span>Método</span>
+                <input v-model="payForm.method" type="text" class="input" />
+              </label>
+              <label class="wide">
+                <span>Notas</span>
+                <input v-model="payForm.notes" type="text" class="input" />
+              </label>
+            </div>
+            <p v-else-if="payInvoice.status === 'aprobada'" class="muted pay-hint">
+              Marque la factura como <strong>enviada</strong> para registrar pagos.
+              <RouterLink class="link" :to="`/admin/facturas/${payInvoice.id}`">Abrir detalle</RouterLink>
+            </p>
+            <p v-else class="muted pay-hint">
+              Solo se registran abonos con factura <strong>enviada</strong> o <strong>parcialmente pagada</strong>.
+              <RouterLink class="link" :to="`/admin/facturas/${payInvoice.id}`">Abrir detalle</RouterLink>
+            </p>
+          </template>
+          <div class="modal-actions">
+            <button type="button" class="btn secondary" @click="closePayModal">Cerrar</button>
+            <button
+              v-if="payInvoice && payCanRegister"
+              type="button"
+              class="btn primary"
+              :disabled="paySubmitting"
+              @click="submitPayModal"
+            >
+              {{ paySubmitting ? 'Registrando…' : 'Registrar pago' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </section>
 </template>
 
@@ -368,14 +570,6 @@ h1 {
   text-transform: uppercase;
 }
 
-.row-data.clickable {
-  cursor: pointer;
-}
-
-.row-data.clickable:hover {
-  background: rgba(56, 189, 248, 0.06);
-}
-
 .mono {
   font-family: ui-monospace, monospace;
   font-size: 0.85rem;
@@ -417,6 +611,29 @@ h1 {
 
 .actions-col {
   white-space: nowrap;
+}
+
+.actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.65rem;
+}
+
+.link-btn {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: #86efac;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
 }
 
 .link {
@@ -480,5 +697,88 @@ h1 {
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.pay-modal.modal {
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  margin: 0;
+}
+
+.modal-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+  color: #f8fafc;
+}
+
+.pay-modal-meta {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+}
+
+.pay-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+.pay-form .wide {
+  grid-column: 1 / -1;
+}
+
+.pay-form .balance-line {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.9rem;
+  color: #e2e8f0;
+}
+
+.pay-form .fill-balance-btn {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin-bottom: 0.25rem;
+}
+
+.pay-form label span {
+  display: block;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  margin-bottom: 0.25rem;
+}
+
+.pay-hint {
+  margin: 0 0 1rem;
+  line-height: 1.5;
+}
+
+.pay-hint .link {
+  display: inline;
+  margin-left: 0.25rem;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
 }
 </style>

@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Services\PanelNotificationDispatcher;
 use App\Services\ServiceCodeGenerator;
+use App\Support\CatalogSuggestionDuplicateChecker;
 use App\Support\DecimalMath;
 use App\Support\Pagination;
 use Carbon\Carbon;
@@ -224,17 +225,19 @@ class ServiceController extends Controller
 
             foreach ($normalized as $sort => $row) {
                 $suggestionId = null;
-                if ($row['is_custom']) {
-                    $s = ServiceCatalogSuggestion::query()->create([
-                        'company_id' => $companyId,
-                        'user_id' => $user->id,
-                        'name' => $row['custom_name'],
-                        'description' => $row['custom_description'],
-                        'suggested_price' => $row['amount'],
-                        'status' => ServiceCatalogSuggestion::STATUS_PENDING,
-                    ]);
-                    $suggestionId = $s->id;
-                    $pendingSuggestions++;
+                if ($row['is_custom'] && ($row['propose_catalog'] ?? false)) {
+                    if (! CatalogSuggestionDuplicateChecker::isRedundantWithActiveCatalog($row['custom_name'], $companyId)) {
+                        $s = ServiceCatalogSuggestion::query()->create([
+                            'company_id' => $companyId,
+                            'user_id' => $user->id,
+                            'name' => $row['custom_name'],
+                            'description' => $row['custom_description'],
+                            'suggested_price' => $row['amount'],
+                            'status' => ServiceCatalogSuggestion::STATUS_PENDING,
+                        ]);
+                        $suggestionId = $s->id;
+                        $pendingSuggestions++;
+                    }
                 }
 
                 ServiceItem::query()->create([
@@ -282,10 +285,10 @@ class ServiceController extends Controller
         if ($pendingSuggestions > 0) {
             app(PanelNotificationDispatcher::class)->notifyAdmins(
                 PanelNotification::TYPE_CATALOG_SUGGESTION_PENDING,
-                'El servicio '.$service->code.' incluye '.$pendingSuggestions.' propuesta(s) de catálogo «Otro» pendiente(s) de revisión.',
+                'El servicio '.$service->code.' incluye '.$pendingSuggestions.' propuesta(s) de ítem nuevo (catálogo global) pendiente(s) de revisión.',
                 [
                     'service_id' => $service->id,
-                    'link' => '/admin/catalogo-servicios?pendientes=1',
+                    'link' => '/admin/catalogo-servicios',
                 ]
             );
         }
@@ -343,6 +346,16 @@ class ServiceController extends Controller
         if ($service->isDirty()) {
             $service->status = Service::STATUS_CORREGIDO;
             $service->save();
+            $this->notifyEmpleadoIfAdminActedOnTheirService(
+                $request->user(),
+                $service,
+                PanelNotification::TYPE_EMP_SERVICIO_MODIFICADO_ADMIN,
+                'Administración modificó su servicio '.$service->code.'. Revise los datos actualizados.',
+                [
+                    'service_id' => $service->id,
+                    'link' => '/empleado/servicio/'.$service->id,
+                ]
+            );
         }
 
         $service->loadCount('invoices');
@@ -373,6 +386,17 @@ class ServiceController extends Controller
 
         $service->status = Service::STATUS_ELIMINADO;
         $service->save();
+        $this->notifyEmpleadoIfAdminActedOnTheirService(
+            $request->user(),
+            $service,
+            PanelNotification::TYPE_EMP_SERVICIO_ELIMINADO_ADMIN,
+            'Administración marcó como eliminado su servicio '.$service->code.'.',
+            [
+                'service_id' => $service->id,
+                'link' => '/empleado/servicio/'.$service->id,
+            ],
+            'emp_svc_elim_'.$service->id
+        );
         $service->load(['company', 'user', 'photos', 'catalog:id,name']);
 
         ActivityLogger::log(
@@ -382,6 +406,33 @@ class ServiceController extends Controller
         );
 
         return new ServiceResource($service);
+    }
+
+    /**
+     * Avisa al técnico dueño del servicio si un administrador actúa sobre su registro.
+     *
+     * @param  array<string, mixed>  $meta
+     */
+    private function notifyEmpleadoIfAdminActedOnTheirService(
+        User $actor,
+        Service $service,
+        string $type,
+        string $message,
+        array $meta = [],
+        ?string $dedupeKey = null
+    ): void {
+        if (! $actor->isAdminEquipo()) {
+            return;
+        }
+        $ownerId = (int) $service->user_id;
+        if ($ownerId === 0 || $ownerId === (int) $actor->id) {
+            return;
+        }
+        $owner = User::query()->find($ownerId);
+        if ($owner === null || $owner->rol !== User::ROL_EMPLEADO) {
+            return;
+        }
+        app(PanelNotificationDispatcher::class)->notifyUser($ownerId, $type, $message, $meta, $dedupeKey);
     }
 
     /**
@@ -404,7 +455,7 @@ class ServiceController extends Controller
 
     /**
      * @param  list<array<string, mixed>>  $rows
-     * @return list<array{catalog_id: ?int, custom_name: ?string, custom_description: ?string, amount: string, label: string, line_description: ?string, is_custom: bool}>
+     * @return list<array{catalog_id: ?int, custom_name: ?string, custom_description: ?string, amount: string, label: string, line_description: ?string, is_custom: bool, propose_catalog: bool}>
      */
     private function validateAndNormalizeServiceItems(array $rows, int $companyId): array
     {
@@ -430,6 +481,12 @@ class ServiceController extends Controller
             $lineDescRaw = isset($row['line_description']) ? trim((string) $row['line_description']) : '';
             $lineDescOverride = $lineDescRaw !== '' ? $lineDescRaw : null;
 
+            $proposeCatalog = false;
+            if (array_key_exists('propose_catalog', $row)) {
+                $pc = $row['propose_catalog'];
+                $proposeCatalog = $pc === true || $pc === 1 || $pc === '1' || $pc === 'true';
+            }
+
             $amt = $row['amount'] ?? null;
             if ($amt === null || ! is_numeric($amt) || (float) $amt < 0.01) {
                 throw ValidationException::withMessages([
@@ -449,6 +506,11 @@ class ServiceController extends Controller
                     'items' => ['Línea '.($i + 1).': no combines catálogo y «Otro» en la misma línea.'],
                 ]);
             }
+            if ($cid !== null && $proposeCatalog) {
+                throw ValidationException::withMessages([
+                    'items' => ['Línea '.($i + 1).': propose_catalog solo aplica a líneas «Otro» (sin catálogo).'],
+                ]);
+            }
 
             if ($cid !== null) {
                 $this->assertCatalogAllowedForCompany($cid, $companyId);
@@ -457,14 +519,18 @@ class ServiceController extends Controller
                     throw ValidationException::withMessages(['items' => ['Ítem de catálogo no encontrado.']]);
                 }
                 $lineDesc = $lineDescOverride ?? $cat->description;
+                // Precio de lista real (facturación): el técnico puede ver un % menor en GET /service-catalog/active;
+                // no confiar en el importe enviado por el cliente para líneas de catálogo.
+                $listPrice = number_format((float) $cat->base_price, 2, '.', '');
                 $out[] = [
                     'catalog_id' => $cid,
                     'custom_name' => null,
                     'custom_description' => null,
-                    'amount' => $amtStr,
+                    'amount' => $listPrice,
                     'label' => $cat->name,
                     'line_description' => $lineDesc,
                     'is_custom' => false,
+                    'propose_catalog' => false,
                 ];
             } else {
                 if (mb_strlen($cname) < 2) {
@@ -481,6 +547,7 @@ class ServiceController extends Controller
                     'label' => $cname,
                     'line_description' => $lineDesc,
                     'is_custom' => true,
+                    'propose_catalog' => $proposeCatalog,
                 ];
             }
         }

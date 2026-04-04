@@ -8,7 +8,12 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/** @mixin ServiceCatalog */
+/**
+ * @mixin ServiceCatalog
+ *
+ * Para empleados, base_price puede mostrarse con descuento % (solo referencia visual en registro).
+ * El importe que grava/factura es siempre el base_price real en BD; ver ServiceController::validateAndNormalizeServiceItems.
+ */
 class ServiceCatalogResource extends JsonResource
 {
     public function toArray(Request $request): array

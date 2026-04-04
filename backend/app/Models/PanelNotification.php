@@ -47,6 +47,18 @@ class PanelNotification extends Model
     /** Técnico registró ítem «Otro» pendiente de alta en catálogo. */
     public const TYPE_CATALOG_SUGGESTION_PENDING = 'catalog_suggestion_pending';
 
+    /** Admin modificó datos de un servicio del técnico (queda en estado corregido). */
+    public const TYPE_EMP_SERVICIO_MODIFICADO_ADMIN = 'emp_servicio_modificado_admin';
+
+    /** Admin marcó como eliminado un servicio del técnico. */
+    public const TYPE_EMP_SERVICIO_ELIMINADO_ADMIN = 'emp_servicio_eliminado_admin';
+
+    /** Factura aprobada que incluye servicios del técnico. */
+    public const TYPE_EMP_SERVICIO_FACTURA_APROBADA = 'emp_servicio_factura_aprobada';
+
+    /** Servicio del técnico quitado del borrador de una factura. */
+    public const TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR = 'emp_servicio_excluido_borrador';
+
     protected $table = 'panel_notifications';
 
     /**
@@ -59,6 +71,10 @@ class PanelNotification extends Model
             self::TYPE_EMP_CORREO_RECHAZADO,
             self::TYPE_EMP_PAGO_FACTURA,
             self::TYPE_EMP_DATOS_PAGO_REQUIEREN_ACTUALIZACION,
+            self::TYPE_EMP_SERVICIO_MODIFICADO_ADMIN,
+            self::TYPE_EMP_SERVICIO_ELIMINADO_ADMIN,
+            self::TYPE_EMP_SERVICIO_FACTURA_APROBADA,
+            self::TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR,
         ];
     }
 
@@ -67,7 +83,11 @@ class PanelNotification extends Model
         return match ($type) {
             self::TYPE_SERVICE_CREATED,
             self::TYPE_ALERT_SERVICES_ZERO,
-            self::TYPE_CATALOG_SUGGESTION_PENDING => 'servicios',
+            self::TYPE_CATALOG_SUGGESTION_PENDING,
+            self::TYPE_EMP_SERVICIO_MODIFICADO_ADMIN,
+            self::TYPE_EMP_SERVICIO_ELIMINADO_ADMIN,
+            self::TYPE_EMP_SERVICIO_FACTURA_APROBADA,
+            self::TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR => 'servicios',
             self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
             self::TYPE_EMAIL_CHANGE_REQUEST => 'empleados',
             default => 'facturas',
@@ -123,7 +143,7 @@ class PanelNotification extends Model
                 ? '/admin/servicios/'.$serviceId
                 : '/admin/servicios',
             self::TYPE_ALERT_SERVICES_ZERO => '/admin/servicios',
-            self::TYPE_CATALOG_SUGGESTION_PENDING => '/admin/catalogo-servicios?pendientes=1',
+            self::TYPE_CATALOG_SUGGESTION_PENDING => '/admin/catalogo-servicios',
             self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
             self::TYPE_EMAIL_CHANGE_REQUEST => '/admin/configuracion/cuentas',
             self::TYPE_CUTOFF_APPROACHING,

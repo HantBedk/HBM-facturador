@@ -17,11 +17,6 @@ const selectedRowId = ref(null)
 
 const period = computed(() => data.value?.period)
 
-const historialMesLink = computed(() => {
-  const p = period.value
-  if (!p?.year || !p?.month) return '/empleado/historial'
-  return { path: '/empleado/historial', query: { year: String(p.year), month: String(p.month) } }
-})
 const summary = computed(() => data.value?.summary)
 const recent = computed(() => data.value?.recent_services || [])
 
@@ -227,7 +222,7 @@ function toggleRow(id) {
     <header class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div class="min-w-0">
         <h1 class="text-2xl font-bold leading-tight tracking-tight text-white sm:text-[1.65rem]">
-          Historial de Rendimiento {{ nombreCorto }} al frente
+          Historial de Rendimiento
         </h1>
         <p v-if="period" class="mt-2 text-sm text-slate-500">
           Periodo mostrado: <span class="text-slate-400">{{ period.label }}</span>
@@ -242,12 +237,6 @@ function toggleRow(id) {
         >
           {{ loading ? 'Actualizando…' : 'Actualizar' }}
         </button>
-        <RouterLink
-          :to="historialMesLink"
-          class="rounded-xl border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-300 transition hover:border-sky-400/50 hover:bg-sky-500/15 sm:text-sm"
-        >
-          Historial por mes
-        </RouterLink>
         <RouterLink
           to="/empleado/registro-servicio"
           class="inline-flex items-center gap-2 rounded-2xl border-2 border-sky-400 bg-slate-950/90 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_0_28px_rgba(56,189,248,0.45)] transition hover:border-sky-300 hover:shadow-[0_0_36px_rgba(56,189,248,0.55)]"

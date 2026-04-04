@@ -127,7 +127,7 @@ const routes = [
         component: EmpleadoConfiguracionView,
       },
       { path: '', name: 'empleado-dashboard', component: EmpleadoDashboardView },
-      { path: 'historial', name: 'emp-historial', component: EmployeeHistorialView },
+      { path: 'historial', redirect: { name: 'empleado-dashboard' } },
       { path: 'registro-servicio', name: 'emp-registro-servicio', component: ServiceRegisterView },
       { path: 'listado-servicios', name: 'emp-listado-servicios', component: ServicesListView },
       { path: 'servicio/:id(\\d+)', name: 'emp-servicio-detalle', component: ServiceDetailView, props: true },

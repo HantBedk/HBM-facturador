@@ -67,10 +67,12 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
 
         Route::get('/admin/service-catalog', [AdminServiceCatalogController::class, 'index']);
         Route::post('/admin/service-catalog', [AdminServiceCatalogController::class, 'store']);
+        Route::post('/admin/service-catalog/bulk-destroy', [AdminServiceCatalogController::class, 'bulkDestroy']);
         Route::get('/admin/service-catalog/technician-pricing', [AdminTechnicianCatalogPricingController::class, 'show']);
         Route::put('/admin/service-catalog/technician-pricing', [AdminTechnicianCatalogPricingController::class, 'update']);
         Route::put('/admin/service-catalog/{service_catalog}', [AdminServiceCatalogController::class, 'update']);
         Route::patch('/admin/service-catalog/{service_catalog}/estado', [AdminServiceCatalogController::class, 'updateEstado']);
+        Route::delete('/admin/service-catalog/{service_catalog}', [AdminServiceCatalogController::class, 'destroy']);
 
         Route::get('/admin/service-catalog-suggestions', [AdminServiceCatalogSuggestionController::class, 'index']);
         Route::post('/admin/service-catalog-suggestions/{service_catalog_suggestion}/approve', [AdminServiceCatalogSuggestionController::class, 'approve']);
@@ -104,7 +106,6 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::get('/admin/dashboard', [AdminDashboardController::class, 'index'])->middleware('role:admin,super_admin');
 
     Route::get('/empleado/dashboard', [EmpleadoDashboardController::class, 'index'])->middleware('role:empleado');
-    Route::get('/empleado/historial', [EmployeeHistorialController::class, 'mine'])->middleware('role:empleado');
     Route::get('/empleado/perfil', [EmpleadoPerfilController::class, 'show'])->middleware('role:empleado');
     Route::put('/empleado/perfil', [EmpleadoPerfilController::class, 'update'])->middleware('role:empleado');
     Route::post('/empleado/correo-solicitud', [EmpleadoCorreoSolicitudController::class, 'store'])->middleware('role:empleado');

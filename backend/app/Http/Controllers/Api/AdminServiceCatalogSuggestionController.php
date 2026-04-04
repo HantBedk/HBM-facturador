@@ -7,6 +7,7 @@ use App\Http\Resources\ServiceCatalogSuggestionResource;
 use App\Models\ServiceCatalog;
 use App\Models\ServiceCatalogSuggestion;
 use App\Models\ServiceItem;
+use App\Support\CatalogSuggestionDuplicateChecker;
 use App\Support\Pagination;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,7 +20,7 @@ class AdminServiceCatalogSuggestionController extends Controller
     public function index(Request $request): AnonymousResourceCollection
     {
         $q = ServiceCatalogSuggestion::query()
-            ->with(['company', 'user'])
+            ->with(['user'])
             ->orderByDesc('id');
 
         if ($request->filled('status')) {
@@ -30,6 +31,19 @@ class AdminServiceCatalogSuggestionController extends Controller
 
         if ($request->filled('company_id')) {
             $q->where('company_id', $request->integer('company_id'));
+        }
+
+        $pendingOnly = $request->boolean('pendientes')
+            || ($request->filled('status') && $request->string('status')->toString() === ServiceCatalogSuggestion::STATUS_PENDING);
+
+        if ($pendingOnly) {
+            $candidateRows = (clone $q)->select([
+                'service_catalog_suggestions.id',
+                'service_catalog_suggestions.company_id',
+                'service_catalog_suggestions.name',
+            ])->get();
+            $keepIds = CatalogSuggestionDuplicateChecker::idsWithoutCatalogOverlap($candidateRows);
+            $q->whereIn('service_catalog_suggestions.id', $keepIds);
         }
 
         return ServiceCatalogSuggestionResource::collection(
@@ -52,6 +66,11 @@ class AdminServiceCatalogSuggestionController extends Controller
         ]);
 
         $name = isset($data['name']) ? trim($data['name']) : $service_catalog_suggestion->name;
+        if ($name === '') {
+            throw ValidationException::withMessages([
+                'name' => ['El nombre es obligatorio.'],
+            ]);
+        }
         $description = array_key_exists('description', $data)
             ? ($data['description'] !== null ? trim((string) $data['description']) : null)
             : $service_catalog_suggestion->description;
@@ -59,21 +78,19 @@ class AdminServiceCatalogSuggestionController extends Controller
             ? $data['base_price']
             : (string) $service_catalog_suggestion->suggested_price;
 
-        $companyId = (int) $service_catalog_suggestion->company_id;
-
         $dup = ServiceCatalog::query()
             ->where('name', $name)
-            ->where('company_id', $companyId)
+            ->whereNull('company_id')
             ->exists();
         if ($dup) {
             throw ValidationException::withMessages([
-                'name' => ['Ya existe un ítem con ese nombre para esta empresa.'],
+                'name' => ['Ya existe un ítem global con ese nombre en el catálogo.'],
             ]);
         }
 
-        DB::transaction(function () use ($service_catalog_suggestion, $companyId, $name, $description, $basePrice) {
+        DB::transaction(function () use ($service_catalog_suggestion, $name, $description, $basePrice) {
             $cat = ServiceCatalog::query()->create([
-                'company_id' => $companyId,
+                'company_id' => null,
                 'name' => $name,
                 'description' => $description,
                 'base_price' => $basePrice,
@@ -93,7 +110,7 @@ class AdminServiceCatalogSuggestionController extends Controller
                 ]);
         });
 
-        $service_catalog_suggestion->refresh()->load(['company', 'user']);
+        $service_catalog_suggestion->refresh()->load(['user']);
 
         return (new ServiceCatalogSuggestionResource($service_catalog_suggestion))->response();
     }
@@ -108,7 +125,7 @@ class AdminServiceCatalogSuggestionController extends Controller
 
         $service_catalog_suggestion->status = ServiceCatalogSuggestion::STATUS_REJECTED;
         $service_catalog_suggestion->save();
-        $service_catalog_suggestion->load(['company', 'user']);
+        $service_catalog_suggestion->load(['user']);
 
         return (new ServiceCatalogSuggestionResource($service_catalog_suggestion))->response();
     }
