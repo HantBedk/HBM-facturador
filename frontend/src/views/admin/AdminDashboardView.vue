@@ -1,9 +1,10 @@
 <script setup>
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, defineAsyncComponent } from 'vue'
 import { RouterLink } from 'vue-router'
 import { api } from '@/services/api.js'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
-import VueApexCharts from 'vue3-apexcharts'
+
+const VueApexCharts = defineAsyncComponent(() => import('vue3-apexcharts'))
 
 const loading = ref(true)
 const loadError = ref('')

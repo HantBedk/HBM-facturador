@@ -1,28 +1,29 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import LoginView from '@/views/LoginView.vue'
-import AdminLayout from '@/layouts/AdminLayout.vue'
-import EmpleadoLayout from '@/layouts/EmpleadoLayout.vue'
-import AdminDashboardView from '@/views/admin/AdminDashboardView.vue'
-import CompaniesListView from '@/views/admin/CompaniesListView.vue'
-import InvoicesListView from '@/views/admin/InvoicesListView.vue'
-import InvoiceEditorView from '@/views/admin/InvoiceEditorView.vue'
-import InvoiceDetailView from '@/views/admin/InvoiceDetailView.vue'
-import AdminConfiguracionLayout from '@/layouts/AdminConfiguracionLayout.vue'
-import AdminEmpleadoNotificacionesView from '@/views/admin/AdminEmpleadoNotificacionesView.vue'
-import AdminHistorialMovimientosView from '@/views/admin/AdminHistorialMovimientosView.vue'
-import AdminEmpleadoPerfilView from '@/views/admin/AdminEmpleadoPerfilView.vue'
-import EmpleadosListView from '@/views/admin/EmpleadosListView.vue'
-import EmpleadoDashboardView from '@/views/empleado/EmpleadoDashboardView.vue'
-import EmpleadoConfiguracionView from '@/views/empleado/EmpleadoConfiguracionView.vue'
-import EmpleadoOnboardingView from '@/views/empleado/EmpleadoOnboardingView.vue'
-import EmployeeHistorialView from '@/views/empleado/EmployeeHistorialView.vue'
-import ServicesListView from '@/views/services/ServicesListView.vue'
-import ServiceRegisterView from '@/views/services/ServiceRegisterView.vue'
-import ServiceDetailView from '@/views/services/ServiceDetailView.vue'
-import ServiceEditView from '@/views/services/ServiceEditView.vue'
-import ServiceCatalogView from '@/views/admin/ServiceCatalogView.vue'
-import PublicInvoiceConsultView from '@/views/public/PublicInvoiceConsultView.vue'
+/** Vistas y layouts en chunks aparte: menos JS en /login y carga bajo demanda al navegar. */
+const AdminLayout = () => import('@/layouts/AdminLayout.vue')
+const EmpleadoLayout = () => import('@/layouts/EmpleadoLayout.vue')
+const AdminDashboardView = () => import('@/views/admin/AdminDashboardView.vue')
+const CompaniesListView = () => import('@/views/admin/CompaniesListView.vue')
+const InvoicesListView = () => import('@/views/admin/InvoicesListView.vue')
+const InvoiceEditorView = () => import('@/views/admin/InvoiceEditorView.vue')
+const InvoiceDetailView = () => import('@/views/admin/InvoiceDetailView.vue')
+const AdminConfiguracionLayout = () => import('@/layouts/AdminConfiguracionLayout.vue')
+const AdminEmpleadoNotificacionesView = () => import('@/views/admin/AdminEmpleadoNotificacionesView.vue')
+const AdminHistorialMovimientosView = () => import('@/views/admin/AdminHistorialMovimientosView.vue')
+const AdminEmpleadoPerfilView = () => import('@/views/admin/AdminEmpleadoPerfilView.vue')
+const EmpleadosListView = () => import('@/views/admin/EmpleadosListView.vue')
+const EmpleadoDashboardView = () => import('@/views/empleado/EmpleadoDashboardView.vue')
+const EmpleadoConfiguracionView = () => import('@/views/empleado/EmpleadoConfiguracionView.vue')
+const EmpleadoOnboardingView = () => import('@/views/empleado/EmpleadoOnboardingView.vue')
+const EmployeeHistorialView = () => import('@/views/empleado/EmployeeHistorialView.vue')
+const ServicesListView = () => import('@/views/services/ServicesListView.vue')
+const ServiceRegisterView = () => import('@/views/services/ServiceRegisterView.vue')
+const ServiceDetailView = () => import('@/views/services/ServiceDetailView.vue')
+const ServiceEditView = () => import('@/views/services/ServiceEditView.vue')
+const ServiceCatalogView = () => import('@/views/admin/ServiceCatalogView.vue')
+const PublicInvoiceConsultView = () => import('@/views/public/PublicInvoiceConsultView.vue')
 import { isAdminPanelRole } from '@/utils/roles.js'
 import { isEmpleadoPerfilIncomplete } from '@/utils/empleadoPerfil.js'
 

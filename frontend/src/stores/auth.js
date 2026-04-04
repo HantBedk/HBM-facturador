@@ -36,6 +36,11 @@ export const useAuthStore = defineStore('auth', () => {
       bootstrapped.value = true
       return
     }
+    /** Si ya hay usuario en memoria (p. ej. localStorage), el router no espera a `/auth/me`. */
+    const hadUser = !!user.value
+    if (hadUser) {
+      bootstrapped.value = true
+    }
     try {
       const me = await api('/auth/me')
       const persistent = !!localStorage.getItem('auth_token')
@@ -44,7 +49,9 @@ export const useAuthStore = defineStore('auth', () => {
       clearTokenStorage()
       persistUser(null)
     } finally {
-      bootstrapped.value = true
+      if (!hadUser) {
+        bootstrapped.value = true
+      }
     }
   }
 
