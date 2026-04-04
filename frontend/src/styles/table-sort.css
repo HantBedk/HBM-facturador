@@ -1,0 +1,37 @@
+/* Cabeceras ordenables (tablas .table, .panel-table, .data-table, Tailwind crudo) */
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+  text-align: inherit;
+  border-radius: 6px;
+}
+
+.th-sort:hover {
+  color: #e2e8f0;
+}
+
+.th-sort:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline-offset: 2px;
+}
+
+.th-sort--end {
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.sort-ind {
+  font-size: 0.7rem;
+  opacity: 0.85;
+  white-space: nowrap;
+}

@@ -101,6 +101,40 @@ class ServiceCatalogTest extends TestCase
         $this->assertSame('260000.00', (string) $svc->amount);
     }
 
+    public function test_admin_can_show_single_catalog_item(): void
+    {
+        $cat = ServiceCatalog::query()->create([
+            'name' => 'Item ver uno',
+            'description' => 'Detalle vía API.',
+            'base_price' => 15000,
+            'status' => ServiceCatalog::STATUS_ACTIVO,
+        ]);
+
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/admin/service-catalog/'.$cat->id)
+            ->assertOk()
+            ->assertJsonPath('data.id', $cat->id)
+            ->assertJsonPath('data.code', 'CAT-'.$cat->id)
+            ->assertJsonPath('data.name', 'Item ver uno');
+    }
+
+    public function test_empleado_cannot_access_admin_catalog_show(): void
+    {
+        $cat = ServiceCatalog::query()->create([
+            'name' => 'Privado',
+            'description' => 'Solo admin.',
+            'base_price' => 100,
+            'status' => ServiceCatalog::STATUS_ACTIVO,
+        ]);
+
+        $emp = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
+        Sanctum::actingAs($emp);
+
+        $this->getJson('/api/admin/service-catalog/'.$cat->id)->assertForbidden();
+    }
+
     public function test_inactive_catalog_cannot_be_used_on_new_service(): void
     {
         $cat = ServiceCatalog::query()->create([
@@ -178,6 +212,11 @@ class ServiceCatalogTest extends TestCase
         $svc = Service::query()->latest('id')->first();
         $this->assertSame('300.00', (string) $svc->amount);
         $this->assertSame(2, $svc->items()->count());
+        $items = $svc->items()->orderBy('sort_order')->get();
+        $this->assertSame('90.00', (string) $items[0]->technician_line_amount);
+        $this->assertSame('100.00', (string) $items[0]->amount);
+        $this->assertSame('180.00', (string) $items[1]->technician_line_amount);
+        $this->assertSame('200.00', (string) $items[1]->amount);
     }
 
     public function test_custom_line_creates_pending_suggestion(): void
@@ -355,7 +394,74 @@ class ServiceCatalogTest extends TestCase
 
         $svc = Service::query()->latest('id')->first();
         $this->assertSame('100000.00', (string) $svc->amount);
-        $this->assertSame('100000.00', (string) $svc->items()->first()->amount);
+        $line = $svc->items()->first();
+        $this->assertSame('100000.00', (string) $line->amount);
+        $this->assertSame('90000.00', (string) $line->technician_line_amount);
+    }
+
+    public function test_custom_otro_line_billed_amount_includes_company_margin(): void
+    {
+        AppSetting::setValue(AppSetting::KEY_TECHNICIAN_CATALOG_DISCOUNT_PERCENT, '10');
+
+        $company = Company::query()->create([
+            'nombre' => 'Emp margen',
+            'factura_sigla' => 'EMG',
+            'nit' => '912-2',
+            'estado' => Company::ESTADO_ACTIVO,
+        ]);
+
+        $emp = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
+        Sanctum::actingAs($emp);
+
+        $this->postJson('/api/services', [
+            'company_id' => $company->id,
+            'client_name' => 'Cliente',
+            'service_type' => 'Otro trabajo',
+            'description' => 'Descripción larga del trabajo personalizado para validar margen en factura.',
+            'service_date' => '2026-04-21',
+            'items' => [
+                [
+                    'custom_name' => 'Trabajo especial',
+                    'amount' => 90000,
+                    'line_description' => 'Detalle del trabajo.',
+                ],
+            ],
+        ])->assertCreated();
+
+        $svc = Service::query()->latest('id')->first();
+        $this->assertSame('100000.00', (string) $svc->amount);
+        $line = $svc->items()->first();
+        $this->assertSame('90000.00', (string) $line->technician_line_amount);
+        $this->assertSame('100000.00', (string) $line->amount);
+    }
+
+    public function test_catalog_item_can_override_technician_discount_percent(): void
+    {
+        AppSetting::setValue(AppSetting::KEY_TECHNICIAN_CATALOG_DISCOUNT_PERCENT, '10');
+
+        $company = Company::query()->create([
+            'nombre' => 'Emp override',
+            'factura_sigla' => 'EOV',
+            'nit' => '912-3',
+            'estado' => Company::ESTADO_ACTIVO,
+        ]);
+
+        ServiceCatalog::query()->create([
+            'name' => 'Ítem 20 pct',
+            'description' => 'Descripción larga para ítem con margen distinto al global.',
+            'base_price' => 100000,
+            'technician_discount_percent' => 20,
+            'status' => ServiceCatalog::STATUS_ACTIVO,
+        ]);
+
+        $emp = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
+        Sanctum::actingAs($emp);
+
+        $res = $this->getJson('/api/service-catalog/active?company_id='.$company->id)->assertOk();
+        $row = collect($res->json('data'))->firstWhere('name', 'Ítem 20 pct');
+        $this->assertNotNull($row);
+        $this->assertSame('80000.00', (string) $row['base_price']);
+        $this->assertArrayNotHasKey('technician_discount_percent', $row);
     }
 
     public function test_approve_catalog_suggestion_creates_global_catalog_row(): void

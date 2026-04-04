@@ -166,7 +166,7 @@ async function salir() {
 
         <!-- Configuración: cuentas del equipo (altas, roles, estados) -->
         <RouterLink
-          to="/admin/configuracion/cuentas"
+          to="/admin/configuracion/notificaciones-tecnicos"
           :class="[
             'group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors',
             route.path.startsWith('/admin/configuracion') || /^\/admin\/empleados\/\d+\/perfil$/.test(route.path)

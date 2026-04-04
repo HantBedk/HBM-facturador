@@ -68,12 +68,11 @@ const routes = [
       {
         path: 'configuracion',
         component: AdminConfiguracionLayout,
-        redirect: { name: 'admin-config-cuentas' },
+        redirect: { name: 'admin-notificaciones-tecnicos' },
         children: [
           {
             path: 'cuentas',
-            name: 'admin-config-cuentas',
-            component: EmpleadosListView,
+            redirect: { name: 'admin-emp-rendimiento' },
           },
           {
             path: 'notificaciones-tecnicos',
@@ -96,7 +95,7 @@ const routes = [
       {
         path: 'empleados/rendimiento',
         name: 'admin-emp-rendimiento',
-        component: EmployeeHistorialView,
+        component: EmpleadosListView,
       },
       {
         path: 'empleados/:userId(\\d+)/perfil',
@@ -104,7 +103,7 @@ const routes = [
         component: AdminEmpleadoPerfilView,
         props: true,
       },
-      { path: 'empleados', redirect: '/admin/configuracion/cuentas' },
+      { path: 'empleados', redirect: { name: 'admin-emp-rendimiento' } },
     ],
   },
   {

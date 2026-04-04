@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Invoice;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\File;
 
 /**
@@ -18,20 +19,55 @@ class InvoicePdfPayload
     {
         $preview = (bool) ($options['preview'] ?? false);
 
-        $invoice->loadMissing(['company', 'services.user', 'payments' => fn ($q) => $q->orderBy('payment_date')]);
+        $invoice->loadMissing([
+            'company',
+            'services.user',
+            'services.catalog',
+            'payments' => fn ($q) => $q->orderBy('payment_date'),
+        ]);
 
         $totalPaid = (string) $invoice->payments->sum('amount');
         $total = (string) $invoice->total;
         $balance = max(0, (float) $invoice->total - (float) $totalPaid);
+        $subtotalNum = (float) $invoice->subtotal;
+        $totalNum = (float) $invoice->total;
+        $taxNum = round(max(0, $totalNum - $subtotalNum), 2);
 
         $services = $invoice->services->map(function ($s) {
+            $date = $s->service_date;
+            try {
+                $pdfDate = $date
+                    ? Carbon::parse($date)->timezone(config('app.timezone'))->format('d/m/y')
+                    : '—';
+            } catch (\Throwable) {
+                $pdfDate = '—';
+            }
+
+            $typeLabel = trim((string) ($s->service_type ?? ''));
+            $catalogName = trim((string) ($s->catalog?->name ?? ''));
+            $title = $typeLabel !== '' ? $typeLabel : ($catalogName !== '' ? $catalogName : 'Servicio');
+
+            $detail = trim((string) ($s->description ?? ''));
+            $client = trim((string) ($s->client_name ?? ''));
+            if ($client !== '') {
+                $detail = $detail !== '' ? $detail.' ('.$client.')' : '('.$client.')';
+            }
+
+            $amountStr = (string) $s->amount;
+
             return [
                 'service_date' => $s->service_date?->format('Y-m-d'),
                 'code' => $s->code,
                 'description' => $s->description,
                 'service_type' => $s->service_type,
                 'technician_name' => $s->user?->nombre,
-                'amount' => (string) $s->amount,
+                'amount' => $amountStr,
+                'pdf_date_label' => $pdfDate,
+                'pdf_title' => $title,
+                'pdf_detail' => $detail !== '' ? $detail : null,
+                'pdf_qty' => 1,
+                'pdf_unit' => $amountStr,
+                'pdf_line_total' => $amountStr,
             ];
         })->values()->all();
 
@@ -48,7 +84,10 @@ class InvoicePdfPayload
         $clientContact = $clientNames !== [] ? implode(', ', $clientNames) : null;
 
         $issuedAt = $invoice->created_at;
-        $issuedLabel = $issuedAt ? $issuedAt->timezone(config('app.timezone'))->format('d/m/Y') : '';
+        $issuedTz = $issuedAt?->timezone(config('app.timezone'));
+        $issuedLabel = $issuedTz ? $issuedTz->format('d/m/y') : '';
+        $issuedTimeLabel = $issuedTz ? $issuedTz->format('g:i A') : '';
+        $periodLabel = self::invoicePeriodLabel((int) $invoice->period_month, (int) $invoice->period_year);
 
         return [
             'issuer' => self::issuerBlock(),
@@ -56,13 +95,15 @@ class InvoicePdfPayload
                 'code' => $invoice->code,
                 'number' => $invoice->code,
                 'status' => $invoice->status,
-                'status_label' => self::statusLabel($invoice->status),
+                'status_label' => self::invoiceStatusLabel($invoice->status),
                 'period_month' => $invoice->period_month,
                 'period_year' => $invoice->period_year,
-                'period_label' => self::periodLabel((int) $invoice->period_month, (int) $invoice->period_year),
+                'period_label' => $periodLabel,
+                'period_label_upper' => SafeUtf8::upper($periodLabel),
                 'sent_at' => $invoice->sent_at?->toIso8601String(),
                 'issued_at' => $issuedAt?->toIso8601String(),
                 'issued_at_label' => $issuedLabel,
+                'issued_time_label' => $issuedTimeLabel,
             ],
             'document' => [
                 'is_preview' => $preview,
@@ -74,6 +115,7 @@ class InvoicePdfPayload
                 'telefono' => $invoice->company?->telefono,
                 'correo' => $invoice->company?->correo,
                 'contact' => $clientContact,
+                'direccion' => data_get($invoice->company, 'direccion'),
             ],
             'services' => $services,
             'products' => [],
@@ -82,17 +124,20 @@ class InvoicePdfPayload
                 'total' => $total,
                 'total_paid' => $totalPaid,
                 'balance' => number_format($balance, 2, '.', ''),
+                'tax_amount' => number_format($taxNum, 2, '.', ''),
+                'tax_label' => $taxNum > 0.0001 ? 'IVA / otros cargos' : 'IVA (0%)',
             ],
             'payments' => $payments,
             'footer' => [
                 'message' => (string) config('billing.footer_message'),
                 'payment_terms' => (string) config('billing.payment_terms'),
+                'payment_methods' => config('billing.pdf_payment_methods', []),
             ],
         ];
     }
 
     /**
-     * @return array{nombre: string, nit: string, direccion: string, telefono: string, correo: string, logo_data_uri: ?string}
+     * @return array{nombre: string, nit: string, direccion: string, telefono: string, correo: string, regimen: string, logo_data_uri: ?string}
      */
     private static function issuerBlock(): array
     {
@@ -104,6 +149,7 @@ class InvoicePdfPayload
             'direccion' => (string) ($cfg['direccion'] ?? ''),
             'telefono' => (string) ($cfg['telefono'] ?? ''),
             'correo' => (string) ($cfg['correo'] ?? ''),
+            'regimen' => (string) ($cfg['regimen'] ?? ''),
             'logo_data_uri' => self::logoDataUri(),
         ];
     }
@@ -149,7 +195,7 @@ class InvoicePdfPayload
         return (bool) preg_match('/^[A-Za-z]:[\\\\\\/]/', $path);
     }
 
-    private static function statusLabel(string $status): string
+    public static function invoiceStatusLabel(string $status): string
     {
         return match ($status) {
             Invoice::STATUS_BORRADOR => 'Borrador',
@@ -161,7 +207,7 @@ class InvoicePdfPayload
         };
     }
 
-    private static function periodLabel(int $month, int $year): string
+    public static function invoicePeriodLabel(int $month, int $year): string
     {
         $months = [
             1 => 'Enero', 2 => 'Febrero', 3 => 'Marzo', 4 => 'Abril',

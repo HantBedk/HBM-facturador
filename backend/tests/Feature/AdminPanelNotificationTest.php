@@ -117,7 +117,7 @@ class AdminPanelNotificationTest extends TestCase
         Sanctum::actingAs($admin);
 
         $this->getJson('/api/admin/notifications')->assertOk()
-            ->assertJsonPath('data.0.link', '/admin/configuracion/cuentas?usuario_id=12');
+            ->assertJsonPath('data.0.link', '/admin/empleados/rendimiento?usuario_id=12');
     }
 
     public function test_empleado_first_profile_completion_notifies_admins(): void

@@ -33,7 +33,7 @@ class AdminUserController extends Controller
 
     public function index(Request $request): AnonymousResourceCollection
     {
-        $q = User::query()->orderBy('nombre');
+        $q = User::query();
 
         if ($this->isActorAdminLimited($request)) {
             $q->where('rol', User::ROL_EMPLEADO);
@@ -63,6 +63,15 @@ class AdminUserController extends Controller
             User::ESTADO_INACTIVO,
         ], true)) {
             $q->where('estado', $request->string('estado')->toString());
+        }
+
+        $sort = $request->query('sort');
+        $sortDir = strtolower((string) $request->query('sort_dir', 'asc')) === 'desc' ? 'desc' : 'asc';
+        $allowedSorts = ['nombre', 'correo', 'rol', 'estado', 'created_at'];
+        if (is_string($sort) && in_array($sort, $allowedSorts, true)) {
+            $q->orderBy($sort, $sortDir)->orderBy('id', $sortDir);
+        } else {
+            $q->orderBy('nombre')->orderBy('id');
         }
 
         return UserResource::collection(

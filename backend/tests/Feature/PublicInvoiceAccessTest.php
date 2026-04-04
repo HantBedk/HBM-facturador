@@ -58,35 +58,55 @@ class PublicInvoiceAccessTest extends TestCase
         return ['invoice' => $invoice->fresh(), 'plain' => $plain];
     }
 
-    public function test_public_consult_requires_verification_code(): void
+    public function test_public_consult_requires_query(): void
+    {
+        $this->seedPublicInvoice();
+
+        $this->postJson('/api/public/invoices/consult', [])->assertStatus(422);
+    }
+
+    public function test_public_consult_ok_with_invoice_code_only(): void
     {
         $this->seedPublicInvoice();
 
         $this->postJson('/api/public/invoices/consult', [
-            'code' => 'PUB-FAC-001',
-        ])->assertStatus(422);
+            'query' => 'PUB-FAC-001',
+        ])->assertOk()
+            ->assertJsonPath('kind', 'invoice')
+            ->assertJsonPath('invoice.code', 'PUB-FAC-001');
     }
 
-    public function test_public_consult_denies_wrong_verification(): void
+    public function test_public_consult_invoice_code_case_insensitive(): void
     {
         $this->seedPublicInvoice();
 
         $this->postJson('/api/public/invoices/consult', [
-            'code' => 'PUB-FAC-001',
-            'verification_code' => 'wrong-token',
-        ])->assertStatus(404)
-            ->assertJsonPath('code', 'public_invoice_denied');
-    }
-
-    public function test_public_consult_ok_with_code_and_verification(): void
-    {
-        $s = $this->seedPublicInvoice();
-
-        $this->postJson('/api/public/invoices/consult', [
-            'code' => 'PUB-FAC-001',
-            'verification_code' => $s['plain'],
+            'query' => 'pub-fac-001',
         ])->assertOk()
             ->assertJsonPath('invoice.code', 'PUB-FAC-001');
+    }
+
+    public function test_public_consult_by_nit_returns_invoice_list(): void
+    {
+        $this->seedPublicInvoice();
+
+        $this->postJson('/api/public/invoices/consult', [
+            'query' => '9001112229',
+        ])->assertOk()
+            ->assertJsonPath('kind', 'invoice_list')
+            ->assertJsonPath('company.nit', '900111222-9')
+            ->assertJsonCount(1, 'invoices')
+            ->assertJsonPath('invoices.0.code', 'PUB-FAC-001');
+    }
+
+    public function test_public_consult_unknown_query_returns_404(): void
+    {
+        $this->seedPublicInvoice();
+
+        $this->postJson('/api/public/invoices/consult', [
+            'query' => 'NO-EXISTE-999',
+        ])->assertStatus(404)
+            ->assertJsonPath('code', 'public_invoice_denied');
     }
 
     public function test_public_consult_rejects_borrador(): void
@@ -95,9 +115,20 @@ class PublicInvoiceAccessTest extends TestCase
         $s['invoice']->update(['status' => Invoice::STATUS_BORRADOR]);
 
         $this->postJson('/api/public/invoices/consult', [
-            'code' => 'PUB-FAC-001',
-            'verification_code' => $s['plain'],
+            'query' => 'PUB-FAC-001',
         ])->assertStatus(403)
-            ->assertJsonPath('code', 'invoice_unavailable');
+            ->assertJsonPath('code', 'invoice_unavailable')
+            ->assertJsonPath('reason', 'borrador');
+    }
+
+    public function test_public_consult_normalizes_spaces_in_invoice_code(): void
+    {
+        $this->seedPublicInvoice();
+
+        $this->postJson('/api/public/invoices/consult', [
+            'query' => '  PUB - FAC - 001 ',
+        ])->assertOk()
+            ->assertJsonPath('kind', 'invoice')
+            ->assertJsonPath('invoice.code', 'PUB-FAC-001');
     }
 }

@@ -44,9 +44,9 @@ class EmpleadoCorreoSolicitudController extends Controller
 
         app(PanelNotificationDispatcher::class)->notifyAdmins(
             PanelNotification::TYPE_EMAIL_CHANGE_REQUEST,
-            'El técnico '.$user->nombre.' solicitó cambiar su correo a '.$nuevo.'. Revisa y aprueba en Configuración → cuentas del equipo.',
+            'El técnico '.$user->nombre.' solicitó cambiar su correo a '.$nuevo.'. Revisa y aprueba en Empleados.',
             [
-                'link' => '/admin/configuracion/cuentas?usuario_id='.$user->id,
+                'link' => '/admin/empleados/rendimiento?usuario_id='.$user->id,
                 'empleado_id' => $user->id,
                 'correo_solicitado' => $nuevo,
             ],

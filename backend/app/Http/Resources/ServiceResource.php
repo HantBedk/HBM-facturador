@@ -21,7 +21,10 @@ class ServiceResource extends JsonResource
             'client_name' => $this->client_name,
             'service_type' => $this->service_type,
             'description' => $this->description,
+            /** Total facturable (suma de líneas que van a factura). */
             'amount' => $this->amount,
+            /** Suma de importes de referencia del técnico por línea (menor que lo facturado si aplica margen). */
+            'technician_line_total' => $this->technicianLineTotalAttribute(),
             'service_date' => $this->service_date?->format('Y-m-d'),
             'status' => $this->status,
             'invoiced' => isset($this->resource->invoices_count)
@@ -60,12 +63,32 @@ class ServiceResource extends JsonResource
                 'catalog_suggestion_id' => $it->catalog_suggestion_id,
                 'label' => $it->label,
                 'line_description' => $it->line_description,
+                /** Importe en factura (línea). */
                 'amount' => (string) $it->amount,
+                /** Importe de referencia del técnico (lo que “ve” o ingresó). */
+                'technician_line_amount' => $it->technician_line_amount !== null ? (string) $it->technician_line_amount : null,
                 'sort_order' => (int) $it->sort_order,
                 'suggestion_status' => $it->relationLoaded('catalogSuggestion') && $it->catalogSuggestion
                     ? $it->catalogSuggestion->status
                     : null,
             ])->values()->all()),
         ];
+    }
+
+    private function technicianLineTotalAttribute(): string
+    {
+        if ($this->relationLoaded('items') && $this->items->isNotEmpty()) {
+            $s = $this->items->sum(fn ($i) => (float) $i->technician_line_amount);
+
+            return number_format($s, 2, '.', '');
+        }
+
+        $sum = $this->resource->getAttribute('items_sum_technician_line_amount');
+        $cnt = (int) $this->resource->getAttribute('items_count');
+        if ($sum !== null && $cnt > 0) {
+            return number_format((float) $sum, 2, '.', '');
+        }
+
+        return number_format((float) $this->amount, 2, '.', '');
     }
 }

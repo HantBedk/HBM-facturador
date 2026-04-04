@@ -24,7 +24,8 @@ const redirectTarget = computed(() => {
   return typeof r === 'string' ? r : null
 })
 
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+/** Permite dominios de desarrollo sin punto (p. ej. user@intranet) y @hbm.local */
+const emailPattern = /^[^\s@]+@[^\s@]+(\.[^\s@]+)*$/
 
 function syncLoginFieldsFromDom() {
   const emailNode = correoInputEl.value
@@ -54,6 +55,11 @@ function validateLocal() {
 }
 
 function mapServerError(e) {
+  if (e?.status === 429) {
+    globalError.value =
+      'Demasiados intentos. Espere un minuto y vuelva a intentar o reinicie el servidor si está en desarrollo.'
+    return
+  }
   if (e?.data?.errors) {
     const err = { ...e.data.errors }
     if (err.correo?.length) {

@@ -1,18 +1,89 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import { RouterLink } from 'vue-router'
 import { publicApi, publicApiBlob } from '@/services/api.js'
+import { openPdfBlobInNewTab, triggerPdfDownload } from '@/utils/pdfBlob.js'
 
-/** @type {import('vue').Ref<'consult' | 'result'>} */
+/** @type {import('vue').Ref<'consult' | 'list' | 'result'>} */
 const viewState = ref('consult')
-const code = ref('')
-const verificationCode = ref('')
-const nit = ref('')
+/** Texto único: código de factura (FAC-…) o NIT de empresa */
+const query = ref('')
 const payload = ref(null)
+/** @type {import('vue').Ref<null | { company: object, invoices: object[] }>} */
+const listResult = ref(null)
 const loading = ref(false)
 const loadingPdf = ref(false)
 const errorMessage = ref('')
 const fieldErrors = ref({})
+
+const listInvoicesSource = computed(() => listResult.value?.invoices || [])
+const {
+  sortedRows: sortedListInvoices,
+  toggleSort: toggleListInvSort,
+  sortIndicator: listInvSortInd,
+  ariaSort: listInvAriaSort,
+} = useClientSortedRows(
+  listInvoicesSource,
+  {
+    code: (inv) => inv.code || '',
+    period_label: (inv) => inv.period_label || '',
+    status: (inv) => inv.status || inv.status_label || '',
+    total: (inv) => Number(inv.total) || 0,
+    balance: (inv) => Number(inv.balance) || 0,
+  },
+  { initialKey: 'code', initialDir: 'asc' }
+)
+
+const publicServicesSource = computed(() => payload.value?.services || [])
+const {
+  sortedRows: sortedPublicServices,
+  toggleSort: togglePubSvcSort,
+  sortIndicator: pubSvcSortInd,
+  ariaSort: pubSvcAriaSort,
+} = useClientSortedRows(
+  publicServicesSource,
+  {
+    service_date: (r) => r.service_date || '',
+    code: (r) => r.code || '',
+    technician_name: (r) => r.technician_name || '',
+    description: (r) => r.description || '',
+    amount: (r) => Number(r.amount) || 0,
+  },
+  { initialKey: 'service_date', initialDir: 'asc' }
+)
+
+const publicProductsSource = computed(() => payload.value?.products || [])
+const {
+  sortedRows: sortedPublicProducts,
+  toggleSort: togglePubProdSort,
+  sortIndicator: pubProdSortInd,
+  ariaSort: pubProdAriaSort,
+} = useClientSortedRows(
+  publicProductsSource,
+  {
+    name: (pr) => pr.name || '',
+    quantity: (pr) => Number(pr.quantity) || 0,
+    price: (pr) => Number(pr.price) || 0,
+  },
+  { initialKey: 'name', initialDir: 'asc' }
+)
+
+const publicPaymentsSource = computed(() => payload.value?.payments || [])
+const {
+  sortedRows: sortedPublicPayments,
+  toggleSort: togglePubPaySort,
+  sortIndicator: pubPaySortInd,
+  ariaSort: pubPayAriaSort,
+} = useClientSortedRows(
+  publicPaymentsSource,
+  {
+    payment_date: (p) => p.payment_date || '',
+    amount: (p) => Number(p.amount) || 0,
+    method: (p) => p.method || '',
+  },
+  { initialKey: 'payment_date', initialDir: 'asc' }
+)
 
 const taxEstimate = computed(() => {
   const sub = Number(payload.value?.financial?.subtotal)
@@ -26,6 +97,12 @@ function pillClass() {
   const label = (payload.value?.invoice?.status_label || '').toLowerCase()
   if (label.includes('pagad')) return 'pill pill--ok'
   if (label.includes('parcial')) return 'pill pill--warn'
+  return 'pill pill--neutral'
+}
+
+function pillClassForStatus(status) {
+  if (status === 'pagada') return 'pill pill--ok'
+  if (status === 'parcialmente_pagada') return 'pill pill--warn'
   return 'pill pill--neutral'
 }
 
@@ -54,14 +131,9 @@ function formatDate(iso) {
 function validateForm() {
   fieldErrors.value = {}
   errorMessage.value = ''
-  const c = code.value.trim()
-  const v = verificationCode.value.trim()
-  if (!c) {
-    fieldErrors.value = { code: ['Indica el código de factura.'] }
-    return false
-  }
-  if (!v) {
-    fieldErrors.value = { verification_code: ['Indica el código de verificación (lo entrega su empresa con la factura).'] }
+  const q = query.value.trim()
+  if (!q) {
+    fieldErrors.value = { query: ['Indique el código de factura o el NIT de la empresa.'] }
     return false
   }
   return true
@@ -74,15 +146,18 @@ async function onConsult() {
   try {
     const res = await publicApi('/public/invoices/consult', {
       method: 'POST',
-      body: JSON.stringify({
-        code: code.value.trim(),
-        verification_code: verificationCode.value.trim(),
-        nit: nit.value.trim() || undefined,
-      }),
+      body: JSON.stringify({ query: query.value.trim() }),
     })
 
-    payload.value = res
-    viewState.value = 'result'
+    if (res.kind === 'invoice_list') {
+      listResult.value = { company: res.company, invoices: res.invoices || [] }
+      payload.value = null
+      viewState.value = 'list'
+    } else {
+      listResult.value = null
+      payload.value = res
+      viewState.value = 'result'
+    }
   } catch (e) {
     payload.value = null
     if (e.status === 404 || e.status === 403) {
@@ -102,8 +177,37 @@ async function onConsult() {
 function nuevaConsulta() {
   viewState.value = 'consult'
   payload.value = null
+  listResult.value = null
   errorMessage.value = ''
   fieldErrors.value = {}
+}
+
+async function verDetalleFactura(code) {
+  const c = String(code || '').trim()
+  if (!c) return
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    const res = await publicApi('/public/invoices/consult', {
+      method: 'POST',
+      body: JSON.stringify({ query: c }),
+    })
+    if (res.kind === 'invoice_list') {
+      errorMessage.value = 'No se pudo cargar el detalle. Intente de nuevo.'
+      return
+    }
+    listResult.value = null
+    payload.value = res
+    viewState.value = 'result'
+  } catch (e) {
+    if (e.status === 404 || e.status === 403) {
+      errorMessage.value = e.message || 'No se pudo cargar la factura.'
+    } else {
+      errorMessage.value = e.message || 'Ocurrió un error. Intente más tarde.'
+    }
+  } finally {
+    loading.value = false
+  }
 }
 
 function imprimir() {
@@ -118,23 +222,29 @@ async function descargarPdf() {
   try {
     const { blob, filename } = await publicApiBlob('/public/invoices/pdf', {
       method: 'POST',
-      body: JSON.stringify({
-        code: invoiceCode,
-        verification_code: verificationCode.value.trim(),
-        nit: nit.value.trim() || undefined,
-      }),
+      body: JSON.stringify({ code: invoiceCode }),
     })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.rel = 'noopener'
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
+    triggerPdfDownload(blob, filename)
   } catch (e) {
     errorMessage.value = e.message || 'No se pudo generar el PDF.'
+  } finally {
+    loadingPdf.value = false
+  }
+}
+
+async function verPdfEnPestaña() {
+  const invoiceCode = payload.value?.invoice?.code
+  if (!invoiceCode) return
+  loadingPdf.value = true
+  errorMessage.value = ''
+  try {
+    const { blob } = await publicApiBlob('/public/invoices/pdf', {
+      method: 'POST',
+      body: JSON.stringify({ code: invoiceCode }),
+    })
+    openPdfBlobInNewTab(blob)
+  } catch (e) {
+    errorMessage.value = e.message || 'No se pudo abrir el PDF.'
   } finally {
     loadingPdf.value = false
   }
@@ -149,50 +259,95 @@ async function descargarPdf() {
       <section class="search-card" aria-labelledby="titulo-consulta">
         <h1 id="titulo-consulta" class="search-title">Consultar Factura</h1>
         <p class="search-sub">
-          Ingrese el <strong>código de factura</strong> y el <strong>código de verificación</strong> que le entregó la empresa
-          (se genera al aprobar la factura). Opcionalmente puede indicar el NIT de la empresa como comprobación adicional. Sin
+          Escriba el <strong>código de la factura</strong> (ej. FAC-…) para ver el detalle, abrir o descargar el PDF, o el
+          <strong>NIT de su empresa</strong> (con o sin puntos o guiones) para listar todas las facturas disponibles. Sin
           inicio de sesión.
         </p>
+        <p class="search-hint muted">
+          Solo aparecen facturas ya <strong>aprobadas o enviadas</strong> (no borradores). Si acaba de generarse la
+          factura, el administrador debe aprobarla en el panel antes de que sea visible aquí.
+        </p>
         <div class="search-row">
-          <label class="search-field">
-            <span class="search-label">Código de Factura</span>
+          <label class="search-field search-field--grow">
+            <span class="search-label">Código de factura o NIT</span>
             <input
-              v-model="code"
+              v-model="query"
               type="text"
               autocomplete="off"
-              placeholder="FAC-260318-SYF"
-              :class="{ 'input-invalid': fieldErrors.code }"
+              placeholder="FAC-260318-SYF o 900.111.222-9"
+              :class="{ 'input-invalid': fieldErrors.query }"
               @keyup.enter="onConsult"
             />
-            <span v-if="fieldErrors.code" class="field-err">{{ fieldErrors.code[0] }}</span>
-          </label>
-          <label class="search-field">
-            <span class="search-label">Código de verificación</span>
-            <input
-              v-model="verificationCode"
-              type="password"
-              autocomplete="off"
-              placeholder="Código secreto"
-              :class="{ 'input-invalid': fieldErrors.verification_code }"
-              @keyup.enter="onConsult"
-            />
-            <span v-if="fieldErrors.verification_code" class="field-err">{{ fieldErrors.verification_code[0] }}</span>
-          </label>
-          <label class="search-field">
-            <span class="search-label">NIT (opcional)</span>
-            <input
-              v-model="nit"
-              type="text"
-              autocomplete="off"
-              placeholder="900.873.222"
-              @keyup.enter="onConsult"
-            />
+            <span v-if="fieldErrors.query" class="field-err">{{ fieldErrors.query[0] }}</span>
           </label>
           <button type="button" class="btn-search" :disabled="loading" @click="onConsult">
-            {{ loading ? 'Consultando…' : 'Consultar Factura' }}
+            {{ loading ? 'Consultando…' : 'Consultar' }}
           </button>
         </div>
         <p v-if="errorMessage && viewState === 'consult'" class="alert" role="alert">{{ errorMessage }}</p>
+      </section>
+
+      <section v-if="viewState === 'list' && listResult" class="detail-card list-card">
+        <h2 class="list-title">Facturas de la empresa</h2>
+        <p class="list-meta muted">
+          <strong>{{ listResult.company?.nombre || '—' }}</strong>
+          <span v-if="listResult.company?.nit"> · NIT {{ listResult.company.nit }}</span>
+        </p>
+        <p v-if="errorMessage" class="alert" role="alert">{{ errorMessage }}</p>
+        <p v-if="!sortedListInvoices.length" class="muted list-empty">No hay facturas publicadas para este NIT.</p>
+        <div v-else class="table-wrap list-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col" :aria-sort="listInvAriaSort('code')">
+                  <button type="button" class="th-sort" @click="toggleListInvSort('code')">
+                    Código<span class="sort-ind" aria-hidden="true">{{ listInvSortInd('code') }}</span>
+                  </button>
+                </th>
+                <th scope="col" :aria-sort="listInvAriaSort('period_label')">
+                  <button type="button" class="th-sort" @click="toggleListInvSort('period_label')">
+                    Periodo<span class="sort-ind" aria-hidden="true">{{ listInvSortInd('period_label') }}</span>
+                  </button>
+                </th>
+                <th scope="col" :aria-sort="listInvAriaSort('status')">
+                  <button type="button" class="th-sort" @click="toggleListInvSort('status')">
+                    Estado<span class="sort-ind" aria-hidden="true">{{ listInvSortInd('status') }}</span>
+                  </button>
+                </th>
+                <th class="num" scope="col" :aria-sort="listInvAriaSort('total')">
+                  <button type="button" class="th-sort th-sort--end" @click="toggleListInvSort('total')">
+                    Total<span class="sort-ind" aria-hidden="true">{{ listInvSortInd('total') }}</span>
+                  </button>
+                </th>
+                <th class="num" scope="col" :aria-sort="listInvAriaSort('balance')">
+                  <button type="button" class="th-sort th-sort--end" @click="toggleListInvSort('balance')">
+                    Saldo<span class="sort-ind" aria-hidden="true">{{ listInvSortInd('balance') }}</span>
+                  </button>
+                </th>
+                <th class="list-actions-col" />
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="inv in sortedListInvoices" :key="inv.id">
+                <td class="mono">{{ inv.code }}</td>
+                <td>{{ inv.period_label }}</td>
+                <td>
+                  <span class="pill" :class="pillClassForStatus(inv.status)">{{ inv.status_label }}</span>
+                </td>
+                <td class="num">{{ formatMoney(inv.total) }}</td>
+                <td class="num">{{ formatMoney(inv.balance) }}</td>
+                <td class="list-actions-col">
+                  <button type="button" class="link-btn" :disabled="loading" @click="verDetalleFactura(inv.code)">
+                    Ver detalle
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="actions no-print">
+          <button type="button" class="btn ghost" @click="nuevaConsulta">Nueva consulta</button>
+        </div>
       </section>
 
       <section v-if="viewState === 'result'" id="invoice-print" class="detail-card detail-card--invoice">
@@ -228,6 +383,13 @@ async function descargarPdf() {
                 <path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z" />
               </svg>
               Imprimir
+            </button>
+            <button type="button" class="btn-white" :disabled="loadingPdf" @click="verPdfEnPestaña">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              {{ loadingPdf ? 'Generando…' : 'Ver PDF' }}
             </button>
             <button type="button" class="btn-white" :disabled="loadingPdf" @click="descargarPdf">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
@@ -276,16 +438,36 @@ async function descargarPdf() {
             <table class="data-table data-table--services">
               <thead>
                 <tr>
-                  <th>Fecha</th>
-                  <th>Código de servicio</th>
-                  <th>Técnico (empleado)</th>
-                  <th>Descripción completa del servicio</th>
+                  <th scope="col" :aria-sort="pubSvcAriaSort('service_date')">
+                    <button type="button" class="th-sort" @click="togglePubSvcSort('service_date')">
+                      Fecha<span class="sort-ind" aria-hidden="true">{{ pubSvcSortInd('service_date') }}</span>
+                    </button>
+                  </th>
+                  <th scope="col" :aria-sort="pubSvcAriaSort('code')">
+                    <button type="button" class="th-sort" @click="togglePubSvcSort('code')">
+                      Código de servicio<span class="sort-ind" aria-hidden="true">{{ pubSvcSortInd('code') }}</span>
+                    </button>
+                  </th>
+                  <th scope="col" :aria-sort="pubSvcAriaSort('technician_name')">
+                    <button type="button" class="th-sort" @click="togglePubSvcSort('technician_name')">
+                      Técnico (empleado)<span class="sort-ind" aria-hidden="true">{{ pubSvcSortInd('technician_name') }}</span>
+                    </button>
+                  </th>
+                  <th scope="col" :aria-sort="pubSvcAriaSort('description')">
+                    <button type="button" class="th-sort" @click="togglePubSvcSort('description')">
+                      Descripción completa del servicio<span class="sort-ind" aria-hidden="true">{{ pubSvcSortInd('description') }}</span>
+                    </button>
+                  </th>
                   <th class="center">Tiempo invertido (horas)</th>
-                  <th class="num">Valor</th>
+                  <th class="num" scope="col" :aria-sort="pubSvcAriaSort('amount')">
+                    <button type="button" class="th-sort th-sort--end" @click="togglePubSvcSort('amount')">
+                      Valor<span class="sort-ind" aria-hidden="true">{{ pubSvcSortInd('amount') }}</span>
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(row, i) in payload?.services || []" :key="i">
+                <tr v-for="(row, i) in sortedPublicServices" :key="i">
                   <td>{{ formatDate(row.service_date) }}</td>
                   <td class="mono">{{ row.code }}</td>
                   <td>{{ row.technician_name || '—' }}</td>
@@ -328,13 +510,25 @@ async function descargarPdf() {
             <table class="data-table">
               <thead>
                 <tr>
-                  <th>Nombre</th>
-                  <th class="num">Cantidad</th>
-                  <th class="num">Precio</th>
+                  <th scope="col" :aria-sort="pubProdAriaSort('name')">
+                    <button type="button" class="th-sort" @click="togglePubProdSort('name')">
+                      Nombre<span class="sort-ind" aria-hidden="true">{{ pubProdSortInd('name') }}</span>
+                    </button>
+                  </th>
+                  <th class="num" scope="col" :aria-sort="pubProdAriaSort('quantity')">
+                    <button type="button" class="th-sort th-sort--end" @click="togglePubProdSort('quantity')">
+                      Cantidad<span class="sort-ind" aria-hidden="true">{{ pubProdSortInd('quantity') }}</span>
+                    </button>
+                  </th>
+                  <th class="num" scope="col" :aria-sort="pubProdAriaSort('price')">
+                    <button type="button" class="th-sort th-sort--end" @click="togglePubProdSort('price')">
+                      Precio<span class="sort-ind" aria-hidden="true">{{ pubProdSortInd('price') }}</span>
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(pr, i) in payload.products" :key="i">
+                <tr v-for="(pr, i) in sortedPublicProducts" :key="i">
                   <td>{{ pr.name }}</td>
                   <td class="num">{{ pr.quantity }}</td>
                   <td class="num">{{ formatMoney(pr.price) }}</td>
@@ -346,18 +540,30 @@ async function descargarPdf() {
 
         <section class="block-extra">
           <h3 class="panel-kicker">Historial de pagos</h3>
-          <div v-if="!(payload?.payments || []).length" class="muted">Sin pagos registrados.</div>
+          <div v-if="!sortedPublicPayments.length" class="muted">Sin pagos registrados.</div>
           <div v-else class="table-wrap">
             <table class="data-table">
               <thead>
                 <tr>
-                  <th>Fecha</th>
-                  <th class="num">Monto</th>
-                  <th>Método</th>
+                  <th scope="col" :aria-sort="pubPayAriaSort('payment_date')">
+                    <button type="button" class="th-sort" @click="togglePubPaySort('payment_date')">
+                      Fecha<span class="sort-ind" aria-hidden="true">{{ pubPaySortInd('payment_date') }}</span>
+                    </button>
+                  </th>
+                  <th class="num" scope="col" :aria-sort="pubPayAriaSort('amount')">
+                    <button type="button" class="th-sort th-sort--end" @click="togglePubPaySort('amount')">
+                      Monto<span class="sort-ind" aria-hidden="true">{{ pubPaySortInd('amount') }}</span>
+                    </button>
+                  </th>
+                  <th scope="col" :aria-sort="pubPayAriaSort('method')">
+                    <button type="button" class="th-sort" @click="togglePubPaySort('method')">
+                      Método<span class="sort-ind" aria-hidden="true">{{ pubPaySortInd('method') }}</span>
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(p, i) in payload.payments" :key="i">
+                <tr v-for="(p, i) in sortedPublicPayments" :key="i">
                   <td>{{ formatDate(p.payment_date) }}</td>
                   <td class="num">{{ formatMoney(p.amount) }}</td>
                   <td>{{ p.method }}</td>
@@ -445,6 +651,13 @@ async function descargarPdf() {
   font-weight: 600;
 }
 
+.search-hint {
+  margin: 0.65rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  max-width: 40rem;
+}
+
 .search-row {
   margin-top: 1.1rem;
   display: flex;
@@ -464,10 +677,68 @@ async function descargarPdf() {
     flex: 1 1 200px;
     min-width: 0;
   }
+  .search-field--grow {
+    flex: 2 1 280px;
+  }
   .btn-search {
     flex: 0 0 auto;
     align-self: flex-end;
   }
+}
+
+.list-card {
+  padding: 1.35rem 1.25rem 1.5rem;
+}
+
+.list-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.list-meta {
+  margin: 0.5rem 0 1rem;
+  font-size: 0.9rem;
+}
+
+.list-meta strong {
+  color: #e2e8f0;
+}
+
+.list-empty {
+  margin: 0 0 1rem;
+}
+
+.list-table-wrap {
+  margin-bottom: 0.5rem;
+}
+
+.list-actions-col {
+  white-space: nowrap;
+  width: 1%;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #7dd3fc;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(125, 211, 252, 0.45);
+}
+
+.link-btn:hover:not(:disabled) {
+  color: #bae6fd;
+}
+
+.link-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .search-label {

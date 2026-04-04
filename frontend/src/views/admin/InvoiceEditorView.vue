@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
+import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { fetchCompanies } from '@/services/servicesApi.js'
 import {
@@ -28,6 +29,22 @@ const periodMonth = ref(new Date().getMonth() + 1)
 
 const available = ref([])
 const selectedIds = ref([])
+
+const {
+  sortedRows: sortedAvailable,
+  toggleSort: toggleAvailSort,
+  sortIndicator: availSortInd,
+  ariaSort: availAriaSort,
+} = useClientSortedRows(
+  available,
+  {
+    code: (r) => r.code || '',
+    service_date: (r) => r.service_date || '',
+    description: (r) => r.description || '',
+    amount: (r) => Number(r.amount) || 0,
+  },
+  { initialKey: 'service_date', initialDir: 'desc' }
+)
 
 const invoice = ref(null)
 
@@ -63,7 +80,7 @@ function toggleId(id) {
 
 const totalPreview = computed(() => {
   let t = 0
-  for (const row of available.value) {
+  for (const row of sortedAvailable.value) {
     if (isSelected(row.id)) t += Number(row.amount) || 0
   }
   return t
@@ -236,14 +253,30 @@ async function onSubmit() {
             <thead>
               <tr>
                 <th class="chk" />
-                <th>Código</th>
-                <th>Fecha</th>
-                <th>Descripción</th>
-                <th class="num">Valor</th>
+                <th scope="col" :aria-sort="availAriaSort('code')">
+                  <button type="button" class="th-sort" @click="toggleAvailSort('code')">
+                    Código<span class="sort-ind" aria-hidden="true">{{ availSortInd('code') }}</span>
+                  </button>
+                </th>
+                <th scope="col" :aria-sort="availAriaSort('service_date')">
+                  <button type="button" class="th-sort" @click="toggleAvailSort('service_date')">
+                    Fecha<span class="sort-ind" aria-hidden="true">{{ availSortInd('service_date') }}</span>
+                  </button>
+                </th>
+                <th scope="col" :aria-sort="availAriaSort('description')">
+                  <button type="button" class="th-sort" @click="toggleAvailSort('description')">
+                    Descripción<span class="sort-ind" aria-hidden="true">{{ availSortInd('description') }}</span>
+                  </button>
+                </th>
+                <th class="num" scope="col" :aria-sort="availAriaSort('amount')">
+                  <button type="button" class="th-sort th-sort--end" @click="toggleAvailSort('amount')">
+                    Valor<span class="sort-ind" aria-hidden="true">{{ availSortInd('amount') }}</span>
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in available" :key="row.id">
+              <tr v-for="row in sortedAvailable" :key="row.id">
                 <td class="chk">
                   <input type="checkbox" :checked="isSelected(row.id)" @change="toggleId(row.id)" />
                 </td>

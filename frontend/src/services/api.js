@@ -60,6 +60,7 @@ export async function publicApi(path, options = {}) {
     )
     err.status = res.status
     err.data = data
+    if (data.code != null) err.code = data.code
     throw err
   }
   return data
@@ -101,20 +102,23 @@ export async function publicApiBlob(path, options = {}) {
 }
 
 export async function api(path, options = {}) {
+  const { skipAuth: skipAuthHeader, ...fetchOptions } = options
   const headers = {
     Accept: 'application/json',
-    ...options.headers,
+    ...fetchOptions.headers,
   }
-  if (!(options.body instanceof FormData)) {
+  if (!(fetchOptions.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json'
   }
-  const token = getToken()
-  if (token) headers.Authorization = `Bearer ${token}`
+  if (!skipAuthHeader) {
+    const token = getToken()
+    if (token) headers.Authorization = `Bearer ${token}`
+  }
 
   let res
   try {
     res = await fetch(`${baseUrl()}/api${path}`, {
-      ...options,
+      ...fetchOptions,
       headers,
     })
   } catch {

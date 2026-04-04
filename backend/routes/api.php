@@ -53,6 +53,8 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::post('/admin/companies', [AdminCompanyController::class, 'store']);
         Route::put('/admin/companies/{company}', [AdminCompanyController::class, 'update']);
         Route::patch('/admin/companies/{company}/estado', [AdminCompanyController::class, 'updateEstado']);
+        Route::delete('/admin/companies/{company}', [AdminCompanyController::class, 'destroy']);
+        Route::get('/admin/companies/{company}/monthly-dashboard', [AdminCompanyController::class, 'monthlyDashboard']);
 
         Route::get('/admin/users', [AdminUserController::class, 'index']);
         Route::post('/admin/users', [AdminUserController::class, 'store']);
@@ -71,6 +73,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::post('/admin/service-catalog/bulk-destroy', [AdminServiceCatalogController::class, 'bulkDestroy']);
         Route::get('/admin/service-catalog/technician-pricing', [AdminTechnicianCatalogPricingController::class, 'show']);
         Route::put('/admin/service-catalog/technician-pricing', [AdminTechnicianCatalogPricingController::class, 'update']);
+        Route::get('/admin/service-catalog/{service_catalog}', [AdminServiceCatalogController::class, 'show']);
         Route::put('/admin/service-catalog/{service_catalog}', [AdminServiceCatalogController::class, 'update']);
         Route::patch('/admin/service-catalog/{service_catalog}/estado', [AdminServiceCatalogController::class, 'updateEstado']);
         Route::delete('/admin/service-catalog/{service_catalog}', [AdminServiceCatalogController::class, 'destroy']);

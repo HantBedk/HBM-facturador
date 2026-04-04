@@ -11,7 +11,21 @@ return [
         'direccion' => env('BILLING_ISSUER_ADDRESS', ''),
         'telefono' => env('BILLING_ISSUER_PHONE', ''),
         'correo' => env('BILLING_ISSUER_EMAIL', ''),
+        /** Texto bajo el NIT en el PDF (ej. Régimen Simplificado). */
+        'regimen' => env('BILLING_ISSUER_REGIMEN', ''),
     ],
+
+    /**
+     * Líneas de “Medios de pago” en el PDF (orden de aparición).
+     * Puede sobreescribirse con BILLING_PDF_PAYMENT_METHODS separado por | (pipe).
+     */
+    'pdf_payment_methods' => array_values(array_filter(array_map(
+        'trim',
+        explode('|', (string) env(
+            'BILLING_PDF_PAYMENT_METHODS',
+            'Nequi|Cuenta bancaria|Transferencia bancaria'
+        ))
+    ))),
 
     /** Ruta relativa a `public/` (ej. `img/logo.png`) o ruta absoluta legible por PHP. */
     'logo_path' => env('BILLING_LOGO_PATH', ''),

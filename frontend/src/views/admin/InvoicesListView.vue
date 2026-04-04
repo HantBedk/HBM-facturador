@@ -8,7 +8,9 @@ import {
   downloadAdminExportCsv,
   fetchAdminInvoice,
   fetchAdminInvoices,
+  patchInvoiceStatus,
 } from '@/services/invoicesApi.js'
+import { tableAriaSort, tableSortIndicator } from '@/utils/tableSort.js'
 
 const companies = ref([])
 const rows = ref([])
@@ -26,6 +28,18 @@ const filters = ref({
   q: '',
   page: 1,
 })
+
+const invSortKey = ref('period')
+const invSortDir = ref('desc')
+const INV_SORT_FIRST = {
+  code: 'asc',
+  company_nombre: 'asc',
+  period: 'desc',
+  status: 'asc',
+  balance: 'desc',
+  total: 'desc',
+  created_at: 'desc',
+}
 
 const STATUS_OPTIONS = [
   { value: '', label: 'Todos' },
@@ -51,6 +65,8 @@ async function load() {
     if (filters.value.period_year) params.period_year = filters.value.period_year
     if (filters.value.period_month) params.period_month = filters.value.period_month
     if (filters.value.q.trim()) params.q = filters.value.q.trim()
+    params.sort = invSortKey.value
+    params.sort_dir = invSortDir.value
 
     const res = await fetchAdminInvoices(params)
     rows.value = res.data
@@ -66,16 +82,27 @@ async function load() {
 
 const detailPanelOpen = ref(false)
 const detailInvoiceId = ref(null)
+const detailReviewMode = ref(false)
 const detailPanelRef = ref(null)
 
 function openDetailPanel(inv) {
   detailInvoiceId.value = inv.id
+  detailReviewMode.value = false
+  detailPanelOpen.value = true
+}
+
+/** Panel de revisión completa antes de aprobar (borrador). */
+function openReviewApprovePanel(inv) {
+  if (inv.status !== 'borrador') return
+  detailInvoiceId.value = inv.id
+  detailReviewMode.value = true
   detailPanelOpen.value = true
 }
 
 function closeDetailPanel() {
   detailPanelOpen.value = false
   detailInvoiceId.value = null
+  detailReviewMode.value = false
 }
 
 onMounted(async () => {
@@ -125,6 +152,25 @@ function goPage(p) {
   load()
 }
 
+function invSortInd(k) {
+  return tableSortIndicator(invSortKey.value, invSortDir.value, k)
+}
+
+function invAriaSort(k) {
+  return tableAriaSort(invSortKey.value, invSortDir.value, k)
+}
+
+function toggleInvSort(key) {
+  if (invSortKey.value === key) {
+    invSortDir.value = invSortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    invSortKey.value = key
+    invSortDir.value = INV_SORT_FIRST[key] || 'asc'
+  }
+  filters.value.page = 1
+  load()
+}
+
 /** Enter en el campo de búsqueda: ejecutar de inmediato sin esperar el debounce. */
 function flushSearchFromInput() {
   clearTimeout(qDebounceTimer)
@@ -134,6 +180,40 @@ function flushSearchFromInput() {
 
 function canPayFromList(inv) {
   return inv.status === 'enviada' || inv.status === 'parcialmente_pagada'
+}
+
+const sendingInvoiceId = ref(null)
+
+const invoiceListStatusBusy = computed(() => sendingInvoiceId.value != null)
+
+/** Marcar como enviada (misma acción que en el panel de detalle). */
+async function onSendFromList(inv) {
+  if (inv.status !== 'aprobada' || invoiceListStatusBusy.value) return
+  sendingInvoiceId.value = inv.id
+  error.value = ''
+  try {
+    await patchInvoiceStatus(inv.id, 'enviada')
+    if (detailPanelOpen.value && String(detailInvoiceId.value) === String(inv.id)) {
+      await detailPanelRef.value?.reload?.()
+    }
+    await load()
+  } catch (e) {
+    error.value = e.data?.message || e.message || 'No se pudo marcar la factura como enviada.'
+  } finally {
+    sendingInvoiceId.value = null
+  }
+}
+
+/** Saldo pendiente de cobro; en borrador/aprobada no aplica en el listado. */
+function invoiceSaldoDisplay(inv) {
+  if (!['enviada', 'parcialmente_pagada', 'pagada'].includes(inv.status)) {
+    return '—'
+  }
+  const b = inv.financial?.balance
+  if (b === undefined || b === null) {
+    return '—'
+  }
+  return money(b)
 }
 
 const payModalOpen = ref(false)
@@ -282,12 +362,14 @@ async function exportInvoicesCsv() {
 </script>
 
 <template>
-  <section class="page">
+  <section class="page page--fluid">
     <header class="head">
       <div>
         <h1>Facturas</h1>
         <p class="lede">
-          Listado y gestión. Clic en el <strong>código</strong> abre el panel lateral con el detalle completo; los borradores se editan con Editar.
+          Listado y gestión. Clic en el <strong>código</strong> abre el detalle. En borrador, <strong>Revisar y aprobar</strong> abre la
+          revisión completa (editar, PDF, aprobar o rechazar). <strong>Enviar factura</strong> (aprobada) y <strong>Pagar</strong> (enviada /
+          parcial).
         </p>
       </div>
       <div class="head-btns">
@@ -359,11 +441,36 @@ async function exportInvoicesCsv() {
         <table class="table">
           <thead>
             <tr>
-              <th>Código</th>
-              <th>Empresa</th>
-              <th>Periodo</th>
-              <th>Estado</th>
-              <th class="num">Total</th>
+              <th scope="col" :aria-sort="invAriaSort('code')">
+                <button type="button" class="th-sort" @click="toggleInvSort('code')">
+                  Código<span class="sort-ind" aria-hidden="true">{{ invSortInd('code') }}</span>
+                </button>
+              </th>
+              <th scope="col" :aria-sort="invAriaSort('company_nombre')">
+                <button type="button" class="th-sort" @click="toggleInvSort('company_nombre')">
+                  Empresa<span class="sort-ind" aria-hidden="true">{{ invSortInd('company_nombre') }}</span>
+                </button>
+              </th>
+              <th scope="col" :aria-sort="invAriaSort('period')">
+                <button type="button" class="th-sort" @click="toggleInvSort('period')">
+                  Periodo<span class="sort-ind" aria-hidden="true">{{ invSortInd('period') }}</span>
+                </button>
+              </th>
+              <th scope="col" :aria-sort="invAriaSort('status')">
+                <button type="button" class="th-sort" @click="toggleInvSort('status')">
+                  Estado<span class="sort-ind" aria-hidden="true">{{ invSortInd('status') }}</span>
+                </button>
+              </th>
+              <th class="num" scope="col" :aria-sort="invAriaSort('balance')">
+                <button type="button" class="th-sort th-sort--end" @click="toggleInvSort('balance')">
+                  Saldo<span class="sort-ind" aria-hidden="true">{{ invSortInd('balance') }}</span>
+                </button>
+              </th>
+              <th class="num" scope="col" :aria-sort="invAriaSort('total')">
+                <button type="button" class="th-sort th-sort--end" @click="toggleInvSort('total')">
+                  Total<span class="sort-ind" aria-hidden="true">{{ invSortInd('total') }}</span>
+                </button>
+              </th>
               <th class="actions-col">Acciones</th>
             </tr>
           </thead>
@@ -377,16 +484,34 @@ async function exportInvoicesCsv() {
               <td>
                 <span class="pill" :data-st="inv.status">{{ inv.status_label }}</span>
               </td>
+              <td class="num">{{ invoiceSaldoDisplay(inv) }}</td>
               <td class="num">{{ money(inv.total) }}</td>
               <td class="actions-col" @click.stop>
                 <div class="actions-row">
-                  <RouterLink v-if="inv.status === 'borrador'" class="link" :to="`/admin/facturas/${inv.id}/editar`">
-                    Editar
-                  </RouterLink>
+                  <button
+                    v-if="inv.status === 'borrador'"
+                    type="button"
+                    class="link-btn link-btn--review"
+                    :disabled="invoiceListStatusBusy"
+                    @click="openReviewApprovePanel(inv)"
+                  >
+                    Revisar y aprobar
+                  </button>
+                  <button
+                    v-if="inv.status === 'aprobada'"
+                    type="button"
+                    class="link-btn link-btn--send"
+                    :disabled="invoiceListStatusBusy"
+                    title="Marcar como enviada"
+                    @click="onSendFromList(inv)"
+                  >
+                    {{ sendingInvoiceId === inv.id ? 'Enviando…' : 'Enviar factura' }}
+                  </button>
                   <button
                     v-if="canPayFromList(inv)"
                     type="button"
                     class="link-btn"
+                    :disabled="invoiceListStatusBusy"
                     @click="openPayModal(inv)"
                   >
                     Pagar
@@ -395,7 +520,7 @@ async function exportInvoicesCsv() {
               </td>
             </tr>
             <tr v-if="!rows.length">
-              <td colspan="6" class="empty muted">No hay facturas con estos filtros.</td>
+              <td colspan="7" class="empty muted">No hay facturas con estos filtros.</td>
             </tr>
           </tbody>
         </table>
@@ -421,6 +546,7 @@ async function exportInvoicesCsv() {
       ref="detailPanelRef"
       :open="detailPanelOpen"
       :invoice-id="detailInvoiceId"
+      :review-mode="detailReviewMode"
       @close="closeDetailPanel"
       @changed="load"
     />
@@ -489,9 +615,12 @@ async function exportInvoicesCsv() {
 </template>
 
 <style scoped>
-.page {
-  max-width: 1200px;
-  margin: 0 auto;
+.page.page--fluid {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+  box-sizing: border-box;
 }
 
 .head {
@@ -576,7 +705,11 @@ h1 {
 }
 
 .table-wrap {
+  width: 100%;
+  min-width: 0;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-inline-end: 2px;
 }
 
 .meta-line {
@@ -666,8 +799,21 @@ h1 {
   text-decoration: none;
 }
 
-.link-btn:hover {
+.link-btn:hover:not(:disabled) {
   text-decoration: underline;
+}
+
+.link-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.link-btn--send {
+  color: #7dd3fc;
+}
+
+.link-btn--review {
+  color: #fde68a;
 }
 
 .link {

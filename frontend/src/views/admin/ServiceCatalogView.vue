@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import AdminServiceCatalogDetailPanel from '@/components/admin/AdminServiceCatalogDetailPanel.vue'
 import {
   approveServiceCatalogSuggestion,
   bulkDestroyServiceCatalogItems,
@@ -16,6 +17,7 @@ import {
   updateTechnicianCatalogDiscount,
 } from '@/services/servicesApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
+import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 
 const uiDialog = useUiDialogStore()
 
@@ -29,7 +31,17 @@ const fieldErrors = ref({})
 const pendingRows = ref([])
 const pendingLoading = ref(false)
 
-/** % de descuento sobre precio de lista que ve el técnico en GET /service-catalog/active */
+const {
+  sortedRows: sortedPendingRows,
+  toggleSort: togglePendingSort,
+  sortIndicator: pendingSortInd,
+  ariaSort: pendingAriaSort,
+} = useClientSortedRows(pendingRows, {
+  name: (r) => r.name || '',
+  suggested_price: (r) => Number(r.suggested_price) || 0,
+}, { initialKey: 'name', initialDir: 'asc' })
+
+/** % global de diferencia: precio lista (factura) vs importe de referencia que ve el técnico en /service-catalog/active */
 const technicianDiscountPercent = ref(10)
 const techDiscountSaving = ref(false)
 const techDiscountError = ref('')
@@ -42,6 +54,8 @@ const form = ref({
   name: '',
   description: '',
   base_price: '',
+  /** Vacío = usar % global (pestaña Importar y precios). */
+  technician_discount_percent: '',
   status: 'activo',
 })
 
@@ -87,7 +101,7 @@ async function setCatalogSort(field) {
     catalogSortDir.value = catalogSortDir.value === 'asc' ? 'desc' : 'asc'
   } else {
     catalogSortBy.value = field
-    catalogSortDir.value = 'asc'
+    catalogSortDir.value = field === 'base_price' ? 'desc' : 'asc'
   }
   await load()
 }
@@ -134,7 +148,8 @@ async function saveTechnicianDiscount() {
   techDiscountSaving.value = true
   try {
     await updateTechnicianCatalogDiscount(Number(technicianDiscountPercent.value))
-    techDiscountOk.value = 'Porcentaje guardado. Los técnicos verán el catálogo con el nuevo descuento.'
+    techDiscountOk.value =
+      'Porcentaje guardado. Cada línea de catálogo usará esta diferencia salvo que el ítem tenga un % propio.'
   } catch (e) {
     techDiscountError.value = e.data?.message || e.message || 'No se pudo guardar.'
     if (e.data?.errors) {
@@ -159,17 +174,50 @@ async function loadPending() {
   }
 }
 
+const detailPanelOpen = ref(false)
+const detailCatalogId = ref(null)
+const detailPanelRef = ref(null)
+
+function openDetailPanel(row) {
+  detailCatalogId.value = row.id
+  detailPanelOpen.value = true
+}
+
+function closeDetailPanel() {
+  detailPanelOpen.value = false
+  detailCatalogId.value = null
+}
+
+function onGlobalEscape(ev) {
+  if (ev.key !== 'Escape') return
+  if (!detailPanelOpen.value) return
+  ev.preventDefault()
+  closeDetailPanel()
+}
+
 onMounted(async () => {
+  document.addEventListener('keydown', onGlobalEscape)
   await loadCompanies()
   await loadTechnicianDiscount()
   await load()
   await loadPending()
 })
 
+onUnmounted(() => {
+  document.removeEventListener('keydown', onGlobalEscape)
+})
+
 watch(showModal, (open) => {
   if (!open) {
     editingId.value = null
-    form.value = { company_id: '', name: '', description: '', base_price: '', status: 'activo' }
+    form.value = {
+      company_id: '',
+      name: '',
+      description: '',
+      base_price: '',
+      technician_discount_percent: '',
+      status: 'activo',
+    }
   }
 })
 
@@ -212,6 +260,9 @@ async function onDeleteCatalogRow(row) {
   try {
     await deleteServiceCatalogItem(row.id)
     selectedCatalogIds.value = selectedCatalogIds.value.filter((id) => id !== Number(row.id))
+    if (detailPanelOpen.value && String(detailCatalogId.value) === String(row.id)) {
+      closeDetailPanel()
+    }
     await load()
   } catch (e) {
     error.value = e.data?.message || e.message || 'No se pudo eliminar.'
@@ -284,20 +335,42 @@ async function onSubmitSuggestionApprove() {
 
 function openCreate() {
   editingId.value = null
-  form.value = { company_id: '', name: '', description: '', base_price: '', status: 'activo' }
+  form.value = {
+    company_id: '',
+    name: '',
+    description: '',
+    base_price: '',
+    technician_discount_percent: '',
+    status: 'activo',
+  }
   showModal.value = true
 }
 
 function openEdit(row) {
   editingId.value = row.id
+  const ov = row.technician_discount_percent
   form.value = {
     company_id: row.company_id != null ? String(row.company_id) : '',
     name: row.name,
     description: row.description || '',
     base_price: String(row.base_price),
+    technician_discount_percent:
+      ov != null && ov !== '' ? String(ov) : '',
     status: row.status,
   }
   showModal.value = true
+}
+
+/** Etiqueta para columna: override por ítem o referencia al % global cargado. */
+function technicianMarginLabel(row) {
+  const ov = row.technician_discount_percent
+  if (ov != null && ov !== '') {
+    const n = Number(ov)
+    if (!Number.isNaN(n)) return `${n}% · ítem`
+  }
+  const g = Number(technicianDiscountPercent.value)
+  const pct = Number.isNaN(g) ? '—' : `${g}%`
+  return `Global (${pct})`
 }
 
 function money(v) {
@@ -310,6 +383,7 @@ async function onSave() {
   saving.value = true
   error.value = ''
   fieldErrors.value = {}
+  const savedId = editingId.value
   try {
     const base = {
       name: form.value.name.trim(),
@@ -318,19 +392,26 @@ async function onSave() {
     }
     const scopedCompany =
       form.value.company_id !== '' && form.value.company_id != null ? Number(form.value.company_id) : null
+    const rawPct = form.value.technician_discount_percent
+    const technicianPct =
+      rawPct === '' || rawPct === null || rawPct === undefined ? null : Number(rawPct)
     if (editingId.value) {
       await updateServiceCatalogItem(editingId.value, {
         ...base,
         company_id: scopedCompany,
         status: form.value.status,
+        technician_discount_percent: technicianPct,
       })
     } else {
-      const body = { ...base }
+      const body = { ...base, technician_discount_percent: technicianPct }
       if (scopedCompany != null) body.company_id = scopedCompany
       await createServiceCatalogItem(body)
     }
     showModal.value = false
     await load()
+    if (detailPanelOpen.value && savedId != null && String(detailCatalogId.value) === String(savedId)) {
+      await detailPanelRef.value?.reload?.()
+    }
   } catch (e) {
     error.value = e.data?.message || e.message || 'No se pudo guardar.'
     if (e.data?.errors) fieldErrors.value = e.data.errors
@@ -344,6 +425,9 @@ async function toggleStatus(row) {
   try {
     await patchServiceCatalogEstado(row.id, next)
     await load()
+    if (detailPanelOpen.value && String(detailCatalogId.value) === String(row.id)) {
+      await detailPanelRef.value?.reload?.()
+    }
   } catch (e) {
     error.value = e.data?.message || e.message || 'No se pudo actualizar.'
   }
@@ -410,16 +494,28 @@ async function onRejectSuggestion(s) {
     error.value = e.data?.message || e.message || 'No se pudo descartar.'
   }
 }
+
+function onDetailEdit(catalogItem) {
+  openEdit(catalogItem)
+}
+
+async function onDetailToggleStatus(catalogItem) {
+  await toggleStatus(catalogItem)
+}
+
+function onDetailDelete(catalogItem) {
+  return onDeleteCatalogRow(catalogItem)
+}
 </script>
 
 <template>
-  <section class="page">
+  <section class="page page--fluid">
     <header class="head">
       <div>
         <h1>Catálogo de servicios</h1>
         <p class="lede">
-          Precios base del catálogo (globales o por empresa en cada ítem). En la pestaña <strong>Catálogo</strong> gestionas ítems y
-          propuestas pendientes; en <strong>Importar y precios</strong> cargas Excel/CSV y el descuento que ven los técnicos.
+          Precios base del catálogo (globales o por empresa en cada ítem). Clic en el <strong>código</strong> (CAT-…) abre el panel lateral con el detalle;
+          en la pestaña <strong>Catálogo</strong> gestionas ítems y propuestas pendientes; en <strong>Importar y precios</strong> cargas Excel/CSV y el <strong>% global</strong> de diferencia factura / referencia técnico.
         </p>
       </div>
       <div class="head-actions">
@@ -469,13 +565,21 @@ async function onRejectSuggestion(s) {
       <table v-else-if="pendingRows.length" class="table">
         <thead>
           <tr>
-            <th>Nombre propuesto</th>
-            <th class="num">Precio sugerido</th>
+            <th scope="col" :aria-sort="pendingAriaSort('name')">
+              <button type="button" class="th-sort" @click="togglePendingSort('name')">
+                Nombre propuesto<span class="sort-ind" aria-hidden="true">{{ pendingSortInd('name') }}</span>
+              </button>
+            </th>
+            <th class="num" scope="col" :aria-sort="pendingAriaSort('suggested_price')">
+              <button type="button" class="th-sort th-sort--end" @click="togglePendingSort('suggested_price', 'desc')">
+                Precio sugerido<span class="sort-ind" aria-hidden="true">{{ pendingSortInd('suggested_price') }}</span>
+              </button>
+            </th>
             <th class="actions-col">Acciones</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="s in pendingRows" :key="s.id">
+          <tr v-for="s in sortedPendingRows" :key="s.id">
             <td>
               <strong>{{ s.name }}</strong>
               <p v-if="s.description" class="muted tiny">{{ s.description }}</p>
@@ -506,6 +610,14 @@ async function onRejectSuggestion(s) {
                 @click.prevent="toggleSelectAllCatalogPage"
               />
             </th>
+            <th
+              scope="col"
+              :aria-sort="catalogSortBy === 'code' ? (catalogSortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+            >
+              <button type="button" class="th-sort" @click="setCatalogSort('code')">
+                Código<span class="sort-ind" aria-hidden="true">{{ catalogSortIndicator('code') }}</span>
+              </button>
+            </th>
             <th scope="col" :aria-sort="catalogSortBy === 'name' ? (catalogSortDir === 'asc' ? 'ascending' : 'descending') : 'none'">
               <button type="button" class="th-sort" @click="setCatalogSort('name')">
                 Nombre<span class="sort-ind" aria-hidden="true">{{ catalogSortIndicator('name') }}</span>
@@ -520,7 +632,15 @@ async function onRejectSuggestion(s) {
                 Precio base<span class="sort-ind" aria-hidden="true">{{ catalogSortIndicator('base_price') }}</span>
               </button>
             </th>
-            <th>Estado</th>
+            <th scope="col" class="nowrap">Margen técnico</th>
+            <th
+              scope="col"
+              :aria-sort="catalogSortBy === 'status' ? (catalogSortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+            >
+              <button type="button" class="th-sort" @click="setCatalogSort('status')">
+                Estado<span class="sort-ind" aria-hidden="true">{{ catalogSortIndicator('status') }}</span>
+              </button>
+            </th>
             <th class="actions-col">Acciones</th>
           </tr>
         </thead>
@@ -535,11 +655,17 @@ async function onRejectSuggestion(s) {
                 @click.prevent="toggleCatalogRowSelect(r.id)"
               />
             </td>
+            <td class="mono">
+              <button type="button" class="code-link" @click="openDetailPanel(r)">
+                {{ r.code || `CAT-${r.id}` }}
+              </button>
+            </td>
             <td>
               <strong>{{ r.name }}</strong>
               <p v-if="r.description" class="muted tiny">{{ r.description }}</p>
             </td>
             <td class="num">{{ money(r.base_price) }}</td>
+            <td class="tiny muted">{{ technicianMarginLabel(r) }}</td>
             <td>
               <span class="pill" :data-st="r.status">{{ r.status === 'activo' ? 'Activo' : 'Inactivo' }}</span>
             </td>
@@ -552,7 +678,7 @@ async function onRejectSuggestion(s) {
             </td>
           </tr>
           <tr v-if="!rows.length">
-            <td colspan="5" class="empty muted">Sin ítems. Cree el primero.</td>
+            <td colspan="7" class="empty muted">Sin ítems. Cree el primero.</td>
           </tr>
         </tbody>
       </table>
@@ -592,12 +718,13 @@ async function onRejectSuggestion(s) {
       <div class="card pricing-card">
         <h2 class="pricing-title">Vista de precios para técnicos</h2>
         <p class="pricing-lede">
-          En el registro de servicios, el empleado ve el catálogo con un descuento sobre el precio de lista (por defecto 10&nbsp;%).
-          El valor facturable sigue siendo el que definas en cada ítem; esto solo afecta la referencia mostrada al técnico.
+          <strong>Aquí defines el porcentaje de diferencia</strong> entre el importe que <strong>factura</strong> cada ítem del catálogo y el que el <strong>técnico ve como referencia</strong> al registrar el servicio (por defecto 10&nbsp;%).
+          Ese criterio se aplica <strong>por cada línea de catálogo</strong> que el empleado agregue: a la empresa cliente solo le corresponde el precio de lista acordado, de modo que no se perciba un <strong>doble cobro</strong>.
+          El valor que guardes abajo es el <strong>% global</strong>; puedes fijar un <strong>% distinto por ítem</strong> en crear/editar catálogo. En líneas <strong>Otro</strong>, lo que escribe el técnico sigue esa misma lógica con el % global.
         </p>
         <div class="pricing-row">
           <label class="pricing-label">
-            <span>Descuento (%)</span>
+            <span>Porcentaje global (%)</span>
             <input
               v-model.number="technicianDiscountPercent"
               type="number"
@@ -608,13 +735,23 @@ async function onRejectSuggestion(s) {
             />
           </label>
           <button type="button" class="btn primary" :disabled="techDiscountSaving" @click="saveTechnicianDiscount">
-            {{ techDiscountSaving ? 'Guardando…' : 'Guardar descuento' }}
+            {{ techDiscountSaving ? 'Guardando…' : 'Guardar porcentaje' }}
           </button>
         </div>
         <p v-if="techDiscountError" class="banner err inline">{{ techDiscountError }}</p>
         <p v-else-if="techDiscountOk" class="banner ok inline">{{ techDiscountOk }}</p>
       </div>
     </div>
+
+    <AdminServiceCatalogDetailPanel
+      ref="detailPanelRef"
+      :open="detailPanelOpen"
+      :catalog-id="detailCatalogId"
+      @close="closeDetailPanel"
+      @edit="onDetailEdit"
+      @toggle-status="onDetailToggleStatus"
+      @delete="onDetailDelete"
+    />
 
     <Teleport to="body">
       <div v-if="showSuggestionModal" class="modal-backdrop" @click.self="showSuggestionModal = false">
@@ -673,6 +810,23 @@ async function onRejectSuggestion(s) {
             <label>
               <span>Precio base (COP)</span>
               <input v-model="form.base_price" type="number" min="0.01" step="0.01" required class="input" />
+              <small class="hint">Es el importe que va a la factura (precio de lista).</small>
+            </label>
+            <label>
+              <span>% descuento vista técnico (opcional)</span>
+              <input
+                v-model="form.technician_discount_percent"
+                type="number"
+                min="0"
+                max="99.99"
+                step="0.5"
+                class="input"
+                placeholder="Vacío = usar global"
+              />
+              <small class="hint">
+                El técnico ve precio ≈ factura × (100&nbsp;−&nbsp;%) / 100. Vacío: mismo % que en «Importar y precios» (ahora
+                {{ Number(technicianDiscountPercent) || '—' }}%).
+              </small>
             </label>
             <label v-if="editingId">
               <span>Estado</span>
@@ -694,9 +848,12 @@ async function onRejectSuggestion(s) {
 </template>
 
 <style scoped>
-.page {
-  max-width: 960px;
-  margin: 0 auto;
+.page.page--fluid {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+  box-sizing: border-box;
 }
 .head {
   display: flex;
@@ -929,6 +1086,28 @@ h1 {
 .num {
   text-align: right;
 }
+.mono {
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+}
+.code-link {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #7dd3fc;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: rgba(125, 211, 252, 0.45);
+}
+.code-link:hover {
+  color: #bae6fd;
+}
 .pill {
   display: inline-block;
   padding: 0.12rem 0.45rem;
@@ -967,6 +1146,9 @@ h1 {
 .tiny {
   font-size: 0.8rem;
   margin: 0.25rem 0 0;
+}
+.nowrap {
+  white-space: nowrap;
 }
 .banner.err {
   padding: 0.65rem 0.85rem;

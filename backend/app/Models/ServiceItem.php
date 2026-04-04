@@ -14,6 +14,7 @@ class ServiceItem extends Model
         'label',
         'line_description',
         'amount',
+        'technician_line_amount',
         'sort_order',
     ];
 
@@ -21,6 +22,7 @@ class ServiceItem extends Model
     {
         return [
             'amount' => 'decimal:2',
+            'technician_line_amount' => 'decimal:2',
         ];
     }
 

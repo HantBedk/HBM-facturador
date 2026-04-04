@@ -57,7 +57,16 @@ export const useAuthStore = defineStore('auth', () => {
     const data = await api('/auth/login', {
       method: 'POST',
       body: JSON.stringify(payload),
+      skipAuth: true,
     })
+    if (data == null || typeof data.token !== 'string' || !data.token || data.user == null) {
+      const err = new Error(
+        'La respuesta del servidor no es válida. Compruebe que el backend esté en marcha (p. ej. puerto 8080) y que la URL de la API sea correcta.'
+      )
+      err.status = 502
+      err.data = data && typeof data === 'object' ? data : {}
+      throw err
+    }
     setToken(data.token, remember)
     persistUser(data.user, remember)
     return data.user

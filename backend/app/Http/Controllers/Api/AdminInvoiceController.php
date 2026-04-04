@@ -29,7 +29,10 @@ class AdminInvoiceController extends Controller
 {
     public function index(Request $request): AnonymousResourceCollection
     {
-        $q = Invoice::query()->with(['company:id,nombre,nit'])->orderByDesc('period_year')->orderByDesc('period_month')->orderByDesc('id');
+        $q = Invoice::query()->with([
+            'company:id,nombre,nit',
+            'payments:id,invoice_id,amount',
+        ]);
 
         if ($request->filled('company_id')) {
             $q->where('company_id', $request->integer('company_id'));
@@ -51,6 +54,37 @@ class AdminInvoiceController extends Controller
             $raw = $request->string('q')->toString();
             $term = '%'.addcslashes($raw, '%_\\').'%';
             $q->where('code', 'like', $term);
+        }
+
+        $sort = $request->query('sort');
+        $sortDir = strtolower((string) $request->query('sort_dir', 'desc')) === 'asc' ? 'asc' : 'desc';
+        $allowedSorts = ['code', 'company_nombre', 'period', 'status', 'total', 'balance', 'created_at'];
+
+        if (is_string($sort) && in_array($sort, $allowedSorts, true)) {
+            match ($sort) {
+                'code' => $q->orderBy('invoices.code', $sortDir)->orderBy('invoices.id', $sortDir),
+                'status' => $q->orderBy('invoices.status', $sortDir)->orderBy('invoices.id', $sortDir),
+                'total' => $q->orderBy('invoices.total', $sortDir)->orderBy('invoices.id', $sortDir),
+                'created_at' => $q->orderBy('invoices.created_at', $sortDir)->orderBy('invoices.id', $sortDir),
+                'company_nombre' => $q->leftJoin('companies', 'invoices.company_id', '=', 'companies.id')
+                    ->select('invoices.*')
+                    ->orderBy('companies.nombre', $sortDir)
+                    ->orderBy('invoices.id', $sortDir),
+                'period' => $q->orderBy('invoices.period_year', $sortDir)
+                    ->orderBy('invoices.period_month', $sortDir)
+                    ->orderBy('invoices.id', $sortDir),
+                'balance' => $q->orderByRaw(
+                    '(invoices.total - COALESCE((SELECT SUM(amount) FROM payments WHERE payments.invoice_id = invoices.id), 0)) '
+                    .($sortDir === 'asc' ? 'asc' : 'desc')
+                )->orderBy('invoices.id', $sortDir),
+                default => $q->orderByDesc('invoices.period_year')
+                    ->orderByDesc('invoices.period_month')
+                    ->orderByDesc('invoices.id'),
+            };
+        } else {
+            $q->orderByDesc('invoices.period_year')
+                ->orderByDesc('invoices.period_month')
+                ->orderByDesc('invoices.id');
         }
 
         return AdminInvoiceResource::collection(
@@ -89,7 +123,7 @@ class AdminInvoiceController extends Controller
             ->all();
 
         $currentIds = $exceptInvoiceId
-            ? Invoice::query()->findOrFail($exceptInvoiceId)->services()->pluck('services.id')->all()
+            ? DB::table('invoice_service')->where('invoice_id', $exceptInvoiceId)->pluck('service_id')->all()
             : [];
 
         $rows = Service::query()
@@ -228,7 +262,10 @@ class AdminInvoiceController extends Controller
 
         $total = $this->sumServiceAmounts($data['service_ids']);
 
-        $prevServiceIds = $invoice->services()->pluck('id')->all();
+        $prevServiceIds = DB::table('invoice_service')
+            ->where('invoice_id', $invoice->id)
+            ->pluck('service_id')
+            ->all();
 
         DB::transaction(function () use ($invoice, $data, $total) {
             $invoice->company_id = $data['company_id'];
@@ -350,9 +387,13 @@ class AdminInvoiceController extends Controller
             $filename = 'factura-'.preg_replace('/[^a-zA-Z0-9_-]/', '_', $invoice->code).$suffix.'.pdf';
 
             return Pdf::loadView('pdf.public_invoice', ['data' => $data])->download($filename);
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            report($e);
+
             return response()->json([
-                'message' => 'No se pudo generar el PDF.',
+                'message' => config('app.debug')
+                    ? ('No se pudo generar el PDF: '.$e->getMessage())
+                    : 'No se pudo generar el PDF.',
             ], 500);
         }
     }

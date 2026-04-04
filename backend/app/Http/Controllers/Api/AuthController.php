@@ -20,7 +20,8 @@ class AuthController extends Controller
             'device_name' => ['sometimes', 'string', 'max:255'],
         ]);
 
-        $user = User::where('correo', $data['correo'])->first();
+        $correoNorm = mb_strtolower(trim($data['correo']));
+        $user = User::query()->whereRaw('LOWER(TRIM(correo)) = ?', [$correoNorm])->first();
 
         if (! $user || ! Hash::check($data['password'], $user->password)) {
             throw ValidationException::withMessages([

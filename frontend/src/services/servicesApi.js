@@ -21,6 +21,11 @@ export function fetchAdminServiceCatalog(params = {}) {
   return api(`/admin/service-catalog${s ? `?${s}` : ''}`)
 }
 
+/** Detalle de un ítem (admin). */
+export function fetchAdminServiceCatalogItem(id) {
+  return api(`/admin/service-catalog/${id}`).then((r) => r.data)
+}
+
 export function createServiceCatalogItem(payload) {
   return api('/admin/service-catalog', {
     method: 'POST',
@@ -71,7 +76,7 @@ export function importServiceCatalogFromSpreadsheet(file, companyId) {
   }).then((r) => r.data)
 }
 
-/** Descuento % sobre precio de lista del catálogo que ve el técnico (solo admin). */
+/** % global de diferencia factura vs referencia técnico en catálogo (solo admin). */
 export function fetchTechnicianCatalogDiscount() {
   return api('/admin/service-catalog/technician-pricing').then((r) => r.data)
 }

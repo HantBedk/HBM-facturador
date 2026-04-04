@@ -107,13 +107,13 @@ class PanelNotification extends Model
     {
         $meta = $meta ?? [];
 
-        // Cambio de correo: la acción (aprobar/rechazar) está en Configuración → cuentas, no en el perfil.
+        // Cambio de correo: aprobar/rechazar en Empleados (listado), no en el perfil.
         if ($type === self::TYPE_EMAIL_CHANGE_REQUEST) {
             if (isset($meta['empleado_id']) && is_numeric($meta['empleado_id'])) {
-                return '/admin/configuracion/cuentas?usuario_id='.(int) $meta['empleado_id'];
+                return '/admin/empleados/rendimiento?usuario_id='.(int) $meta['empleado_id'];
             }
 
-            return '/admin/configuracion/cuentas';
+            return '/admin/empleados/rendimiento';
         }
 
         if ($type === self::TYPE_EMPLEADO_PERFIL_COMPLETADO
@@ -145,7 +145,7 @@ class PanelNotification extends Model
             self::TYPE_ALERT_SERVICES_ZERO => '/admin/servicios',
             self::TYPE_CATALOG_SUGGESTION_PENDING => '/admin/catalogo-servicios',
             self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
-            self::TYPE_EMAIL_CHANGE_REQUEST => '/admin/configuracion/cuentas',
+            self::TYPE_EMAIL_CHANGE_REQUEST => '/admin/empleados/rendimiento',
             self::TYPE_CUTOFF_APPROACHING,
             self::TYPE_ALERT_DRAFTS_PENDING,
             self::TYPE_ALERT_APPROVED_UNSENT,

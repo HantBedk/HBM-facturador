@@ -21,12 +21,16 @@ class AdminServiceCatalogController extends Controller
 
         $sortField = $request->query('sort', 'name');
         $sortField = is_string($sortField) ? $sortField : 'name';
-        if (! in_array($sortField, ['name', 'base_price'], true)) {
+        if (! in_array($sortField, ['name', 'base_price', 'code', 'status'], true)) {
             $sortField = 'name';
         }
         $direction = strtolower((string) $request->query('direction', 'asc')) === 'desc' ? 'desc' : 'asc';
 
-        $q->orderBy($sortField, $direction)->orderBy('id');
+        $dbColumn = $sortField === 'code' ? 'id' : $sortField;
+        $q->orderBy($dbColumn, $direction);
+        if ($dbColumn !== 'id') {
+            $q->orderBy('id', $direction);
+        }
 
         if ($request->filled('status')) {
             $q->where('status', $request->string('status')->toString());
@@ -39,6 +43,13 @@ class AdminServiceCatalogController extends Controller
         return ServiceCatalogResource::collection(
             $q->paginate(Pagination::perPage($request, 50, 100))->withQueryString()
         );
+    }
+
+    public function show(ServiceCatalog $service_catalog): ServiceCatalogResource
+    {
+        $service_catalog->load('company');
+
+        return new ServiceCatalogResource($service_catalog);
     }
 
     public function store(Request $request): JsonResponse
@@ -60,6 +71,7 @@ class AdminServiceCatalogController extends Controller
             ],
             'description' => ['nullable', 'string', 'max:5000'],
             'base_price' => ['required', 'numeric', 'min:0.01'],
+            'technician_discount_percent' => ['nullable', 'numeric', 'min:0', 'max:99.99'],
             'status' => ['sometimes', 'in:'.ServiceCatalog::STATUS_ACTIVO.','.ServiceCatalog::STATUS_INACTIVO],
         ]);
 
@@ -68,6 +80,7 @@ class AdminServiceCatalogController extends Controller
             'name' => trim($data['name']),
             'description' => isset($data['description']) ? trim((string) $data['description']) : null,
             'base_price' => $data['base_price'],
+            'technician_discount_percent' => $data['technician_discount_percent'] ?? null,
             'status' => $data['status'] ?? ServiceCatalog::STATUS_ACTIVO,
         ]);
         $row->load('company');
@@ -99,6 +112,7 @@ class AdminServiceCatalogController extends Controller
             ],
             'description' => ['nullable', 'string', 'max:5000'],
             'base_price' => ['required', 'numeric', 'min:0.01'],
+            'technician_discount_percent' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99.99'],
             'status' => ['required', 'in:'.ServiceCatalog::STATUS_ACTIVO.','.ServiceCatalog::STATUS_INACTIVO],
         ]);
 
@@ -108,6 +122,9 @@ class AdminServiceCatalogController extends Controller
         $service_catalog->name = trim($data['name']);
         $service_catalog->description = isset($data['description']) ? trim((string) $data['description']) : null;
         $service_catalog->base_price = $data['base_price'];
+        if (array_key_exists('technician_discount_percent', $data)) {
+            $service_catalog->technician_discount_percent = $data['technician_discount_percent'];
+        }
         $service_catalog->status = $data['status'];
         $service_catalog->save();
         $service_catalog->load('company');

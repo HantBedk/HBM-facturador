@@ -7,9 +7,10 @@ import {
   downloadInvoicePdfBlob,
   fetchAdminInvoice,
   patchInvoiceStatus,
-  regenerateInvoicePublicAccess,
 } from '@/services/invoicesApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
+import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
+import { openPdfBlobInNewTab, triggerPdfDownload } from '@/utils/pdfBlob.js'
 
 const uiDialog = useUiDialogStore()
 
@@ -17,6 +18,10 @@ const props = defineProps({
   open: { type: Boolean, default: false },
   /** ID de factura a cargar cuando `open` es true */
   invoiceId: { type: [Number, String], default: null },
+  /**
+   * Listado → «Revisar y aprobar»: muestra la factura completa, pie con Rechazar / Aprobar y oculta el bloque duplicado de aprobar en el cuerpo.
+   */
+  reviewMode: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['close', 'changed'])
@@ -32,9 +37,43 @@ const invoice = ref(null)
 const loading = ref(false)
 const error = ref('')
 const actionError = ref('')
-const publicVerificationShown = ref('')
-const publicVerificationNotice = ref('')
-const regeneratingPublic = ref(false)
+const approveSubmitting = ref(false)
+
+const svcListSource = computed(() => invoice.value?.services || [])
+const {
+  sortedRows: sortedInvoiceServices,
+  toggleSort: toggleInvSvcSort,
+  sortIndicator: invSvcSortInd,
+  ariaSort: invSvcAriaSort,
+} = useClientSortedRows(
+  svcListSource,
+  {
+    service_date: (s) => s.service_date || '',
+    code: (s) => s.code || '',
+    description: (s) => s.description || '',
+    service_type: (s) => s.service_type || '',
+    empleado: (s) => s.empleado?.nombre || '',
+    amount: (s) => Number(s.amount) || 0,
+  },
+  { initialKey: 'service_date', initialDir: 'desc' }
+)
+
+const payListSource = computed(() => invoice.value?.payments || [])
+const {
+  sortedRows: sortedInvoicePayments,
+  toggleSort: toggleInvPaySort,
+  sortIndicator: invPaySortInd,
+  ariaSort: invPayAriaSort,
+} = useClientSortedRows(
+  payListSource,
+  {
+    payment_date: (p) => p.payment_date || '',
+    method: (p) => p.method || '',
+    amount: (p) => Number(p.amount) || 0,
+    notes: (p) => p.notes || '',
+  },
+  { initialKey: 'payment_date', initialDir: 'asc' }
+)
 
 const payForm = ref({
   amount: '',
@@ -71,8 +110,6 @@ watch(
       invoice.value = null
       error.value = ''
       actionError.value = ''
-      publicVerificationShown.value = ''
-      publicVerificationNotice.value = ''
       return
     }
     if (id == null || id === '') return
@@ -106,6 +143,17 @@ const canDeletePayment = computed(() => {
   return (invoice.value?.payments || []).length > 0
 })
 
+const drawerKicker = computed(() => {
+  if (props.reviewMode && invoice.value?.status === 'borrador') {
+    return 'Revisión antes de aprobar'
+  }
+  return 'Detalle de factura'
+})
+
+const showReviewFooter = computed(
+  () => props.reviewMode && invoice.value?.status === 'borrador' && !loading.value && !error.value
+)
+
 const issuedAtLabel = computed(() => formatDateShort(invoice.value?.created_at))
 
 const clientContactPreview = computed(() => {
@@ -115,18 +163,17 @@ const clientContactPreview = computed(() => {
 
 async function onAprobar() {
   actionError.value = ''
-  publicVerificationShown.value = ''
-  publicVerificationNotice.value = ''
+  approveSubmitting.value = true
   try {
-    const res = await patchInvoiceStatus(idRef.value, 'aprobada')
-    invoice.value = res
-    if (res.public_verification_code) {
-      publicVerificationShown.value = res.public_verification_code
-      publicVerificationNotice.value = res.public_verification_notice || ''
-    }
+    invoice.value = await patchInvoiceStatus(idRef.value, 'aprobada')
     emit('changed')
+    if (props.reviewMode) {
+      emit('close')
+    }
   } catch (e) {
     actionError.value = e.data?.message || e.message || 'No se pudo aprobar.'
+  } finally {
+    approveSubmitting.value = false
   }
 }
 
@@ -137,33 +184,6 @@ async function onEnviar() {
     emit('changed')
   } catch (e) {
     actionError.value = e.data?.message || e.message || 'No se pudo marcar como enviada.'
-  }
-}
-
-async function onRegeneratePublicCode() {
-  const ok = await uiDialog.confirm({
-    title: 'Regenerar código público',
-    message:
-      'Se generará un nuevo código de verificación. El anterior dejará de ser válido para la consulta pública. ¿Continuar?',
-    danger: true,
-    confirmLabel: 'Regenerar',
-  })
-  if (!ok) return
-  actionError.value = ''
-  publicVerificationShown.value = ''
-  publicVerificationNotice.value = ''
-  regeneratingPublic.value = true
-  try {
-    const res = await regenerateInvoicePublicAccess(idRef.value)
-    invoice.value = res
-    if (res.public_verification_code) {
-      publicVerificationShown.value = res.public_verification_code
-      publicVerificationNotice.value = res.public_verification_notice || ''
-    }
-  } catch (e) {
-    actionError.value = e.data?.message || e.message || 'No se pudo regenerar el código.'
-  } finally {
-    regeneratingPublic.value = false
   }
 }
 
@@ -210,25 +230,37 @@ async function onDeletePayment(pid) {
   }
 }
 
-function triggerPdfDownload(blob, suggestedName) {
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = suggestedName
-  a.click()
-  URL.revokeObjectURL(a.href)
+async function onPdfPreviewView() {
+  actionError.value = ''
+  try {
+    const blob = await downloadInvoicePdfBlob(idRef.value, { preview: true })
+    openPdfBlobInNewTab(blob)
+  } catch (e) {
+    actionError.value = e.message || 'No se pudo abrir la vista previa en PDF.'
+  }
 }
 
-async function onPdfPreview() {
+async function onPdfPreviewDownload() {
   actionError.value = ''
   try {
     const blob = await downloadInvoicePdfBlob(idRef.value, { preview: true })
     triggerPdfDownload(blob, `factura-${invoice.value?.code || idRef.value}-vista-previa.pdf`)
   } catch (e) {
-    actionError.value = e.message || 'No se pudo generar la vista previa.'
+    actionError.value = e.message || 'No se pudo descargar la vista previa.'
   }
 }
 
-async function onPdfOfficial() {
+async function onPdfOfficialView() {
+  actionError.value = ''
+  try {
+    const blob = await downloadInvoicePdfBlob(idRef.value, { preview: false })
+    openPdfBlobInNewTab(blob)
+  } catch (e) {
+    actionError.value = e.message || 'No se pudo abrir el PDF.'
+  }
+}
+
+async function onPdfOfficialDownload() {
   actionError.value = ''
   try {
     const blob = await downloadInvoicePdfBlob(idRef.value, { preview: false })
@@ -253,7 +285,7 @@ defineExpose({ reload })
       >
         <header class="drawer-header">
           <div class="drawer-header-text">
-            <p class="drawer-kicker">Detalle de factura</p>
+            <p class="drawer-kicker">{{ drawerKicker }}</p>
             <h2 :id="invoice ? 'drawer-inv-title' : 'drawer-inv-loading'" class="drawer-title">
               {{ invoice?.code || (loading ? 'Cargando…' : '—') }}
             </h2>
@@ -275,12 +307,14 @@ defineExpose({ reload })
         </header>
 
         <div class="drawer-toolbar" v-if="invoice">
-          <button v-if="invoice.status === 'borrador'" type="button" class="btn secondary btn-compact" @click="onPdfPreview">
-            Vista previa PDF
-          </button>
-          <button v-if="invoice.status !== 'borrador'" type="button" class="btn secondary btn-compact" @click="onPdfOfficial">
-            Descargar PDF
-          </button>
+          <template v-if="invoice.status === 'borrador'">
+            <button type="button" class="btn secondary btn-compact" @click="onPdfPreviewView">Ver PDF</button>
+            <button type="button" class="btn secondary btn-compact" @click="onPdfPreviewDownload">Descargar PDF</button>
+          </template>
+          <template v-else>
+            <button type="button" class="btn secondary btn-compact" @click="onPdfOfficialView">Ver PDF</button>
+            <button type="button" class="btn secondary btn-compact" @click="onPdfOfficialDownload">Descargar PDF</button>
+          </template>
           <RouterLink v-if="canEdit" class="btn primary btn-compact" :to="`/admin/facturas/${invoice.id}/editar`" @click="emit('close')">
             Editar borrador
           </RouterLink>
@@ -298,23 +332,20 @@ defineExpose({ reload })
               <span v-if="invoice.sent_at" class="muted">Enviada: {{ new Date(invoice.sent_at).toLocaleString('es-CO') }}</span>
             </div>
 
-            <div v-if="publicVerificationShown" class="card public-code-card" role="status">
-              <h2 class="public-code-title">Código para consulta pública del cliente</h2>
-              <p class="muted small">
-                Comparta con el cliente junto al código de factura. Guárdelo en lugar seguro; no se volverá a mostrar salvo que genere uno nuevo.
+            <div v-if="reviewMode && invoice.status === 'borrador'" class="card review-hint-card">
+              <p class="muted small review-hint-text">
+                Revise el detalle y la vista previa PDF. Use <strong>Editar borrador</strong> si debe corregir algo. Si no aprueba,
+                pulse <strong>Rechazar</strong> para cerrar sin cambiar el estado.
               </p>
-              <p v-if="publicVerificationNotice" class="muted small">{{ publicVerificationNotice }}</p>
-              <code class="public-code">{{ publicVerificationShown }}</code>
             </div>
 
-            <div v-if="invoice.status !== 'borrador' && invoice.public_access_configured" class="card">
+            <div v-if="invoice.status !== 'borrador'" class="card">
               <h2>Consulta pública</h2>
-              <p class="muted">
-                El cliente usa <strong>/consulta-factura</strong> con el código de factura y su código de verificación.
+              <p class="muted small">
+                En <strong>/consulta-factura</strong> el cliente puede ingresar el <strong>código de esta factura</strong> para ver el
+                detalle y descargar PDF, o el <strong>NIT de su empresa</strong> para listar todas las facturas disponibles. No requiere
+                inicio de sesión ni código de verificación.
               </p>
-              <button type="button" class="btn secondary btn-compact" :disabled="regeneratingPublic" @click="onRegeneratePublicCode">
-                {{ regeneratingPublic ? 'Generando…' : 'Generar nuevo código de verificación' }}
-              </button>
             </div>
 
             <div class="card preview-sheet">
@@ -352,15 +383,35 @@ defineExpose({ reload })
                 <table class="table preview-table">
                   <thead>
                     <tr>
-                      <th>Fecha</th>
-                      <th>Código</th>
-                      <th>Descripción</th>
-                      <th>Técnico</th>
-                      <th class="num">Valor</th>
+                      <th scope="col" :aria-sort="invSvcAriaSort('service_date')">
+                        <button type="button" class="th-sort" @click="toggleInvSvcSort('service_date')">
+                          Fecha<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('service_date') }}</span>
+                        </button>
+                      </th>
+                      <th scope="col" :aria-sort="invSvcAriaSort('code')">
+                        <button type="button" class="th-sort" @click="toggleInvSvcSort('code')">
+                          Código<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('code') }}</span>
+                        </button>
+                      </th>
+                      <th scope="col" :aria-sort="invSvcAriaSort('description')">
+                        <button type="button" class="th-sort" @click="toggleInvSvcSort('description')">
+                          Descripción<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('description') }}</span>
+                        </button>
+                      </th>
+                      <th scope="col" :aria-sort="invSvcAriaSort('empleado')">
+                        <button type="button" class="th-sort" @click="toggleInvSvcSort('empleado')">
+                          Técnico<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('empleado') }}</span>
+                        </button>
+                      </th>
+                      <th class="num" scope="col" :aria-sort="invSvcAriaSort('amount')">
+                        <button type="button" class="th-sort th-sort--end" @click="toggleInvSvcSort('amount')">
+                          Valor<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('amount') }}</span>
+                        </button>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="s in invoice.services || []" :key="s.id">
+                    <tr v-for="s in sortedInvoiceServices" :key="s.id">
                       <td>{{ s.service_date }}</td>
                       <td class="mono">{{ s.code }}</td>
                       <td class="desc">{{ s.description }}</td>
@@ -371,12 +422,20 @@ defineExpose({ reload })
                 </table>
               </div>
               <p v-if="invoice.status === 'borrador'" class="preview-hint">
-                Revise datos y montos antes de aprobar. En borrador solo puede descargar una vista previa con marca de agua.
+                Revise datos y montos antes de aprobar. En borrador puede ver o descargar una vista previa con marca de agua.
               </p>
             </div>
 
-            <div class="card actions-bar" v-if="canApprove || canSend">
-              <button v-if="canApprove" type="button" class="btn primary btn-compact" @click="onAprobar">Aprobar factura</button>
+            <div class="card actions-bar" v-if="(canApprove && !reviewMode) || canSend">
+              <button
+                v-if="canApprove && !reviewMode"
+                type="button"
+                class="btn primary btn-compact"
+                :disabled="approveSubmitting"
+                @click="onAprobar"
+              >
+                {{ approveSubmitting ? 'Aprobando…' : 'Aprobar factura' }}
+              </button>
               <button v-if="canSend" type="button" class="btn primary btn-compact" @click="onEnviar">Marcar como enviada</button>
             </div>
 
@@ -403,15 +462,35 @@ defineExpose({ reload })
                 <table class="table">
                   <thead>
                     <tr>
-                      <th>Código</th>
-                      <th>Fecha</th>
-                      <th>Tipo</th>
-                      <th>Descripción</th>
-                      <th class="num">Valor</th>
+                      <th scope="col" :aria-sort="invSvcAriaSort('code')">
+                        <button type="button" class="th-sort" @click="toggleInvSvcSort('code')">
+                          Código<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('code') }}</span>
+                        </button>
+                      </th>
+                      <th scope="col" :aria-sort="invSvcAriaSort('service_date')">
+                        <button type="button" class="th-sort" @click="toggleInvSvcSort('service_date')">
+                          Fecha<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('service_date') }}</span>
+                        </button>
+                      </th>
+                      <th scope="col" :aria-sort="invSvcAriaSort('service_type')">
+                        <button type="button" class="th-sort" @click="toggleInvSvcSort('service_type')">
+                          Tipo<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('service_type') }}</span>
+                        </button>
+                      </th>
+                      <th scope="col" :aria-sort="invSvcAriaSort('description')">
+                        <button type="button" class="th-sort" @click="toggleInvSvcSort('description')">
+                          Descripción<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('description') }}</span>
+                        </button>
+                      </th>
+                      <th class="num" scope="col" :aria-sort="invSvcAriaSort('amount')">
+                        <button type="button" class="th-sort th-sort--end" @click="toggleInvSvcSort('amount')">
+                          Valor<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('amount') }}</span>
+                        </button>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="s in invoice.services || []" :key="s.id">
+                    <tr v-for="s in sortedInvoiceServices" :key="s.id">
                       <td class="mono">{{ s.code }}</td>
                       <td>{{ s.service_date }}</td>
                       <td>{{ s.service_type }}</td>
@@ -453,15 +532,31 @@ defineExpose({ reload })
                 <table class="table">
                   <thead>
                     <tr>
-                      <th>Fecha</th>
-                      <th>Método</th>
-                      <th class="num">Monto</th>
-                      <th>Notas</th>
+                      <th scope="col" :aria-sort="invPayAriaSort('payment_date')">
+                        <button type="button" class="th-sort" @click="toggleInvPaySort('payment_date')">
+                          Fecha<span class="sort-ind" aria-hidden="true">{{ invPaySortInd('payment_date') }}</span>
+                        </button>
+                      </th>
+                      <th scope="col" :aria-sort="invPayAriaSort('method')">
+                        <button type="button" class="th-sort" @click="toggleInvPaySort('method')">
+                          Método<span class="sort-ind" aria-hidden="true">{{ invPaySortInd('method') }}</span>
+                        </button>
+                      </th>
+                      <th class="num" scope="col" :aria-sort="invPayAriaSort('amount')">
+                        <button type="button" class="th-sort th-sort--end" @click="toggleInvPaySort('amount')">
+                          Monto<span class="sort-ind" aria-hidden="true">{{ invPaySortInd('amount') }}</span>
+                        </button>
+                      </th>
+                      <th scope="col" :aria-sort="invPayAriaSort('notes')">
+                        <button type="button" class="th-sort" @click="toggleInvPaySort('notes')">
+                          Notas<span class="sort-ind" aria-hidden="true">{{ invPaySortInd('notes') }}</span>
+                        </button>
+                      </th>
                       <th v-if="canDeletePayment" />
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="p in invoice.payments || []" :key="p.id">
+                    <tr v-for="p in sortedInvoicePayments" :key="p.id">
                       <td>{{ p.payment_date }}</td>
                       <td>{{ p.method }}</td>
                       <td class="num">{{ money(p.amount) }}</td>
@@ -477,6 +572,25 @@ defineExpose({ reload })
             </div>
           </template>
         </div>
+
+        <footer v-if="showReviewFooter" class="drawer-approve-footer">
+          <button
+            type="button"
+            class="btn secondary btn-compact"
+            :disabled="approveSubmitting"
+            @click="emit('close')"
+          >
+            Rechazar
+          </button>
+          <button
+            type="button"
+            class="btn primary btn-compact"
+            :disabled="approveSubmitting"
+            @click="onAprobar"
+          >
+            {{ approveSubmitting ? 'Aprobando…' : 'Aprobar factura' }}
+          </button>
+        </footer>
       </aside>
     </div>
   </Teleport>
@@ -600,6 +714,29 @@ defineExpose({ reload })
   overflow-y: auto;
   padding: 0.85rem 1rem 1.5rem;
   -webkit-overflow-scrolling: touch;
+}
+
+.drawer-approve-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.95);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.review-hint-card {
+  border-left: 4px solid rgba(251, 191, 36, 0.55);
+  background: rgba(251, 191, 36, 0.06);
+}
+
+.review-hint-text {
+  margin: 0;
+  line-height: 1.45;
 }
 
 h2 {
@@ -891,27 +1028,6 @@ h2 {
   font-size: 0.82rem;
 }
 
-.public-code-card {
-  border-left: 4px solid rgba(56, 189, 248, 0.65);
-  background: rgba(56, 189, 248, 0.06);
-}
-.public-code-title {
-  margin: 0 0 0.45rem;
-  font-size: 0.95rem;
-  color: #e2e8f0;
-}
-.public-code {
-  display: block;
-  margin-top: 0.55rem;
-  padding: 0.55rem 0.75rem;
-  border-radius: 10px;
-  background: rgba(2, 6, 23, 0.5);
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  color: #bae6fd;
-  font-size: 0.82rem;
-  word-break: break-all;
-  user-select: all;
-}
 .small {
   font-size: 0.82rem;
   line-height: 1.45;

@@ -2,38 +2,51 @@
 
 namespace App\Http\Resources;
 
-use App\Models\AppSetting;
 use App\Models\ServiceCatalog;
 use App\Models\User;
+use App\Support\CatalogPricing;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
  * @mixin ServiceCatalog
  *
- * Para empleados, base_price puede mostrarse con descuento % (solo referencia visual en registro).
- * El importe que grava/factura es siempre el base_price real en BD; ver ServiceController::validateAndNormalizeServiceItems.
+ * - base_price en BD = precio que factura (lista).
+ * - Para empleados, base_price en JSON = importe de referencia del técnico (menor), salvo admin.
+ * - technician_discount_percent null = usar el % global de ajuste a técnicos.
  */
 class ServiceCatalogResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $basePrice = (string) $this->base_price;
+        $listPrice = (string) $this->base_price;
         $user = $request->user();
+
+        $pEff = CatalogPricing::effectiveTechnicianDiscountPercent(
+            $this->technician_discount_percent !== null ? (float) $this->technician_discount_percent : null
+        );
+
+        $displayPrice = $listPrice;
         if ($user !== null && $user->rol === User::ROL_EMPLEADO) {
-            $pct = AppSetting::getFloat(AppSetting::KEY_TECHNICIAN_CATALOG_DISCOUNT_PERCENT, 10.0);
-            if ($pct > 0 && $pct < 100) {
-                $adj = round((float) $basePrice * (100 - $pct) / 100, 2);
-                $basePrice = number_format($adj, 2, '.', '');
-            }
+            $displayPrice = CatalogPricing::technicianAmountFromListPrice((float) $this->base_price, $pEff);
         }
+
+        $isEmpleado = $user !== null && $user->rol === User::ROL_EMPLEADO;
 
         return [
             'id' => $this->id,
+            'code' => 'CAT-'.$this->id,
             'company_id' => $this->company_id,
             'name' => $this->name,
             'description' => $this->description,
-            'base_price' => $basePrice,
+            'base_price' => $displayPrice,
+            /** El % de margen/diferencia no se expone a empleados (solo admin en panel catálogo). */
+            'technician_discount_percent' => $this->when(
+                ! $isEmpleado,
+                $this->technician_discount_percent !== null
+                    ? (string) $this->technician_discount_percent
+                    : null
+            ),
             'status' => $this->status,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),

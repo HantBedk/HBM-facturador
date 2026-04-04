@@ -7,9 +7,10 @@ import {
   downloadInvoicePdfBlob,
   fetchAdminInvoice,
   patchInvoiceStatus,
-  regenerateInvoicePublicAccess,
 } from '@/services/invoicesApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
+import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
+import { openPdfBlobInNewTab, triggerPdfDownload } from '@/utils/pdfBlob.js'
 
 const uiDialog = useUiDialogStore()
 
@@ -27,10 +28,42 @@ const invoice = ref(null)
 const loading = ref(true)
 const error = ref('')
 const actionError = ref('')
-/** Código de verificación para el cliente (solo se muestra al aprobar o al regenerar). */
-const publicVerificationShown = ref('')
-const publicVerificationNotice = ref('')
-const regeneratingPublic = ref(false)
+
+const svcListSource = computed(() => invoice.value?.services || [])
+const {
+  sortedRows: sortedInvoiceServices,
+  toggleSort: toggleInvSvcSort,
+  sortIndicator: invSvcSortInd,
+  ariaSort: invSvcAriaSort,
+} = useClientSortedRows(
+  svcListSource,
+  {
+    service_date: (s) => s.service_date || '',
+    code: (s) => s.code || '',
+    description: (s) => s.description || '',
+    service_type: (s) => s.service_type || '',
+    empleado: (s) => s.empleado?.nombre || '',
+    amount: (s) => Number(s.amount) || 0,
+  },
+  { initialKey: 'service_date', initialDir: 'desc' }
+)
+
+const payListSource = computed(() => invoice.value?.payments || [])
+const {
+  sortedRows: sortedInvoicePayments,
+  toggleSort: toggleInvPaySort,
+  sortIndicator: invPaySortInd,
+  ariaSort: invPayAriaSort,
+} = useClientSortedRows(
+  payListSource,
+  {
+    payment_date: (p) => p.payment_date || '',
+    method: (p) => p.method || '',
+    amount: (p) => Number(p.amount) || 0,
+    notes: (p) => p.notes || '',
+  },
+  { initialKey: 'payment_date', initialDir: 'asc' }
+)
 
 const payForm = ref({
   amount: '',
@@ -99,15 +132,8 @@ const clientContactPreview = computed(() => {
 
 async function onAprobar() {
   actionError.value = ''
-  publicVerificationShown.value = ''
-  publicVerificationNotice.value = ''
   try {
-    const res = await patchInvoiceStatus(id.value, 'aprobada')
-    invoice.value = res
-    if (res.public_verification_code) {
-      publicVerificationShown.value = res.public_verification_code
-      publicVerificationNotice.value = res.public_verification_notice || ''
-    }
+    invoice.value = await patchInvoiceStatus(id.value, 'aprobada')
   } catch (e) {
     actionError.value = e.data?.message || e.message || 'No se pudo aprobar.'
   }
@@ -119,33 +145,6 @@ async function onEnviar() {
     invoice.value = await patchInvoiceStatus(id.value, 'enviada')
   } catch (e) {
     actionError.value = e.data?.message || e.message || 'No se pudo marcar como enviada.'
-  }
-}
-
-async function onRegeneratePublicCode() {
-  const ok = await uiDialog.confirm({
-    title: 'Regenerar código público',
-    message:
-      'Se generará un nuevo código de verificación. El anterior dejará de ser válido para la consulta pública. ¿Continuar?',
-    danger: true,
-    confirmLabel: 'Regenerar',
-  })
-  if (!ok) return
-  actionError.value = ''
-  publicVerificationShown.value = ''
-  publicVerificationNotice.value = ''
-  regeneratingPublic.value = true
-  try {
-    const res = await regenerateInvoicePublicAccess(id.value)
-    invoice.value = res
-    if (res.public_verification_code) {
-      publicVerificationShown.value = res.public_verification_code
-      publicVerificationNotice.value = res.public_verification_notice || ''
-    }
-  } catch (e) {
-    actionError.value = e.data?.message || e.message || 'No se pudo regenerar el código.'
-  } finally {
-    regeneratingPublic.value = false
   }
 }
 
@@ -190,25 +189,37 @@ async function onDeletePayment(pid) {
   }
 }
 
-function triggerPdfDownload(blob, suggestedName) {
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = suggestedName
-  a.click()
-  URL.revokeObjectURL(a.href)
+async function onPdfPreviewView() {
+  actionError.value = ''
+  try {
+    const blob = await downloadInvoicePdfBlob(id.value, { preview: true })
+    openPdfBlobInNewTab(blob)
+  } catch (e) {
+    actionError.value = e.message || 'No se pudo abrir la vista previa en PDF.'
+  }
 }
 
-async function onPdfPreview() {
+async function onPdfPreviewDownload() {
   actionError.value = ''
   try {
     const blob = await downloadInvoicePdfBlob(id.value, { preview: true })
     triggerPdfDownload(blob, `factura-${invoice.value?.code || id.value}-vista-previa.pdf`)
   } catch (e) {
-    actionError.value = e.message || 'No se pudo generar la vista previa.'
+    actionError.value = e.message || 'No se pudo descargar la vista previa.'
   }
 }
 
-async function onPdfOfficial() {
+async function onPdfOfficialView() {
+  actionError.value = ''
+  try {
+    const blob = await downloadInvoicePdfBlob(id.value, { preview: false })
+    openPdfBlobInNewTab(blob)
+  } catch (e) {
+    actionError.value = e.message || 'No se pudo abrir el PDF.'
+  }
+}
+
+async function onPdfOfficialDownload() {
   actionError.value = ''
   try {
     const blob = await downloadInvoicePdfBlob(id.value, { preview: false })
@@ -229,12 +240,14 @@ async function onPdfOfficial() {
         <p v-if="invoice" class="lede">{{ invoice.period_label }} · {{ invoice.company?.nombre }}</p>
       </div>
       <div v-if="invoice" class="head-actions">
-        <button v-if="invoice.status === 'borrador'" type="button" class="btn secondary" @click="onPdfPreview">
-          Vista previa PDF
-        </button>
-        <button v-if="invoice.status !== 'borrador'" type="button" class="btn secondary" @click="onPdfOfficial">
-          Descargar PDF
-        </button>
+        <template v-if="invoice.status === 'borrador'">
+          <button type="button" class="btn secondary" @click="onPdfPreviewView">Ver PDF</button>
+          <button type="button" class="btn secondary" @click="onPdfPreviewDownload">Descargar PDF</button>
+        </template>
+        <template v-else>
+          <button type="button" class="btn secondary" @click="onPdfOfficialView">Ver PDF</button>
+          <button type="button" class="btn secondary" @click="onPdfOfficialDownload">Descargar PDF</button>
+        </template>
         <RouterLink v-if="canEdit" class="btn primary" :to="`/admin/facturas/${invoice.id}/editar`">Editar borrador</RouterLink>
       </div>
     </header>
@@ -249,37 +262,13 @@ async function onPdfOfficial() {
         <span v-if="invoice.sent_at" class="muted">Enviada: {{ new Date(invoice.sent_at).toLocaleString('es-CO') }}</span>
       </div>
 
-      <div
-        v-if="publicVerificationShown"
-        class="card public-code-card"
-        role="status"
-      >
-        <h2 class="public-code-title">Código para consulta pública del cliente</h2>
-        <p class="muted small">
-          Comparta con el cliente junto al código de factura (página de consulta sin login). Guárdelo en lugar seguro; no se
-          volverá a mostrar salvo que genere uno nuevo.
-        </p>
-        <p v-if="publicVerificationNotice" class="muted small">{{ publicVerificationNotice }}</p>
-        <code class="public-code">{{ publicVerificationShown }}</code>
-      </div>
-
-      <div
-        v-if="invoice.status !== 'borrador' && invoice.public_access_configured"
-        class="card"
-      >
+      <div v-if="invoice.status !== 'borrador'" class="card">
         <h2>Consulta pública</h2>
-        <p class="muted">
-          El cliente usa <strong>/consulta-factura</strong> con el código de factura y su código de verificación. Si perdió el
-          código o debe invalidarlo, genere uno nuevo.
+        <p class="muted small">
+          En <strong>/consulta-factura</strong> el cliente puede ingresar el <strong>código de esta factura</strong> para ver el
+          detalle, abrir o descargar el PDF, o el <strong>NIT de su empresa</strong> para listar todas las facturas disponibles. No requiere
+          inicio de sesión ni código de verificación.
         </p>
-        <button
-          type="button"
-          class="btn secondary"
-          :disabled="regeneratingPublic"
-          @click="onRegeneratePublicCode"
-        >
-          {{ regeneratingPublic ? 'Generando…' : 'Generar nuevo código de verificación' }}
-        </button>
       </div>
 
       <div class="card preview-sheet">
@@ -317,15 +306,35 @@ async function onPdfOfficial() {
           <table class="table preview-table">
             <thead>
               <tr>
-                <th>Fecha</th>
-                <th>Código</th>
-                <th>Descripción</th>
-                <th>Técnico</th>
-                <th class="num">Valor</th>
+                <th scope="col" :aria-sort="invSvcAriaSort('service_date')">
+                  <button type="button" class="th-sort" @click="toggleInvSvcSort('service_date')">
+                    Fecha<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('service_date') }}</span>
+                  </button>
+                </th>
+                <th scope="col" :aria-sort="invSvcAriaSort('code')">
+                  <button type="button" class="th-sort" @click="toggleInvSvcSort('code')">
+                    Código<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('code') }}</span>
+                  </button>
+                </th>
+                <th scope="col" :aria-sort="invSvcAriaSort('description')">
+                  <button type="button" class="th-sort" @click="toggleInvSvcSort('description')">
+                    Descripción<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('description') }}</span>
+                  </button>
+                </th>
+                <th scope="col" :aria-sort="invSvcAriaSort('empleado')">
+                  <button type="button" class="th-sort" @click="toggleInvSvcSort('empleado')">
+                    Técnico<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('empleado') }}</span>
+                  </button>
+                </th>
+                <th class="num" scope="col" :aria-sort="invSvcAriaSort('amount')">
+                  <button type="button" class="th-sort th-sort--end" @click="toggleInvSvcSort('amount')">
+                    Valor<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('amount') }}</span>
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="s in invoice.services || []" :key="s.id">
+              <tr v-for="s in sortedInvoiceServices" :key="s.id">
                 <td>{{ s.service_date }}</td>
                 <td class="mono">{{ s.code }}</td>
                 <td class="desc">{{ s.description }}</td>
@@ -336,7 +345,7 @@ async function onPdfOfficial() {
           </table>
         </div>
         <p v-if="invoice.status === 'borrador'" class="preview-hint">
-          Revise datos y montos antes de aprobar. El PDF oficial se habilita al aprobar la factura; en borrador solo puede
+          Revise datos y montos antes de aprobar. El PDF oficial se habilita al aprobar la factura; en borrador puede ver o
           descargar una vista previa con marca de agua.
         </p>
       </div>
@@ -369,15 +378,35 @@ async function onPdfOfficial() {
           <table class="table">
             <thead>
               <tr>
-                <th>Código</th>
-                <th>Fecha</th>
-                <th>Tipo</th>
-                <th>Descripción</th>
-                <th class="num">Valor</th>
+                <th scope="col" :aria-sort="invSvcAriaSort('code')">
+                  <button type="button" class="th-sort" @click="toggleInvSvcSort('code')">
+                    Código<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('code') }}</span>
+                  </button>
+                </th>
+                <th scope="col" :aria-sort="invSvcAriaSort('service_date')">
+                  <button type="button" class="th-sort" @click="toggleInvSvcSort('service_date')">
+                    Fecha<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('service_date') }}</span>
+                  </button>
+                </th>
+                <th scope="col" :aria-sort="invSvcAriaSort('service_type')">
+                  <button type="button" class="th-sort" @click="toggleInvSvcSort('service_type')">
+                    Tipo<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('service_type') }}</span>
+                  </button>
+                </th>
+                <th scope="col" :aria-sort="invSvcAriaSort('description')">
+                  <button type="button" class="th-sort" @click="toggleInvSvcSort('description')">
+                    Descripción<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('description') }}</span>
+                  </button>
+                </th>
+                <th class="num" scope="col" :aria-sort="invSvcAriaSort('amount')">
+                  <button type="button" class="th-sort th-sort--end" @click="toggleInvSvcSort('amount')">
+                    Valor<span class="sort-ind" aria-hidden="true">{{ invSvcSortInd('amount') }}</span>
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="s in invoice.services || []" :key="s.id">
+              <tr v-for="s in sortedInvoiceServices" :key="s.id">
                 <td class="mono">{{ s.code }}</td>
                 <td>{{ s.service_date }}</td>
                 <td>{{ s.service_type }}</td>
@@ -419,15 +448,31 @@ async function onPdfOfficial() {
           <table class="table">
             <thead>
               <tr>
-                <th>Fecha</th>
-                <th>Método</th>
-                <th class="num">Monto</th>
-                <th>Notas</th>
+                <th scope="col" :aria-sort="invPayAriaSort('payment_date')">
+                  <button type="button" class="th-sort" @click="toggleInvPaySort('payment_date')">
+                    Fecha<span class="sort-ind" aria-hidden="true">{{ invPaySortInd('payment_date') }}</span>
+                  </button>
+                </th>
+                <th scope="col" :aria-sort="invPayAriaSort('method')">
+                  <button type="button" class="th-sort" @click="toggleInvPaySort('method')">
+                    Método<span class="sort-ind" aria-hidden="true">{{ invPaySortInd('method') }}</span>
+                  </button>
+                </th>
+                <th class="num" scope="col" :aria-sort="invPayAriaSort('amount')">
+                  <button type="button" class="th-sort th-sort--end" @click="toggleInvPaySort('amount')">
+                    Monto<span class="sort-ind" aria-hidden="true">{{ invPaySortInd('amount') }}</span>
+                  </button>
+                </th>
+                <th scope="col" :aria-sort="invPayAriaSort('notes')">
+                  <button type="button" class="th-sort" @click="toggleInvPaySort('notes')">
+                    Notas<span class="sort-ind" aria-hidden="true">{{ invPaySortInd('notes') }}</span>
+                  </button>
+                </th>
                 <th v-if="canDeletePayment" />
               </tr>
             </thead>
             <tbody>
-              <tr v-for="p in invoice.payments || []" :key="p.id">
+              <tr v-for="p in sortedInvoicePayments" :key="p.id">
                 <td>{{ p.payment_date }}</td>
                 <td>{{ p.method }}</td>
                 <td class="num">{{ money(p.amount) }}</td>
@@ -789,30 +834,6 @@ h2 {
   border: 1px solid rgba(56, 189, 248, 0.22);
   color: #bae6fd;
   font-size: 0.85rem;
-}
-
-.public-code-card {
-  border-left: 4px solid rgba(56, 189, 248, 0.65);
-  background: rgba(56, 189, 248, 0.06);
-}
-
-.public-code-title {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
-  color: #e2e8f0;
-}
-
-.public-code {
-  display: block;
-  margin-top: 0.75rem;
-  padding: 0.65rem 0.85rem;
-  border-radius: 10px;
-  background: rgba(2, 6, 23, 0.5);
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  color: #bae6fd;
-  font-size: 0.85rem;
-  word-break: break-all;
-  user-select: all;
 }
 
 .small {

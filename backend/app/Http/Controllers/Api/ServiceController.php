@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Services\PanelNotificationDispatcher;
 use App\Services\ServiceCodeGenerator;
+use App\Support\CatalogPricing;
 use App\Support\CatalogSuggestionDuplicateChecker;
 use App\Support\DecimalMath;
 use App\Support\Pagination;
@@ -36,6 +37,8 @@ class ServiceController extends Controller
         $q = Service::query()
             ->with(['company', 'user'])
             ->withCount('invoices')
+            ->withCount('items')
+            ->withSum('items', 'technician_line_amount')
             ->with(['invoices' => function ($rel) {
                 $rel->select('invoices.id', 'invoices.code');
             }]);
@@ -247,6 +250,7 @@ class ServiceController extends Controller
                     'label' => $row['label'],
                     'line_description' => $row['line_description'],
                     'amount' => $row['amount'],
+                    'technician_line_amount' => $row['technician_line_amount'],
                     'sort_order' => $sort,
                 ]);
             }
@@ -306,7 +310,16 @@ class ServiceController extends Controller
     {
         $this->authorize('view', $service);
         $service->loadCount('invoices');
-        $service->load(['company', 'user', 'photos', 'catalog:id,name', 'items.catalogSuggestion']);
+        $service->load([
+            'company',
+            'user',
+            'photos',
+            'catalog:id,name',
+            'items.catalogSuggestion',
+            'invoices' => function ($rel) {
+                $rel->select('invoices.id', 'invoices.code');
+            },
+        ]);
 
         return new ServiceResource($service);
     }
@@ -455,7 +468,7 @@ class ServiceController extends Controller
 
     /**
      * @param  list<array<string, mixed>>  $rows
-     * @return list<array{catalog_id: ?int, custom_name: ?string, custom_description: ?string, amount: string, label: string, line_description: ?string, is_custom: bool, propose_catalog: bool}>
+     * @return list<array{catalog_id: ?int, custom_name: ?string, custom_description: ?string, amount: string, technician_line_amount: string, label: string, line_description: ?string, is_custom: bool, propose_catalog: bool}>
      */
     private function validateAndNormalizeServiceItems(array $rows, int $companyId): array
     {
@@ -519,14 +532,18 @@ class ServiceController extends Controller
                     throw ValidationException::withMessages(['items' => ['Ítem de catálogo no encontrado.']]);
                 }
                 $lineDesc = $lineDescOverride ?? $cat->description;
-                // Precio de lista real (facturación): el técnico puede ver un % menor en GET /service-catalog/active;
-                // no confiar en el importe enviado por el cliente para líneas de catálogo.
+                // Precio de lista (factura); el técnico ve menos en catálogo activo según % global o por ítem.
                 $listPrice = number_format((float) $cat->base_price, 2, '.', '');
+                $pEff = CatalogPricing::effectiveTechnicianDiscountPercent(
+                    $cat->technician_discount_percent !== null ? (float) $cat->technician_discount_percent : null
+                );
+                $techLine = CatalogPricing::technicianAmountFromListPrice((float) $listPrice, $pEff);
                 $out[] = [
                     'catalog_id' => $cid,
                     'custom_name' => null,
                     'custom_description' => null,
                     'amount' => $listPrice,
+                    'technician_line_amount' => $techLine,
                     'label' => $cat->name,
                     'line_description' => $lineDesc,
                     'is_custom' => false,
@@ -539,11 +556,14 @@ class ServiceController extends Controller
                     ]);
                 }
                 $lineDesc = $lineDescOverride ?? $cdesc;
+                $pGlobal = CatalogPricing::globalTechnicianDiscountPercent();
+                $billedStr = CatalogPricing::billedAmountFromTechnicianEntry((float) $amtStr, $pGlobal);
                 $out[] = [
                     'catalog_id' => null,
                     'custom_name' => $cname,
                     'custom_description' => $cdesc,
-                    'amount' => $amtStr,
+                    'amount' => $billedStr,
+                    'technician_line_amount' => $amtStr,
                     'label' => $cname,
                     'line_description' => $lineDesc,
                     'is_custom' => true,

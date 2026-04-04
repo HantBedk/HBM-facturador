@@ -19,6 +19,7 @@ class ServiceCatalog extends Model
         'name',
         'description',
         'base_price',
+        'technician_discount_percent',
         'status',
     ];
 
@@ -26,6 +27,7 @@ class ServiceCatalog extends Model
     {
         return [
             'base_price' => 'decimal:2',
+            'technician_discount_percent' => 'decimal:2',
         ];
     }
 

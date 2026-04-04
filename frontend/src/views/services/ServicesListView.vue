@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
+import AdminServiceDetailPanel from '@/components/admin/AdminServiceDetailPanel.vue'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
 import { downloadAdminExportCsv } from '@/services/invoicesApi.js'
@@ -25,6 +26,19 @@ const deleteTarget = ref(null)
 const deleteConfirmInput = ref('')
 const deleteModalError = ref('')
 const deleteInputRef = ref(null)
+
+const detailPanelOpen = ref(false)
+const detailServiceId = ref(null)
+
+function openDetailPanel(row) {
+  detailServiceId.value = row.id
+  detailPanelOpen.value = true
+}
+
+function closeDetailPanel() {
+  detailPanelOpen.value = false
+  detailServiceId.value = null
+}
 
 const deleteExpectedCode = computed(() => {
   const t = deleteTarget.value
@@ -114,6 +128,9 @@ async function submitDeleteModal() {
   try {
     await archiveService(t.id)
     closeDeleteModal()
+    if (detailPanelOpen.value && String(detailServiceId.value) === String(t.id)) {
+      closeDetailPanel()
+    }
     await load()
   } catch (e) {
     error.value = e.data?.message || e.message || 'No se pudo eliminar el servicio.'
@@ -122,10 +139,16 @@ async function submitDeleteModal() {
   }
 }
 
-function escapeCloseDeleteModal(ev) {
-  if (ev.key === 'Escape' && deleteModalOpen.value) {
+function onGlobalEscape(ev) {
+  if (ev.key !== 'Escape') return
+  if (deleteModalOpen.value) {
     ev.preventDefault()
     closeDeleteModal()
+    return
+  }
+  if (isAdmin.value && detailPanelOpen.value) {
+    ev.preventDefault()
+    closeDetailPanel()
   }
 }
 
@@ -183,7 +206,7 @@ function scheduleFilterLoad() {
 }
 
 onMounted(async () => {
-  document.addEventListener('keydown', escapeCloseDeleteModal)
+  document.addEventListener('keydown', onGlobalEscape)
   try {
     companies.value = await fetchCompanies()
     if (isAdmin.value) {
@@ -196,7 +219,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  document.removeEventListener('keydown', escapeCloseDeleteModal)
+  document.removeEventListener('keydown', onGlobalEscape)
   clearTimeout(searchTimer)
   clearTimeout(filterTimer)
 })
@@ -314,7 +337,7 @@ async function exportServicesCsv() {
         <p class="lede">
           {{
             isAdmin
-              ? 'Código del servicio → detalle del servicio; debajo, el código de factura (si existe) → detalle de la factura.'
+              ? 'Clic en el código de servicio abre el panel lateral con el detalle; debajo, el código de factura (si existe) enlaza a la factura.'
               : 'Solo tus servicios visibles. Toca una fila para ver el detalle.'
           }}
         </p>
@@ -438,7 +461,14 @@ async function exportServicesCsv() {
             >
               <td class="code-cell">
                 <div class="code-cell-inner">
-                  <RouterLink v-if="isAdmin" class="link" :to="detailPath(s.id)" @click.stop>{{ s.code }}</RouterLink>
+                  <button
+                    v-if="isAdmin"
+                    type="button"
+                    class="code-link"
+                    @click.stop="openDetailPanel(s)"
+                  >
+                    {{ s.code }}
+                  </button>
                   <span v-else class="link">{{ s.code }}</span>
                   <template v-if="isAdmin && s.invoices?.length">
                     <RouterLink
@@ -586,6 +616,13 @@ async function exportServicesCsv() {
         </div>
       </div>
     </Teleport>
+
+    <AdminServiceDetailPanel
+      v-if="isAdmin"
+      :open="detailPanelOpen"
+      :service-id="detailServiceId"
+      @close="closeDetailPanel"
+    />
   </section>
 </template>
 
@@ -815,6 +852,26 @@ async function exportServicesCsv() {
 
 .link:hover {
   text-decoration: underline;
+}
+
+.code-link {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-family: ui-monospace, monospace;
+  font-size: inherit;
+  font-weight: 600;
+  color: #7dd3fc;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: rgba(125, 211, 252, 0.45);
+}
+
+.code-link:hover {
+  color: #bae6fd;
 }
 
 /* No usar flex en el <td>: rompe la altura de fila y desalinea bordes horizontales. */

@@ -6,7 +6,6 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\Service;
 use App\Models\User;
-use App\Services\InvoicePublicAccessService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -76,12 +75,11 @@ class FullSystemFlowTest extends TestCase
         $this->assertStringContainsString('pdf', (string) $pdf->headers->get('Content-Type'));
 
         $invoice = Invoice::query()->findOrFail($invoiceId);
-        app(InvoicePublicAccessService::class)->setPlainToken($invoice, 'TOKEN-CLIENTE-TEST');
 
         $this->postJson('/api/public/invoices/consult', [
-            'code' => $invoice->code,
-            'verification_code' => 'TOKEN-CLIENTE-TEST',
+            'query' => $invoice->code,
         ])->assertOk()
+            ->assertJsonPath('kind', 'invoice')
             ->assertJsonPath('invoice.code', $invoice->code);
     }
 
