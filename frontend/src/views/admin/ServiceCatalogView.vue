@@ -9,6 +9,7 @@ import {
   fetchCompanies,
   fetchServiceCatalogSuggestions,
   fetchTechnicianCatalogDiscount,
+  importServiceCatalogFromSpreadsheet,
   patchServiceCatalogEstado,
   rejectServiceCatalogSuggestion,
   updateServiceCatalogItem,
@@ -47,6 +48,13 @@ const form = ref({
 /** Selección multi para borrado masivo (ids en la página cargada). */
 const selectedCatalogIds = ref([])
 const bulkDeleting = ref(false)
+
+const importCompanyId = ref('')
+const importBusy = ref(false)
+const importFileRef = ref(null)
+
+/** listado: propuestas + tabla; herramientas: importar Excel + descuento técnicos */
+const catalogTab = ref('listado')
 
 const showSuggestionModal = ref(false)
 const suggestionSaving = ref(false)
@@ -341,6 +349,52 @@ async function toggleStatus(row) {
   }
 }
 
+function formatImportSummary(data) {
+  const lines = [data?.message || 'Importación finalizada.']
+  const issues = data?.issues
+  if (issues?.length) {
+    lines.push('')
+    lines.push('Detalle por fila (máx. 20):')
+    issues.slice(0, 20).forEach((i) => {
+      const tag = i.code === 'duplicate' ? 'duplicado' : 'aviso'
+      lines.push(`· Fila ${i.row} (${tag}): ${i.message}`)
+    })
+    if (issues.length > 20) {
+      lines.push(`… y ${issues.length - 20} más.`)
+    }
+  }
+  return lines.join('\n')
+}
+
+async function onImportFile(ev) {
+  const input = ev.target
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  importBusy.value = true
+  error.value = ''
+  try {
+    const data = await importServiceCatalogFromSpreadsheet(file, importCompanyId.value)
+    await load()
+    await uiDialog.alert({
+      title: 'Importación de catálogo',
+      message: formatImportSummary(data),
+    })
+  } catch (e) {
+    error.value = e.data?.message || e.message || 'No se pudo importar el archivo.'
+    const fe = e.data?.errors?.file
+    if (Array.isArray(fe) && fe[0]) {
+      error.value = fe[0]
+    }
+  } finally {
+    importBusy.value = false
+  }
+}
+
+function triggerImportPick() {
+  importFileRef.value?.click()
+}
+
 async function onRejectSuggestion(s) {
   const ok = await uiDialog.confirm({
     title: 'Descartar propuesta',
@@ -364,9 +418,8 @@ async function onRejectSuggestion(s) {
       <div>
         <h1>Catálogo de servicios</h1>
         <p class="lede">
-          Precios base del catálogo (globales o por empresa en cada ítem). Arriba del listado verás las
-          <strong>propuestas pendientes</strong> cuando un técnico registra un ítem «Otro»; al aprobarlas pasan al catálogo global
-          para todas las empresas.
+          Precios base del catálogo (globales o por empresa en cada ítem). En la pestaña <strong>Catálogo</strong> gestionas ítems y
+          propuestas pendientes; en <strong>Importar y precios</strong> cargas Excel/CSV y el descuento que ven los técnicos.
         </p>
       </div>
       <div class="head-actions">
@@ -383,34 +436,30 @@ async function onRejectSuggestion(s) {
       </div>
     </header>
 
-    <div class="card pricing-card">
-      <h2 class="pricing-title">Vista de precios para técnicos</h2>
-      <p class="pricing-lede">
-        En el registro de servicios, el empleado ve el catálogo con un descuento sobre el precio de lista (por defecto 10&nbsp;%).
-        El valor facturable sigue siendo el que definas aquí en cada ítem; esto solo afecta la referencia mostrada al técnico.
-      </p>
-      <div class="pricing-row">
-        <label class="pricing-label">
-          <span>Descuento (%)</span>
-          <input
-            v-model.number="technicianDiscountPercent"
-            type="number"
-            min="0"
-            max="95"
-            step="0.5"
-            class="input pricing-input"
-          />
-        </label>
-        <button type="button" class="btn primary" :disabled="techDiscountSaving" @click="saveTechnicianDiscount">
-          {{ techDiscountSaving ? 'Guardando…' : 'Guardar descuento' }}
-        </button>
-      </div>
-      <p v-if="techDiscountError" class="banner err inline">{{ techDiscountError }}</p>
-      <p v-else-if="techDiscountOk" class="banner ok inline">{{ techDiscountOk }}</p>
+    <div class="catalog-tabs" role="tablist" aria-label="Secciones del catálogo">
+      <button
+        type="button"
+        class="catalog-tab"
+        role="tab"
+        :aria-selected="catalogTab === 'listado'"
+        @click="catalogTab = 'listado'"
+      >
+        Catálogo
+      </button>
+      <button
+        type="button"
+        class="catalog-tab"
+        role="tab"
+        :aria-selected="catalogTab === 'herramientas'"
+        @click="catalogTab = 'herramientas'"
+      >
+        Importar y precios
+      </button>
     </div>
 
     <p v-if="error" class="banner err">{{ error }}</p>
 
+    <div v-show="catalogTab === 'listado'" class="tab-panel" role="tabpanel">
     <div class="card pending-block">
       <h2 class="pending-title">Propuestas de catálogo pendientes</h2>
       <p class="pending-sub muted">
@@ -507,6 +556,64 @@ async function onRejectSuggestion(s) {
           </tr>
         </tbody>
       </table>
+    </div>
+    </div>
+
+    <div v-show="catalogTab === 'herramientas'" class="tab-panel" role="tabpanel">
+      <div class="card import-card">
+        <h2 class="import-title">Importar desde Excel o CSV</h2>
+        <p class="lede import-lede">
+          Use la <strong>primera hoja</strong> del libro (.xlsx, .xls) o un archivo <strong>CSV UTF-8</strong>. Puede incluir una fila de encabezados con textos como
+          <em>Nombre</em>, <em>Descripción</em> (opcional) y <em>Precio</em> / <em>Valor</em>. Sin encabezados: columna A = nombre, B = descripción si hay tres o más columnas, última columna numérica = precio; con solo dos columnas: A = nombre, B = precio. Máximo
+          2000 filas; archivo hasta 5&nbsp;MB. Los nombres duplicados en el mismo ámbito (global o empresa) se omiten.
+        </p>
+        <div class="import-row">
+          <label class="import-field">
+            <span>Ámbito</span>
+            <select v-model="importCompanyId" class="input" :disabled="importBusy">
+              <option value="">Global (todas las empresas)</option>
+              <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
+            </select>
+          </label>
+          <input
+            ref="importFileRef"
+            type="file"
+            class="import-file-input"
+            accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+            :disabled="importBusy"
+            @change="onImportFile"
+          />
+          <button type="button" class="btn secondary import-btn" :disabled="importBusy" @click="triggerImportPick">
+            {{ importBusy ? 'Importando…' : 'Elegir archivo…' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="card pricing-card">
+        <h2 class="pricing-title">Vista de precios para técnicos</h2>
+        <p class="pricing-lede">
+          En el registro de servicios, el empleado ve el catálogo con un descuento sobre el precio de lista (por defecto 10&nbsp;%).
+          El valor facturable sigue siendo el que definas en cada ítem; esto solo afecta la referencia mostrada al técnico.
+        </p>
+        <div class="pricing-row">
+          <label class="pricing-label">
+            <span>Descuento (%)</span>
+            <input
+              v-model.number="technicianDiscountPercent"
+              type="number"
+              min="0"
+              max="95"
+              step="0.5"
+              class="input pricing-input"
+            />
+          </label>
+          <button type="button" class="btn primary" :disabled="techDiscountSaving" @click="saveTechnicianDiscount">
+            {{ techDiscountSaving ? 'Guardando…' : 'Guardar descuento' }}
+          </button>
+        </div>
+        <p v-if="techDiscountError" class="banner err inline">{{ techDiscountError }}</p>
+        <p v-else-if="techDiscountOk" class="banner ok inline">{{ techDiscountOk }}</p>
+      </div>
     </div>
 
     <Teleport to="body">
@@ -605,6 +712,44 @@ async function onRejectSuggestion(s) {
   gap: 0.5rem;
   align-items: center;
 }
+.catalog-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+  padding: 0.2rem;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+.catalog-tab {
+  flex: 1 1 auto;
+  min-width: 10rem;
+  padding: 0.55rem 1rem;
+  border: none;
+  border-radius: 9px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  color: #94a3b8;
+  background: transparent;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.catalog-tab:hover {
+  color: #e2e8f0;
+  background: rgba(56, 189, 248, 0.08);
+}
+.catalog-tab[aria-selected='true'] {
+  color: #f8fafc;
+  background: rgba(56, 189, 248, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35);
+}
+.tab-panel {
+  margin-bottom: 1rem;
+}
 h1 {
   margin: 0 0 0.35rem;
   font-size: 1.35rem;
@@ -629,11 +774,58 @@ h1 {
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: rgba(15, 23, 42, 0.55);
 }
-.pricing-card {
+.import-card {
   margin-bottom: 1rem;
+  border-color: rgba(56, 189, 248, 0.28);
+  background: rgba(12, 74, 110, 0.12);
+}
+.import-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+  color: #e0f2fe;
+}
+.import-lede {
+  margin: 0 0 1rem;
+  max-width: 48rem;
+  line-height: 1.5;
+  font-size: 0.86rem;
+}
+.import-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1rem;
+}
+.import-field {
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+.import-field span {
+  display: block;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  margin-bottom: 0.3rem;
+}
+.import-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.import-btn {
+  flex-shrink: 0;
+}
+.pricing-card {
+  margin-bottom: 0;
   border-color: rgba(45, 212, 191, 0.25);
   background: rgba(6, 78, 59, 0.12);
 }
+
 .pricing-title {
   margin: 0 0 0.35rem;
   font-size: 1.05rem;

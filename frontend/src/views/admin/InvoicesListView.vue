@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
+import AdminInvoiceDetailPanel from '@/components/admin/AdminInvoiceDetailPanel.vue'
 import { fetchCompanies } from '@/services/servicesApi.js'
 import {
   addInvoicePayment,
@@ -63,8 +64,22 @@ async function load() {
   }
 }
 
+const detailPanelOpen = ref(false)
+const detailInvoiceId = ref(null)
+const detailPanelRef = ref(null)
+
+function openDetailPanel(inv) {
+  detailInvoiceId.value = inv.id
+  detailPanelOpen.value = true
+}
+
+function closeDetailPanel() {
+  detailPanelOpen.value = false
+  detailInvoiceId.value = null
+}
+
 onMounted(async () => {
-  document.addEventListener('keydown', onPayModalEscape)
+  document.addEventListener('keydown', onGlobalEscape)
   try {
     companies.value = await fetchCompanies()
   } catch {
@@ -101,7 +116,7 @@ watch(
 )
 
 onUnmounted(() => {
-  document.removeEventListener('keydown', onPayModalEscape)
+  document.removeEventListener('keydown', onGlobalEscape)
   clearTimeout(qDebounceTimer)
 })
 
@@ -206,6 +221,9 @@ async function submitPayModal() {
       notes: payForm.value.notes.trim() || undefined,
     })
     closePayModal()
+    if (detailPanelOpen.value && String(detailInvoiceId.value) === String(id)) {
+      await detailPanelRef.value?.reload?.()
+    }
     await load()
   } catch (e) {
     payModalError.value = e.data?.message || e.message || 'No se pudo registrar el pago.'
@@ -214,8 +232,14 @@ async function submitPayModal() {
   }
 }
 
-function onPayModalEscape(ev) {
-  if (ev.key === 'Escape' && payModalOpen.value) {
+function onGlobalEscape(ev) {
+  if (ev.key !== 'Escape') return
+  if (detailPanelOpen.value) {
+    ev.preventDefault()
+    closeDetailPanel()
+    return
+  }
+  if (payModalOpen.value) {
     ev.preventDefault()
     closePayModal()
   }
@@ -262,7 +286,9 @@ async function exportInvoicesCsv() {
     <header class="head">
       <div>
         <h1>Facturas</h1>
-        <p class="lede">Listado y gestión. Clic en el <strong>código</strong> de la factura para ver el detalle; los borradores se editan con Editar.</p>
+        <p class="lede">
+          Listado y gestión. Clic en el <strong>código</strong> abre el panel lateral con el detalle completo; los borradores se editan con Editar.
+        </p>
       </div>
       <div class="head-btns">
         <button type="button" class="btn secondary" :disabled="exportBusy" @click="exportInvoicesCsv">
@@ -344,7 +370,7 @@ async function exportInvoicesCsv() {
           <tbody>
             <tr v-for="inv in rows" :key="inv.id" class="row-data">
               <td class="mono">
-                <RouterLink class="link" :to="`/admin/facturas/${inv.id}`">{{ inv.code }}</RouterLink>
+                <button type="button" class="code-link" @click="openDetailPanel(inv)">{{ inv.code }}</button>
               </td>
               <td>{{ inv.company?.nombre || '—' }}</td>
               <td>{{ inv.period_label }}</td>
@@ -390,6 +416,14 @@ async function exportInvoicesCsv() {
         </div>
       </template>
     </div>
+
+    <AdminInvoiceDetailPanel
+      ref="detailPanelRef"
+      :open="detailPanelOpen"
+      :invoice-id="detailInvoiceId"
+      @close="closeDetailPanel"
+      @changed="load"
+    />
 
     <Teleport to="body">
       <div v-if="payModalOpen" class="modal-backdrop" @click.self="closePayModal">
@@ -646,6 +680,26 @@ h1 {
   text-decoration: underline;
 }
 
+.code-link {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #7dd3fc;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: rgba(125, 211, 252, 0.45);
+}
+
+.code-link:hover {
+  color: #bae6fd;
+}
+
 .tiny {
   font-size: 0.75rem;
 }
@@ -702,7 +756,7 @@ h1 {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 100;
   display: flex;
   align-items: center;
   justify-content: center;

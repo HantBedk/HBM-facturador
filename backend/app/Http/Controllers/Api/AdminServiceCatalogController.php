@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ServiceCatalogResource;
 use App\Models\ServiceCatalog;
+use App\Services\ServiceCatalogSpreadsheetImporter;
 use App\Support\Pagination;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -153,6 +154,98 @@ class AdminServiceCatalogController extends Controller
                 : "Se eliminaron {$deleted} ítems del catálogo.",
             'deleted' => $deleted,
         ]);
+    }
+
+    /**
+     * Importación masiva desde Excel (.xlsx, .xls) o CSV (UTF-8), primera hoja.
+     */
+    public function import(Request $request, ServiceCatalogSpreadsheetImporter $importer): JsonResponse
+    {
+        $data = $request->validate([
+            'file' => ['required', 'file', 'max:5120', 'mimes:xlsx,xls,csv,txt'],
+            'company_id' => ['nullable', 'integer', 'exists:companies,id'],
+        ]);
+
+        $companyScope = $this->resolveCatalogCompanyScope($data['company_id'] ?? null);
+        $parsed = $importer->parse($request->file('file'));
+
+        $imported = 0;
+        $skippedDuplicates = 0;
+        $issues = [];
+
+        foreach ($parsed as $row) {
+            $line = $row['line'];
+            $name = $row['name'];
+
+            if ($this->catalogNameExistsInScope($name, $companyScope)) {
+                $skippedDuplicates++;
+                $issues[] = [
+                    'row' => $line,
+                    'code' => 'duplicate',
+                    'message' => 'Ya existe un ítem con el mismo nombre en este ámbito (global o empresa).',
+                ];
+
+                continue;
+            }
+
+            try {
+                ServiceCatalog::query()->create([
+                    'company_id' => $companyScope,
+                    'name' => $name,
+                    'description' => $row['description'],
+                    'base_price' => $row['base_price'],
+                    'status' => ServiceCatalog::STATUS_ACTIVO,
+                ]);
+                $imported++;
+            } catch (\Throwable $e) {
+                $issues[] = [
+                    'row' => $line,
+                    'code' => 'error',
+                    'message' => 'No se pudo crear el registro.',
+                ];
+                report($e);
+            }
+        }
+
+        $msgParts = [];
+        if ($imported > 0) {
+            $msgParts[] = $imported === 1 ? 'Se importó 1 ítem.' : "Se importaron {$imported} ítems.";
+        }
+        if ($skippedDuplicates > 0) {
+            $msgParts[] = $skippedDuplicates === 1
+                ? '1 fila omitida por nombre duplicado.'
+                : "{$skippedDuplicates} filas omitidas por nombre duplicado.";
+        }
+        $errorCount = count(array_filter($issues, fn ($i) => ($i['code'] ?? '') === 'error'));
+        if ($errorCount > 0) {
+            $msgParts[] = $errorCount === 1 ? '1 fila falló al guardar.' : "{$errorCount} filas fallaron al guardar.";
+        }
+        if ($imported === 0 && $skippedDuplicates === 0 && $issues === []) {
+            $msgParts[] = 'No se importó ningún ítem.';
+        }
+
+        return response()->json([
+            'message' => implode(' ', $msgParts),
+            'imported' => $imported,
+            'skipped_duplicates' => $skippedDuplicates,
+            'issues' => $issues,
+        ]);
+    }
+
+    private function catalogNameExistsInScope(string $name, ?int $companyScope): bool
+    {
+        $lower = mb_strtolower(trim($name));
+
+        return ServiceCatalog::query()
+            ->whereRaw('LOWER(TRIM(name)) = ?', [$lower])
+            ->where(function ($q) use ($companyScope) {
+                if ($companyScope === null) {
+                    $q->whereNull('company_id');
+                } else {
+                    $q->where('company_id', $companyScope);
+                }
+            })
+            ->exists();
     }
 
     private function resolveCatalogCompanyScope(mixed $raw): ?int

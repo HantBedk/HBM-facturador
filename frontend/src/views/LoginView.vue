@@ -97,10 +97,6 @@ async function onSubmit(e) {
   fieldErrors.value = {}
   loading.value = true
 
-  console.warn("⚠️ [DEBUG LOGIN] Correo enviado:", correo.value);
-  console.warn("⚠️ [DEBUG LOGIN] Longitud de la contraseña enviada:", password.value.length);
-  // Si la longitud de la contraseña no es 8 (que es el tamaño de "1qwer432"), el autocompletado está inyectando una clave incorrecta.
-
   try {
     const user = await auth.login(
       {

@@ -54,6 +54,23 @@ export function bulkDestroyServiceCatalogItems(ids) {
   }).then((r) => r.data)
 }
 
+/**
+ * Importación masiva desde Excel (.xlsx, .xls) o CSV (UTF-8).
+ * @param {File} file
+ * @param {string|number|null|undefined} companyId vacío = catálogo global
+ */
+export function importServiceCatalogFromSpreadsheet(file, companyId) {
+  const fd = new FormData()
+  fd.append('file', file)
+  if (companyId !== '' && companyId != null) {
+    fd.append('company_id', String(companyId))
+  }
+  return api('/admin/service-catalog/import', {
+    method: 'POST',
+    body: fd,
+  }).then((r) => r.data)
+}
+
 /** Descuento % sobre precio de lista del catálogo que ve el técnico (solo admin). */
 export function fetchTechnicianCatalogDiscount() {
   return api('/admin/service-catalog/technician-pricing').then((r) => r.data)

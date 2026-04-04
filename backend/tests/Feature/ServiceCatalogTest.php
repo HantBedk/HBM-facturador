@@ -9,6 +9,7 @@ use App\Models\ServiceCatalog;
 use App\Models\ServiceCatalogSuggestion;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -387,5 +388,32 @@ class ServiceCatalogTest extends TestCase
         $suggestion->refresh();
         $this->assertSame(ServiceCatalogSuggestion::STATUS_APPROVED, $suggestion->status);
         $this->assertSame($cat->id, (int) $suggestion->resolved_catalog_id);
+    }
+
+    public function test_admin_can_import_catalog_from_csv(): void
+    {
+        if (! class_exists(\PhpOffice\PhpSpreadsheet\IOFactory::class)) {
+            self::markTestSkipped('phpoffice/phpspreadsheet no está instalado (composer install / update en backend).');
+        }
+
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        $csv = "Nombre,Precio,Descripción\nServicio CSV import,1500.75,Texto auxiliar\n";
+        $file = UploadedFile::fake()->createWithContent('items.csv', $csv);
+
+        $res = $this->post('/api/admin/service-catalog/import', [
+            'file' => $file,
+        ]);
+
+        $res->assertOk();
+        $res->assertJsonPath('imported', 1);
+        $res->assertJsonPath('skipped_duplicates', 0);
+
+        $row = ServiceCatalog::query()->where('name', 'Servicio CSV import')->first();
+        $this->assertNotNull($row);
+        $this->assertSame('1500.75', (string) $row->base_price);
+        $this->assertSame('Texto auxiliar', $row->description);
+        $this->assertNull($row->company_id);
     }
 }

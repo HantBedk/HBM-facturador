@@ -67,6 +67,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
 
         Route::get('/admin/service-catalog', [AdminServiceCatalogController::class, 'index']);
         Route::post('/admin/service-catalog', [AdminServiceCatalogController::class, 'store']);
+        Route::post('/admin/service-catalog/import', [AdminServiceCatalogController::class, 'import']);
         Route::post('/admin/service-catalog/bulk-destroy', [AdminServiceCatalogController::class, 'bulkDestroy']);
         Route::get('/admin/service-catalog/technician-pricing', [AdminTechnicianCatalogPricingController::class, 'show']);
         Route::put('/admin/service-catalog/technician-pricing', [AdminTechnicianCatalogPricingController::class, 'update']);
