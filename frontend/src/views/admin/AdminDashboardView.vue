@@ -1,11 +1,9 @@
 <script setup>
 import { onMounted, ref, computed } from 'vue'
 import { RouterLink } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
 import { api } from '@/services/api.js'
+import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import VueApexCharts from 'vue3-apexcharts'
-
-const auth = useAuthStore()
 
 const loading = ref(true)
 const loadError = ref('')
@@ -67,10 +65,10 @@ const mockServices = [
 ]
 
 const mockInvoices = [
-  { id: 1, code: 'FAC-2023-0045', company_name: 'Innova Corp', total: 1200, status_label: 'Pendiente' },
-  { id: 2, code: 'FAC-2023-0044', company_name: 'Green Energy', total: 4120, status_label: 'Pagado' },
-  { id: 3, code: 'FAC-2023-0043', company_name: 'Tech Solutions', total: 2500, status_label: 'Pagado' },
-  { id: 4, code: 'FAC-2023-0042', company_name: 'Global L.', total: 850, status_label: 'Vencida' }
+  { id: 1, code: 'FAC-231015-INV', company_name: 'Innova Corp', total: 1200, status_label: 'Pendiente' },
+  { id: 2, code: 'FAC-231014-GRE', company_name: 'Green Energy', total: 4120, status_label: 'Pagado' },
+  { id: 3, code: 'FAC-231013-TEC', company_name: 'Tech Solutions', total: 2500, status_label: 'Pagado' },
+  { id: 4, code: 'FAC-231012-GLO', company_name: 'Global L.', total: 850, status_label: 'Vencida' }
 ]
 
 async function loadDashboard() {
@@ -92,6 +90,44 @@ onMounted(() => {
 
 const metrics = computed(() => data.value?.metrics)
 const recent = computed(() => data.value?.recent || { services: [], invoices: [] })
+
+const dashSvcTableSource = computed(() =>
+  recent.value.services?.length ? recent.value.services : mockServices
+)
+const {
+  sortedRows: dashSortedServices,
+  toggleSort: toggleDashSvcSort,
+  sortIndicator: dashSvcSortInd,
+  ariaSort: dashSvcAriaSort,
+} = useClientSortedRows(
+  dashSvcTableSource,
+  {
+    fecha: (s) => s.created_at || s.code || '',
+    company_name: (s) => s.company_name || '',
+    user_name: (s) => s.user_name || '',
+    valor: (s) => Number(s.price ?? s.valor) || 0,
+  },
+  { initialKey: 'fecha', initialDir: 'desc' }
+)
+
+const dashInvTableSource = computed(() =>
+  recent.value.invoices?.length ? recent.value.invoices : mockInvoices
+)
+const {
+  sortedRows: dashSortedInvoices,
+  toggleSort: toggleDashInvSort,
+  sortIndicator: dashInvSortInd,
+  ariaSort: dashInvAriaSort,
+} = useClientSortedRows(
+  dashInvTableSource,
+  {
+    code: (inv) => inv.code || '',
+    company_name: (inv) => inv.company_name || '',
+    total: (inv) => Number(inv.total) || 0,
+    status: (inv) => inv.status || inv.status_label || '',
+  },
+  { initialKey: 'code', initialDir: 'desc' }
+)
 
 function formatMoney(value) {
   if (value === undefined || value === null) return '—'
@@ -130,16 +166,7 @@ function getStatusClasses(status) {
 </script>
 
 <template>
-  <div class="h-full w-full p-6 sm:p-8 text-slate-200">
-    
-    <!-- ENCABEZADO -->
-    <header class="mb-8">
-      <h1 class="text-[2.1rem] font-bold text-white tracking-tight mb-1">Hola, {{ auth.user?.nombre || 'Javier' }}!</h1>
-      <p class="text-sm text-slate-400">
-        Octubre 15, 2023, Octubre 15, 2023
-      </p>
-    </header>
-
+  <div class="h-full w-full -mt-2 px-4 pb-6 pt-0 text-slate-200 sm:-mt-3 sm:px-6 sm:pb-8">
     <div v-if="loadError && !data" class="rounded-xl bg-red-500/10 border border-red-500/20 p-4 mb-8 text-sm text-red-400">
       Error: {{ loadError }}
     </div>
@@ -257,14 +284,30 @@ function getStatusClasses(status) {
               <table class="w-full text-left border-collapse">
                 <thead>
                   <tr class="border-b border-[#2b3548]">
-                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 whitespace-nowrap">Fecha</th>
-                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400">Empresa</th>
-                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 hidden sm:table-cell">Empleado</th>
-                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 text-right">Valor</th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 whitespace-nowrap" scope="col" :aria-sort="dashSvcAriaSort('fecha')">
+                      <button type="button" class="th-sort" @click="toggleDashSvcSort('fecha')">
+                        Fecha<span class="sort-ind" aria-hidden="true">{{ dashSvcSortInd('fecha') }}</span>
+                      </button>
+                    </th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400" scope="col" :aria-sort="dashSvcAriaSort('company_name')">
+                      <button type="button" class="th-sort" @click="toggleDashSvcSort('company_name')">
+                        Empresa<span class="sort-ind" aria-hidden="true">{{ dashSvcSortInd('company_name') }}</span>
+                      </button>
+                    </th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 hidden sm:table-cell" scope="col" :aria-sort="dashSvcAriaSort('user_name')">
+                      <button type="button" class="th-sort" @click="toggleDashSvcSort('user_name')">
+                        Empleado<span class="sort-ind" aria-hidden="true">{{ dashSvcSortInd('user_name') }}</span>
+                      </button>
+                    </th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 text-right" scope="col" :aria-sort="dashSvcAriaSort('valor')">
+                      <button type="button" class="th-sort th-sort--end" @click="toggleDashSvcSort('valor')">
+                        Valor<span class="sort-ind" aria-hidden="true">{{ dashSvcSortInd('valor') }}</span>
+                      </button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody class="text-[0.85rem] text-slate-300 font-medium border-t border-transparent">
-                   <tr v-for="(s, idx) in (recent.services?.length ? recent.services.slice(0, 4) : mockServices)" :key="idx" class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors">
+                   <tr v-for="(s, idx) in dashSortedServices.slice(0, 4)" :key="idx" class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors">
                      <td class="py-3 pr-4 whitespace-nowrap">{{ s.code?.length < 8 ? s.code : formatDateOnly(s.created_at) }}</td>
                      <td class="py-3 pr-4 text-white truncate max-w-[140px]">{{ s.company_name }}</td>
                      <td class="py-3 pr-4 hidden sm:table-cell truncate max-w-[100px]">{{ s.user_name }}</td>
@@ -284,14 +327,30 @@ function getStatusClasses(status) {
               <table class="w-full text-left border-collapse">
                 <thead>
                   <tr class="border-b border-[#2b3548]">
-                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 whitespace-nowrap">ID</th>
-                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400">Cliente</th>
-                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 whitespace-nowrap text-right">Amount</th>
-                    <th class="py-2.5 px-4 text-[0.8rem] font-normal text-slate-400 text-center">Status</th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 whitespace-nowrap" scope="col" :aria-sort="dashInvAriaSort('code')">
+                      <button type="button" class="th-sort" @click="toggleDashInvSort('code')">
+                        ID<span class="sort-ind" aria-hidden="true">{{ dashInvSortInd('code') }}</span>
+                      </button>
+                    </th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400" scope="col" :aria-sort="dashInvAriaSort('company_name')">
+                      <button type="button" class="th-sort" @click="toggleDashInvSort('company_name')">
+                        Cliente<span class="sort-ind" aria-hidden="true">{{ dashInvSortInd('company_name') }}</span>
+                      </button>
+                    </th>
+                    <th class="py-2.5 text-[0.8rem] font-normal text-slate-400 whitespace-nowrap text-right" scope="col" :aria-sort="dashInvAriaSort('total')">
+                      <button type="button" class="th-sort th-sort--end" @click="toggleDashInvSort('total')">
+                        Amount<span class="sort-ind" aria-hidden="true">{{ dashInvSortInd('total') }}</span>
+                      </button>
+                    </th>
+                    <th class="py-2.5 px-4 text-[0.8rem] font-normal text-slate-400 text-center" scope="col" :aria-sort="dashInvAriaSort('status')">
+                      <button type="button" class="th-sort" @click="toggleDashInvSort('status')">
+                        Status<span class="sort-ind" aria-hidden="true">{{ dashInvSortInd('status') }}</span>
+                      </button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody class="text-[0.85rem] text-slate-300 font-medium border-t border-transparent">
-                   <tr v-for="(inv, idx) in (recent.invoices?.length ? recent.invoices.slice(0, 4) : mockInvoices)" :key="idx" class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors">
+                   <tr v-for="(inv, idx) in dashSortedInvoices.slice(0, 4)" :key="idx" class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors">
                      <td class="py-3 pr-4 whitespace-nowrap">{{ inv.code }}</td>
                      <td class="py-3 pr-4 text-white truncate max-w-[140px]">{{ inv.company_name }}</td>
                      <td class="py-3 text-right text-slate-200 whitespace-nowrap">{{ formatMoney(inv.total) }}</td>

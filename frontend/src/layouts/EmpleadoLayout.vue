@@ -1,29 +1,71 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
+import EmpleadoNotificationBell from '@/components/EmpleadoNotificationBell.vue'
 import { useAuthStore } from '@/stores/auth'
+import { isEmpleadoPerfilIncomplete } from '@/utils/empleadoPerfil.js'
 
 const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 
-const displayName = computed(() => auth.user?.nombre || 'Empleado')
+const menuOpen = ref(false)
+const menuWrap = ref(null)
 
-/** Ej. "Javier García" → "Historial Javier G." */
-const historialBarLabel = computed(() => {
+const initials = computed(() => {
   const n = (auth.user?.nombre || '').trim()
-  if (!n) return 'Historial'
+  if (!n) return '?'
   const parts = n.split(/\s+/).filter(Boolean)
-  if (parts.length === 1) return `Historial ${parts[0]}`
-  const first = parts[0]
-  const last = parts[parts.length - 1]
-  const initial = last.charAt(0).toUpperCase()
-  return `Historial ${first} ${initial}.`
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 })
 
-const showPanelLink = computed(() => route.path !== '/empleado')
+/**
+ * Primer nombre + primer apellido desde el nombre completo registrado.
+ * Heurística: 2 palabras → ambas; 3+ → primera + penúltima (apellido paterno típ. antes del materno).
+ */
+const nombreCuentaCorta = computed(() => {
+  const n = (auth.user?.nombre || '').trim()
+  if (!n) return ''
+  const parts = n.split(/\s+/).filter(Boolean)
+  if (parts.length === 1) return parts[0]
+  if (parts.length === 2) return `${parts[0]} ${parts[1]}`
+  return `${parts[0]} ${parts[parts.length - 2]}`
+})
+
+const menuAriaLabel = computed(() =>
+  nombreCuentaCorta.value ? `Menú de cuenta, ${nombreCuentaCorta.value}` : 'Menú de cuenta'
+)
+
+const isMandatoryProfileGate = computed(
+  () => route.path === '/empleado/perfil' && isEmpleadoPerfilIncomplete(auth.user)
+)
+
+const showPanelLink = computed(() => route.path !== '/empleado' && !isMandatoryProfileGate.value)
+
+const profileActive = computed(() => route.path === '/empleado/perfil')
+const configActive = computed(() => route.path.startsWith('/empleado/configuracion'))
+
+function itemClass(active) {
+  return [
+    'flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition',
+    active
+      ? 'border-l-[3px] border-l-sky-400 bg-slate-800/70 text-white'
+      : 'border-l-[3px] border-l-transparent text-slate-200 hover:bg-slate-800/55 hover:text-white',
+  ]
+}
+
+function onDocClick(e) {
+  if (!menuWrap.value?.contains(e.target)) {
+    menuOpen.value = false
+  }
+}
+
+onMounted(() => document.addEventListener('click', onDocClick))
+onUnmounted(() => document.removeEventListener('click', onDocClick))
 
 async function salir() {
+  menuOpen.value = false
   await auth.logout()
   await router.replace('/login')
 }
@@ -31,9 +73,8 @@ async function salir() {
 
 <template>
   <div class="min-h-screen bg-[#0b0f14] text-slate-200">
-    <!-- Barra superior como mockup (logo + contexto) -->
     <header
-      class="sticky top-0 z-20 flex items-center justify-between border-b border-slate-800/80 bg-[#0f1419]/95 px-4 py-3 shadow-sm shadow-black/20 backdrop-blur-md sm:px-6"
+      class="sticky top-0 z-20 flex items-center justify-between gap-3 overflow-visible border-b border-slate-800/80 bg-[#0f1419]/95 px-4 py-3 shadow-sm shadow-black/20 backdrop-blur-md sm:px-6"
     >
       <div class="flex min-w-0 flex-1 items-center gap-3 sm:gap-5">
         <div class="flex items-center gap-2.5">
@@ -45,13 +86,25 @@ async function salir() {
               <path d="M3 3v18h18M7 16l4-4 4 4 6-6" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </div>
-          <span class="text-sm font-bold tracking-tight text-white sm:text-base">HBM</span>
+          <span class="text-sm font-bold tracking-tight text-white sm:text-base"></span>
         </div>
-        <span class="hidden text-slate-600 md:inline" aria-hidden="true">|</span>
-        <p class="hidden max-w-[200px] truncate text-sm font-medium text-slate-400 md:block md:max-w-xs lg:max-w-md">
-          {{ historialBarLabel }}
-        </p>
-        <nav class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.7rem] font-semibold sm:gap-x-3 sm:text-xs">
+        <div
+          v-if="isMandatoryProfileGate"
+          class="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-sm md:max-w-md"
+        >
+          <p class="font-medium text-sky-400/95">Datos de contacto y pago</p>
+          <RouterLink
+            to="/empleado/configuracion"
+            class="rounded-lg px-2 py-1 text-[0.7rem] font-semibold text-sky-400 transition hover:bg-slate-800/80 hover:text-sky-300 sm:text-xs"
+            :class="{ 'bg-slate-800/60 text-sky-300': configActive }"
+          >
+            Configuración
+          </RouterLink>
+        </div>
+        <nav
+          v-if="!isMandatoryProfileGate"
+          class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.7rem] font-semibold sm:gap-x-3 sm:text-xs"
+        >
           <RouterLink
             to="/empleado"
             class="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-800/80 hover:text-sky-300"
@@ -60,18 +113,11 @@ async function salir() {
             Panel
           </RouterLink>
           <RouterLink
-            to="/empleado/historial"
-            class="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-800/80 hover:text-sky-300"
-            :class="{ 'bg-slate-800/60 text-sky-300': route.path.startsWith('/empleado/historial') }"
-          >
-            Historial
-          </RouterLink>
-          <RouterLink
             to="/empleado/listado-servicios"
             class="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-800/80 hover:text-sky-300"
             :class="{ 'bg-slate-800/60 text-sky-300': route.path.startsWith('/empleado/listado-servicios') }"
           >
-            Listado
+            Historial
           </RouterLink>
           <RouterLink
             to="/empleado/registro-servicio"
@@ -89,19 +135,102 @@ async function salir() {
           ← Panel
         </RouterLink>
       </div>
-      <div class="flex shrink-0 items-center gap-2 sm:gap-3">
-        <span
-          class="hidden max-w-[140px] truncate rounded-full border border-slate-700/80 bg-slate-800/50 px-3 py-1 text-xs text-slate-300 sm:inline"
+
+      <div ref="menuWrap" class="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        <RouterLink
+          v-if="!isMandatoryProfileGate"
+          to="/empleado/listado-servicios"
+          class="relative rounded-lg p-2 text-slate-300 transition hover:bg-slate-800/90 hover:text-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+          title="Listado de servicios"
+          aria-label="Listado de servicios"
         >
-          {{ displayName }}
-        </span>
-        <button
-          type="button"
-          class="rounded-xl border border-slate-600/80 bg-slate-800/40 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-slate-500 hover:bg-slate-800 sm:px-4 sm:py-2 sm:text-sm"
-          @click="salir"
-        >
-          Salir
-        </button>
+          <svg class="h-[1.25rem] w-[1.25rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
+            />
+          </svg>
+        </RouterLink>
+
+        <EmpleadoNotificationBell />
+
+        <div class="relative">
+          <button
+            type="button"
+            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-600 to-blue-700 text-xs font-bold uppercase tracking-tight text-white shadow-md ring-2 ring-slate-800 transition hover:ring-sky-500/50 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+            :aria-expanded="menuOpen"
+            aria-haspopup="true"
+            :aria-label="menuAriaLabel"
+            @click.stop="menuOpen = !menuOpen"
+          >
+            {{ initials }}
+          </button>
+
+          <div
+            v-show="menuOpen"
+            class="empleado-user-menu absolute right-0 z-40 mt-2 w-[min(100vw-2rem,15rem)] overflow-hidden rounded-xl border border-slate-700/80 bg-[#1a222d] py-1 shadow-2xl shadow-black/50"
+            role="menu"
+          >
+            <div
+              v-if="nombreCuentaCorta"
+              class="border-b border-slate-700/80 px-4 py-3"
+              role="presentation"
+            >
+              <p class="truncate text-sm font-semibold text-white">{{ nombreCuentaCorta }}</p>
+            </div>
+            <RouterLink
+              to="/empleado/perfil"
+              :class="itemClass(profileActive)"
+              role="menuitem"
+              @click="menuOpen = false"
+            >
+              <svg class="h-4 w-4 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                />
+              </svg>
+              Perfil
+            </RouterLink>
+            <RouterLink
+              to="/empleado/configuracion"
+              :class="itemClass(configActive)"
+              role="menuitem"
+              @click="menuOpen = false"
+            >
+              <svg class="h-4 w-4 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              Configuración
+            </RouterLink>
+            <button
+              type="button"
+              :class="itemClass(false)"
+              role="menuitem"
+              @click="salir"
+            >
+              <svg class="h-4 w-4 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                />
+              </svg>
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -110,3 +239,15 @@ async function salir() {
     </main>
   </div>
 </template>
+
+<style scoped>
+.empleado-user-menu::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  right: 14px;
+  border-width: 0 6px 6px 6px;
+  border-style: solid;
+  border-color: transparent transparent #1a222d transparent;
+}
+</style>

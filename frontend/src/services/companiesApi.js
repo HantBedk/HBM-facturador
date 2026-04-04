@@ -14,6 +14,7 @@ export function fetchAdminCompanies(params = {}) {
 /**
  * @param {{
  *   nombre: string,
+ *   factura_sigla: string,
  *   nit?: string | null,
  *   telefono?: string | null,
  *   correo?: string | null,
@@ -31,6 +32,7 @@ export function createCompany(payload) {
  * @param {number|string} id
  * @param {{
  *   nombre: string,
+ *   factura_sigla: string,
  *   nit?: string | null,
  *   telefono?: string | null,
  *   correo?: string | null,
@@ -53,4 +55,22 @@ export function patchCompanyEstado(id, estado) {
     method: 'PATCH',
     body: JSON.stringify({ estado }),
   }).then((r) => r.data)
+}
+
+/** @param {number|string} id */
+export function deleteCompany(id) {
+  return api(`/admin/companies/${id}`, { method: 'DELETE' })
+}
+
+/**
+ * KPIs de facturación/cobros/servicios para un mes (por defecto mes anterior en servidor).
+ * @param {number|string} companyId
+ * @param {{ year?: number, month?: number }} [params]
+ */
+export function fetchCompanyMonthlyDashboard(companyId, params = {}) {
+  const qs = new URLSearchParams()
+  if (params.year != null) qs.set('year', String(params.year))
+  if (params.month != null) qs.set('month', String(params.month))
+  const s = qs.toString()
+  return api(`/admin/companies/${companyId}/monthly-dashboard${s ? `?${s}` : ''}`).then((r) => r.data)
 }

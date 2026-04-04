@@ -3,6 +3,7 @@ import { computed, onMounted, ref, useId } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { api } from '@/services/api.js'
+import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 
 const auth = useAuthStore()
 const chartGradId = useId()
@@ -17,11 +18,6 @@ const selectedRowId = ref(null)
 
 const period = computed(() => data.value?.period)
 
-const historialMesLink = computed(() => {
-  const p = period.value
-  if (!p?.year || !p?.month) return '/empleado/historial'
-  return { path: '/empleado/historial', query: { year: String(p.year), month: String(p.month) } }
-})
 const summary = computed(() => data.value?.summary)
 const recent = computed(() => data.value?.recent_services || [])
 
@@ -33,7 +29,7 @@ const uniqueCompanies = computed(() => {
   return [...set].sort((a, b) => a.localeCompare(b))
 })
 
-const filteredRecent = computed(() => {
+const filteredRecentBase = computed(() => {
   let rows = [...recent.value]
   if (companyFilter.value) {
     rows = rows.filter((r) => r.company_name === companyFilter.value)
@@ -48,8 +44,25 @@ const filteredRecent = computed(() => {
       return !Number.isNaN(d.getTime()) && d >= cutoff
     })
   }
-  return rows.sort((a, b) => (a.service_date || '').localeCompare(b.service_date || ''))
+  return rows
 })
+
+const {
+  sortedRows: sortedDashboardTable,
+  toggleSort: toggleDashRecentSort,
+  sortIndicator: dashRecentSortInd,
+  ariaSort: dashRecentAriaSort,
+} = useClientSortedRows(
+  filteredRecentBase,
+  {
+    code: (r) => r.code || '',
+    service_date: (r) => r.service_date || '',
+    company_name: (r) => r.company_name || '',
+    description: (r) => r.description || '',
+    amount: (r) => Number(r.amount) || 0,
+  },
+  { initialKey: 'service_date', initialDir: 'asc' }
+)
 
 /** Ej. "Javier García" → "Javier G." */
 const nombreCorto = computed(() => {
@@ -63,7 +76,7 @@ const nombreCorto = computed(() => {
 
 /** Puntos para gráfico (acumulado por fecha de servicio en el subconjunto filtrado) */
 const chartSeries = computed(() => {
-  const rows = [...filteredRecent.value].sort((a, b) =>
+  const rows = [...filteredRecentBase.value].sort((a, b) =>
     (a.service_date || '').localeCompare(b.service_date || '')
   )
   let cum = 0
@@ -137,7 +150,7 @@ const sparklinePoints = computed(() => {
 
 const companyBreakdown = computed(() => {
   const map = new Map()
-  for (const r of filteredRecent.value) {
+  for (const r of filteredRecentBase.value) {
     const name = r.company_name || '—'
     const prev = map.get(name) || { name, count: 0, total: 0 }
     prev.count += 1
@@ -227,7 +240,7 @@ function toggleRow(id) {
     <header class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div class="min-w-0">
         <h1 class="text-2xl font-bold leading-tight tracking-tight text-white sm:text-[1.65rem]">
-          Historial de Rendimiento {{ nombreCorto }} al frente
+          Historial de Rendimiento
         </h1>
         <p v-if="period" class="mt-2 text-sm text-slate-500">
           Periodo mostrado: <span class="text-slate-400">{{ period.label }}</span>
@@ -242,12 +255,6 @@ function toggleRow(id) {
         >
           {{ loading ? 'Actualizando…' : 'Actualizar' }}
         </button>
-        <RouterLink
-          :to="historialMesLink"
-          class="rounded-xl border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-300 transition hover:border-sky-400/50 hover:bg-sky-500/15 sm:text-sm"
-        >
-          Historial por mes
-        </RouterLink>
         <RouterLink
           to="/empleado/registro-servicio"
           class="inline-flex items-center gap-2 rounded-2xl border-2 border-sky-400 bg-slate-950/90 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_0_28px_rgba(56,189,248,0.45)] transition hover:border-sky-300 hover:shadow-[0_0_36px_rgba(56,189,248,0.55)]"
@@ -487,17 +494,37 @@ function toggleRow(id) {
               <tr
                 class="border-b border-slate-700/80 bg-slate-800/40 text-xs font-semibold uppercase tracking-wide text-slate-400"
               >
-                <th class="px-4 py-3.5 first:rounded-tl-2xl">Código</th>
-                <th class="px-4 py-3.5">Fecha</th>
-                <th class="px-4 py-3.5">Empresa</th>
-                <th class="px-4 py-3.5">Descripción</th>
-                <th class="px-4 py-3.5 text-right">Valor</th>
+                <th class="px-4 py-3.5 first:rounded-tl-2xl" scope="col" :aria-sort="dashRecentAriaSort('code')">
+                  <button type="button" class="th-sort" @click="toggleDashRecentSort('code')">
+                    Código<span class="sort-ind" aria-hidden="true">{{ dashRecentSortInd('code') }}</span>
+                  </button>
+                </th>
+                <th class="px-4 py-3.5" scope="col" :aria-sort="dashRecentAriaSort('service_date')">
+                  <button type="button" class="th-sort" @click="toggleDashRecentSort('service_date')">
+                    Fecha<span class="sort-ind" aria-hidden="true">{{ dashRecentSortInd('service_date') }}</span>
+                  </button>
+                </th>
+                <th class="px-4 py-3.5" scope="col" :aria-sort="dashRecentAriaSort('company_name')">
+                  <button type="button" class="th-sort" @click="toggleDashRecentSort('company_name')">
+                    Empresa<span class="sort-ind" aria-hidden="true">{{ dashRecentSortInd('company_name') }}</span>
+                  </button>
+                </th>
+                <th class="px-4 py-3.5" scope="col" :aria-sort="dashRecentAriaSort('description')">
+                  <button type="button" class="th-sort" @click="toggleDashRecentSort('description')">
+                    Descripción<span class="sort-ind" aria-hidden="true">{{ dashRecentSortInd('description') }}</span>
+                  </button>
+                </th>
+                <th class="px-4 py-3.5 text-right" scope="col" :aria-sort="dashRecentAriaSort('amount')">
+                  <button type="button" class="th-sort th-sort--end" @click="toggleDashRecentSort('amount')">
+                    Valor<span class="sort-ind" aria-hidden="true">{{ dashRecentSortInd('amount') }}</span>
+                  </button>
+                </th>
                 <th class="px-4 py-3.5 text-right last:rounded-tr-2xl" />
               </tr>
             </thead>
             <tbody>
               <tr
-                v-for="row in filteredRecent"
+                v-for="row in sortedDashboardTable"
                 :key="row.id"
                 class="cursor-pointer border-b border-slate-800/70 transition last:border-0"
                 :class="
@@ -535,7 +562,7 @@ function toggleRow(id) {
               </tr>
             </tbody>
           </table>
-          <p v-if="!filteredRecent.length" class="px-4 py-8 text-center text-sm text-slate-500">
+          <p v-if="!sortedDashboardTable.length" class="px-4 py-8 text-center text-sm text-slate-500">
             No hay servicios con estos filtros.
           </p>
         </div>

@@ -28,11 +28,19 @@ class ServicePolicy
 
     public function update(User $user, Service $service): bool
     {
-        return $user->isAdminEquipo();
+        if ($user->isAdminEquipo()) {
+            return true;
+        }
+
+        return $user->rol === User::ROL_EMPLEADO && (int) $service->user_id === (int) $user->id;
     }
 
     public function delete(User $user, Service $service): bool
     {
-        return $user->isAdminEquipo();
+        if ($user->isAdminEquipo()) {
+            return true;
+        }
+
+        return $user->rol === User::ROL_EMPLEADO && (int) $service->user_id === (int) $user->id;
     }
 }

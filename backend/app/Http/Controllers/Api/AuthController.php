@@ -20,7 +20,8 @@ class AuthController extends Controller
             'device_name' => ['sometimes', 'string', 'max:255'],
         ]);
 
-        $user = User::where('correo', $data['correo'])->first();
+        $correoNorm = mb_strtolower(trim($data['correo']));
+        $user = User::query()->whereRaw('LOWER(TRIM(correo)) = ?', [$correoNorm])->first();
 
         if (! $user || ! Hash::check($data['password'], $user->password)) {
             throw ValidationException::withMessages([
@@ -59,12 +60,28 @@ class AuthController extends Controller
 
     private function userPayload(User $user): array
     {
-        return [
+        $base = [
             'id' => $user->id,
             'nombre' => $user->nombre,
             'correo' => $user->correo,
             'rol' => $user->rol,
             'estado' => $user->estado,
         ];
+
+        if ($user->rol === User::ROL_EMPLEADO) {
+            $base['perfil_completado_at'] = $user->perfil_completado_at?->toIso8601String();
+            $base['correo_solicitado'] = $user->correo_solicitado;
+            $base['correo_solicitado_at'] = $user->correo_solicitado_at?->toIso8601String();
+            $base['telefono'] = $user->telefono;
+            $base['tipo_documento'] = $user->tipo_documento;
+            $base['numero_documento'] = $user->numero_documento;
+            $base['ciudad'] = $user->ciudad;
+            $base['departamento'] = $user->departamento;
+            $base['banco_codigo'] = $user->banco_codigo;
+            $base['cuenta_tipo'] = $user->cuenta_tipo;
+            $base['cuenta_numero'] = $user->cuenta_numero;
+        }
+
+        return $base;
     }
 }

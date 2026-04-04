@@ -1,19 +1,46 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
-import { createUser, fetchAdminUsers, patchUserEstado, updateUser } from '@/services/usersApi.js'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import {
+  approveCorreoSolicitud,
+  createUser,
+  fetchAdminUsers,
+  patchUserEstado,
+  rejectCorreoSolicitud,
+  updateUser,
+} from '@/services/usersApi.js'
+import { useAuthStore } from '@/stores/auth'
+import { useUiDialogStore } from '@/stores/uiDialog'
+import { tableAriaSort, tableSortIndicator } from '@/utils/tableSort.js'
+import AdminEmpleadoFichaPanel from '@/components/admin/AdminEmpleadoFichaPanel.vue'
+
+const route = useRoute()
+const auth = useAuthStore()
+const uiDialog = useUiDialogStore()
+const router = useRouter()
 
 const rows = ref([])
 const meta = ref(null)
 const loading = ref(false)
 const error = ref('')
 const search = ref('')
-const rolFilter = ref('')
-const estadoFilter = ref('')
+
+const userSortKey = ref('nombre')
+const userSortDir = ref('asc')
+const USER_SORT_FIRST = {
+  nombre: 'asc',
+  correo: 'asc',
+  estado: 'asc',
+  created_at: 'desc',
+}
+
+const showPassword = ref(false)
 
 const modalOpen = ref(false)
 const modalMode = ref('create')
 const editingId = ref(null)
+/** Fila en edición (p. ej. solicitud de correo) */
+const editingRow = ref(null)
 const saving = ref(false)
 const modalError = ref('')
 const fieldErrors = ref({})
@@ -26,29 +53,41 @@ const form = ref({
   estado: 'activo',
 })
 
-const ROL_OPTIONS = [
-  { value: '', label: 'Todos' },
-  { value: 'empleado', label: 'Empleado' },
-  { value: 'admin', label: 'Admin' },
-  { value: 'super_admin', label: 'Super admin' },
-]
+const isAdminNotSuper = computed(() => auth.user?.rol === 'admin')
 
-const ROL_LABEL = {
-  empleado: 'Empleado',
-  admin: 'Admin',
-  super_admin: 'Super admin',
-}
+const ROL_FORM_OPTIONS = computed(() => {
+  if (isAdminNotSuper.value) {
+    return [{ value: 'empleado', label: 'Empleado' }]
+  }
+  return [
+    { value: 'empleado', label: 'Empleado' },
+    { value: 'admin', label: 'Administrador' },
+    { value: 'super_admin', label: 'Super administrador' },
+  ]
+})
 
 let searchTimer = null
+
+/** Desde notificación de cambio de correo: ?usuario_id= */
+const filterUsuarioId = computed(() => {
+  const raw = route.query.usuario_id
+  if (raw == null || raw === '') return null
+  const n = Number.parseInt(String(raw), 10)
+  return Number.isFinite(n) && n > 0 ? n : null
+})
 
 async function load() {
   error.value = ''
   loading.value = true
   try {
     const params = { page: filtersPage.value, per_page: 15 }
-    if (search.value.trim()) params.q = search.value.trim()
-    if (rolFilter.value) params.rol = rolFilter.value
-    if (estadoFilter.value) params.estado = estadoFilter.value
+    if (filterUsuarioId.value != null) {
+      params.user_id = filterUsuarioId.value
+    } else {
+      if (search.value.trim()) params.q = search.value.trim()
+      params.sort = userSortKey.value
+      params.sort_dir = userSortDir.value
+    }
     const res = await fetchAdminUsers(params)
     rows.value = res.data
     meta.value = res.meta
@@ -58,23 +97,36 @@ async function load() {
   } finally {
     loading.value = false
   }
+  if (filterUsuarioId.value != null) {
+    await nextTick()
+    const el = document.querySelector(`tr[data-user-id="${filterUsuarioId.value}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }
+}
+
+function clearUsuarioNotificationFilter() {
+  router.replace({ name: 'admin-emp-rendimiento' })
 }
 
 const filtersPage = ref(1)
 
-watch([rolFilter, estadoFilter], () => {
-  filtersPage.value = 1
-  load()
-})
-
 watch(
   () => search.value,
   () => {
+    if (filterUsuarioId.value != null) return
     clearTimeout(searchTimer)
     searchTimer = setTimeout(() => {
       filtersPage.value = 1
       load()
     }, 320)
+  }
+)
+
+watch(
+  () => route.query.usuario_id,
+  () => {
+    filtersPage.value = 1
+    load()
   }
 )
 
@@ -86,9 +138,30 @@ function goPage(p) {
   load()
 }
 
+function userSortInd(k) {
+  return tableSortIndicator(userSortKey.value, userSortDir.value, k)
+}
+
+function userAriaSort(k) {
+  return tableAriaSort(userSortKey.value, userSortDir.value, k)
+}
+
+function toggleUserSort(key) {
+  if (userSortKey.value === key) {
+    userSortDir.value = userSortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    userSortKey.value = key
+    userSortDir.value = USER_SORT_FIRST[key] || 'asc'
+  }
+  filtersPage.value = 1
+  load()
+}
+
 function openCreate() {
+  showPassword.value = false
   modalMode.value = 'create'
   editingId.value = null
+  editingRow.value = null
   modalError.value = ''
   fieldErrors.value = {}
   form.value = { nombre: '', correo: '', password: '', rol: 'empleado', estado: 'activo' }
@@ -96,8 +169,10 @@ function openCreate() {
 }
 
 function openEdit(row) {
+  showPassword.value = false
   modalMode.value = 'edit'
   editingId.value = row.id
+  editingRow.value = row
   modalError.value = ''
   fieldErrors.value = {}
   form.value = {
@@ -114,7 +189,14 @@ function closeModal() {
   modalOpen.value = false
 }
 
-const modalTitle = computed(() => (modalMode.value === 'create' ? 'Nuevo usuario' : 'Editar usuario'))
+const modalTitle = computed(() => (modalMode.value === 'create' ? 'Nuevo Empleado' : 'Editar usuario'))
+
+function formatDate(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
+}
 
 async function onSubmitModal() {
   modalError.value = ''
@@ -149,23 +231,80 @@ async function onSubmitModal() {
   }
 }
 
+async function onApproveCorreo(row) {
+  if (!row.correo_solicitado) return false
+  const msg = `¿Aplicar como correo de acceso el siguiente?\n${row.correo_solicitado}\n\nEl técnico usará ese correo para iniciar sesión.`
+  const ok = await uiDialog.confirm({ title: 'Aprobar correo solicitado', message: msg })
+  if (!ok) return false
+  try {
+    await approveCorreoSolicitud(row.id)
+    await load()
+    return true
+  } catch (e) {
+    await uiDialog.alert({
+      title: 'Error',
+      message: e.data?.message || e.message || 'No se pudo aprobar.',
+    })
+    return false
+  }
+}
+
+async function onRejectCorreo(row) {
+  if (!row.correo_solicitado) return false
+  const ok = await uiDialog.confirm({
+    title: 'Rechazar solicitud',
+    message: '¿Rechazar la solicitud de cambio de correo? El técnico seguirá con su correo actual.',
+    danger: true,
+    confirmLabel: 'Rechazar',
+  })
+  if (!ok) return false
+  try {
+    await rejectCorreoSolicitud(row.id)
+    await load()
+    return true
+  } catch (e) {
+    await uiDialog.alert({
+      title: 'Error',
+      message: e.data?.message || e.message || 'No se pudo rechazar.',
+    })
+    return false
+  }
+}
+
+async function approveFromModal() {
+  const row = editingRow.value
+  if (!row?.correo_solicitado) return
+  const ok = await onApproveCorreo(row)
+  if (ok) closeModal()
+}
+
+async function rejectFromModal() {
+  const row = editingRow.value
+  if (!row?.correo_solicitado) return
+  const ok = await onRejectCorreo(row)
+  if (ok) closeModal()
+}
+
 async function onToggleEstado(row) {
   const next = row.estado === 'activo' ? 'inactivo' : 'activo'
   const label = next === 'activo' ? 'activar' : 'desactivar'
-  if (!window.confirm(`¿${label} a «${row.nombre}»?`)) return
+  const ok = await uiDialog.confirm({
+    title: next === 'activo' ? 'Activar empleado' : 'Desactivar empleado',
+    message: `¿${label} a «${row.nombre}»?`,
+    danger: next === 'inactivo',
+  })
+  if (!ok) return
   try {
     const updated = await patchUserEstado(row.id, next)
     const i = rows.value.findIndex((r) => r.id === row.id)
     if (i >= 0) rows.value[i] = { ...rows.value[i], ...updated }
     else await load()
   } catch (e) {
-    window.alert(e.data?.message || e.message || 'No se pudo actualizar.')
+    await uiDialog.alert({
+      title: 'Error',
+      message: e.data?.message || e.message || 'No se pudo actualizar.',
+    })
   }
-}
-
-async function applySearch() {
-  filtersPage.value = 1
-  await load()
 }
 
 const pageSummary = computed(() => {
@@ -173,38 +312,54 @@ const pageSummary = computed(() => {
   if (!m || !m.total) return ''
   return `${m.from ?? 0}–${m.to ?? 0} de ${m.total}`
 })
+
+const fichaOpen = ref(false)
+const fichaRow = ref(null)
+
+function openFicha(row) {
+  fichaRow.value = row
+  fichaOpen.value = true
+}
+
+function closeFicha() {
+  fichaOpen.value = false
+  fichaRow.value = null
+}
+
+function onFichaUpdated() {
+  load()
+}
 </script>
 
 <template>
-  <section class="page">
+  <section class="page page--fluid">
     <header class="head">
-      <div>
-        <h1>Empleados y usuarios</h1>
-        <p class="lede">Alta y edición de cuentas. El equipo usa el rol «empleado» para registrar servicios.</p>
+      <div class="head-main">
+        <div class="head-title-row">
+          <h1>Empleados</h1>
+          <button type="button" class="btn primary" @click="openCreate">+ Nuevo empleado</button>
+        </div>
+        <p class="lede">
+          Alta y edición de cuentas. Pulse el nombre para abrir la ficha en un panel (técnicos: contacto, documento y
+          datos de pago). Use «Historial» para métricas y servicios por mes.
+          <template v-if="isAdminNotSuper">
+            Solo gestiona técnicos; las cuentas administrador las gestiona un super administrador.
+          </template>
+        </p>
       </div>
-      <button type="button" class="btn primary" @click="openCreate">+ Nuevo usuario</button>
     </header>
+
+    <p v-if="filterUsuarioId != null" class="banner focus">
+      Vista filtrada por la notificación (solicitud de correo). Use
+      <button type="button" class="link-btn" @click="clearUsuarioNotificationFilter">ver todos los usuarios</button>
+      para volver al listado completo.
+    </p>
 
     <div class="toolbar card">
       <label class="grow">
         <span class="lbl">Buscar</span>
-        <input v-model="search" type="search" class="input" placeholder="Nombre o correo…" @keydown.enter.prevent="applySearch" />
+        <input v-model="search" type="search" class="input" placeholder="Nombre o correo…" />
       </label>
-      <label>
-        <span class="lbl">Rol</span>
-        <select v-model="rolFilter" class="input">
-          <option v-for="o in ROL_OPTIONS" :key="o.value || 'all'" :value="o.value">{{ o.label }}</option>
-        </select>
-      </label>
-      <label>
-        <span class="lbl">Estado</span>
-        <select v-model="estadoFilter" class="input">
-          <option value="">Todos</option>
-          <option value="activo">Activo</option>
-          <option value="inactivo">Inactivo</option>
-        </select>
-      </label>
-      <button type="button" class="btn secondary" @click="applySearch">Aplicar</button>
     </div>
 
     <p v-if="error" class="banner err">{{ error }}</p>
@@ -216,38 +371,80 @@ const pageSummary = computed(() => {
         <table class="table">
           <thead>
             <tr>
-              <th>Nombre</th>
-              <th>Correo</th>
-              <th>Rol</th>
-              <th>Estado</th>
+              <th scope="col" :aria-sort="userAriaSort('nombre')">
+                <button type="button" class="th-sort" @click="toggleUserSort('nombre')">
+                  Nombre<span class="sort-ind" aria-hidden="true">{{ userSortInd('nombre') }}</span>
+                </button>
+              </th>
+              <th scope="col" :aria-sort="userAriaSort('correo')">
+                <button type="button" class="th-sort" @click="toggleUserSort('correo')">
+                  Correo<span class="sort-ind" aria-hidden="true">{{ userSortInd('correo') }}</span>
+                </button>
+              </th>
+              <th scope="col" :aria-sort="userAriaSort('estado')">
+                <button type="button" class="th-sort" @click="toggleUserSort('estado')">
+                  Estado<span class="sort-ind" aria-hidden="true">{{ userSortInd('estado') }}</span>
+                </button>
+              </th>
+              <th scope="col" :aria-sort="userAriaSort('created_at')">
+                <button type="button" class="th-sort" @click="toggleUserSort('created_at')">
+                  Alta<span class="sort-ind" aria-hidden="true">{{ userSortInd('created_at') }}</span>
+                </button>
+              </th>
               <th class="actions-col">Acciones</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="u in rows" :key="u.id">
+            <tr
+              v-for="u in rows"
+              :key="u.id"
+              :data-user-id="u.id"
+              :class="{ 'row--focus': filterUsuarioId != null && filterUsuarioId === u.id }"
+            >
               <td>
-                <span class="name">{{ u.nombre }}</span>
+                <button
+                  type="button"
+                  class="name-link"
+                  :title="`Ver ficha de ${u.nombre}`"
+                  @click="openFicha(u)"
+                >
+                  {{ u.nombre }}
+                </button>
               </td>
-              <td class="muted">{{ u.correo }}</td>
               <td>
-                <span class="pill" :data-rol="u.rol">{{ ROL_LABEL[u.rol] || u.rol }}</span>
+                <div v-if="u.correo" class="cell-sm muted">{{ u.correo }}</div>
+                <div v-if="u.rol === 'empleado' && u.correo_solicitado" class="correo-solicitado">
+                  <span class="badge">Pendiente</span>
+                  {{ u.correo_solicitado }}
+                </div>
+                <span v-if="!u.correo && !(u.rol === 'empleado' && u.correo_solicitado)" class="muted">—</span>
               </td>
               <td>
-                <span class="pill" :data-st="u.estado">{{ u.estado === 'activo' ? 'Activo' : 'Inactivo' }}</span>
+                <button
+                  type="button"
+                  class="pill pill-estado"
+                  :data-st="u.estado"
+                  :title="u.estado === 'activo' ? 'Pulsa para desactivar' : 'Pulsa para activar'"
+                  :aria-label="`${u.estado === 'activo' ? 'Desactivar' : 'Activar'} a ${u.nombre}`"
+                  @click="onToggleEstado(u)"
+                >
+                  {{ u.estado === 'activo' ? 'Activo' : 'Inactivo' }}
+                </button>
               </td>
+              <td class="muted">{{ formatDate(u.created_at) }}</td>
               <td class="actions-col">
+                <button type="button" class="link" @click="openEdit(u)">Editar</button>
                 <RouterLink
                   v-if="u.rol === 'empleado'"
-                  class="link"
-                  :to="`/admin/empleados/rendimiento/${u.id}`"
+                  class="link link-inline-block"
+                  :to="{ name: 'admin-emp-rendimiento-user', params: { userId: String(u.id) } }"
                 >
                   Historial
                 </RouterLink>
-                <button type="button" class="link" @click="openEdit(u)">Editar</button>
-                <label class="toggle" :title="u.estado === 'activo' ? 'Desactivar' : 'Activar'">
-                  <input type="checkbox" :checked="u.estado === 'activo'" @click.prevent="onToggleEstado(u)" />
-                  <span class="slider" />
-                </label>
+                <template v-if="u.rol === 'empleado' && u.correo_solicitado">
+                  <button type="button" class="link link-ok" @click="onApproveCorreo(u)">Aprobar correo</button>
+                  <button type="button" class="link link-warn" @click="onRejectCorreo(u)">Rechazar</button>
+                </template>
               </td>
             </tr>
             <tr v-if="!rows.length">
@@ -273,50 +470,102 @@ const pageSummary = computed(() => {
       </template>
     </div>
 
+    <AdminEmpleadoFichaPanel :open="fichaOpen" :row="fichaRow" @close="closeFicha" @updated="onFichaUpdated" />
+
     <Teleport to="body">
       <div v-if="modalOpen" class="modal-backdrop" @click.self="closeModal">
-        <div class="modal card" role="dialog" aria-modal="true">
-          <h2 class="modal-title">{{ modalTitle }}</h2>
-          <p v-if="modalError" class="banner err">{{ modalError }}</p>
+        <div class="modal card modal-emp" role="dialog" aria-modal="true" aria-labelledby="emp-modal-title">
+          <div class="modal-header">
+            <h2 id="emp-modal-title" class="modal-title">{{ modalTitle }}</h2>
+            <button type="button" class="modal-close" aria-label="Cerrar" @click="closeModal">×</button>
+          </div>
+          <p v-if="modalError" class="banner err modal-banner-err">{{ modalError }}</p>
+          <div
+            v-if="modalMode === 'edit' && form.rol === 'empleado' && editingRow?.correo_solicitado"
+            class="banner info"
+          >
+            <p class="info-p">
+              <strong>Solicitud de correo (técnico):</strong>
+              {{ editingRow.correo_solicitado }}
+            </p>
+            <p class="info-p muted-note">Acceso actual: {{ form.correo }}</p>
+            <div class="correo-actions">
+              <button type="button" class="btn primary" @click="approveFromModal">Aprobar este correo</button>
+              <button type="button" class="btn secondary" @click="rejectFromModal">Rechazar solicitud</button>
+            </div>
+          </div>
           <form class="modal-form" @submit.prevent="onSubmitModal">
             <label class="field">
-              <span>Nombre <abbr title="obligatorio">*</abbr></span>
+              <span>Nombre completo <abbr title="obligatorio">*</abbr></span>
               <input v-model="form.nombre" class="input" required maxlength="255" />
               <small v-if="fieldErrors.nombre" class="err">{{ fieldErrors.nombre[0] }}</small>
             </label>
             <label class="field">
-              <span>Correo <abbr title="obligatorio">*</abbr></span>
+              <span>Correo electrónico <abbr title="obligatorio">*</abbr></span>
               <input v-model="form.correo" type="email" class="input" required />
               <small v-if="fieldErrors.correo" class="err">{{ fieldErrors.correo[0] }}</small>
             </label>
             <label class="field">
-              <span>Contraseña {{ modalMode === 'create' ? '(obligatoria)' : '(opcional, dejar vacío para no cambiar)' }}</span>
-              <input v-model="form.password" type="password" class="input" :required="modalMode === 'create'" autocomplete="new-password" />
+              <span>Contraseña {{ modalMode === 'create' ? '(obligatoria)' : '(opcional)' }}</span>
+              <span class="password-wrap">
+                <input
+                  v-model="form.password"
+                  :type="showPassword ? 'text' : 'password'"
+                  class="input input--password"
+                  :required="modalMode === 'create'"
+                  autocomplete="new-password"
+                />
+                <button
+                  type="button"
+                  class="pw-toggle"
+                  :aria-pressed="showPassword"
+                  :aria-label="showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+                  @click="showPassword = !showPassword"
+                >
+                  <svg v-if="!showPassword" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"
+                    />
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" />
+                  </svg>
+                  <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M3 3l18 18M10.6 10.6a3 3 0 004.8 4.8M9.9 5.1A10.4 10.4 0 0112 5c7 0 11 7 11 7a18.3 18.3 0 01-3.5 4M6.2 6.2C3.6 8.3 2 12 2 12s4 7 11 7a10 10 0 004.4-.9M12 12a3 3 0 01-3-3"
+                    />
+                  </svg>
+                </button>
+              </span>
               <small v-if="fieldErrors.password" class="err">{{ fieldErrors.password[0] }}</small>
             </label>
-            <label class="field">
-              <span>Rol</span>
-              <select v-model="form.rol" class="input" required>
-                <option value="empleado">Empleado</option>
-                <option value="admin">Administrador</option>
-                <option value="super_admin">Super administrador</option>
-              </select>
-              <small v-if="fieldErrors.rol" class="err">{{ fieldErrors.rol[0] }}</small>
-            </label>
-            <fieldset class="field">
-              <legend>Estado</legend>
-              <label class="radio">
-                <input v-model="form.estado" type="radio" value="activo" />
-                Activo
+            <div class="modal-row-2">
+              <label class="field">
+                <span>Rol</span>
+                <select v-model="form.rol" class="input" required>
+                  <option v-for="o in ROL_FORM_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+                </select>
+                <small v-if="fieldErrors.rol" class="err">{{ fieldErrors.rol[0] }}</small>
               </label>
-              <label class="radio">
-                <input v-model="form.estado" type="radio" value="inactivo" />
-                Inactivo
+              <label class="field">
+                <span>Estado</span>
+                <select v-model="form.estado" class="input" required>
+                  <option value="activo">Activo</option>
+                  <option value="inactivo">Inactivo</option>
+                </select>
               </label>
-            </fieldset>
+            </div>
             <div class="modal-actions">
               <button type="button" class="btn secondary" @click="closeModal">Cancelar</button>
-              <button type="submit" class="btn primary" :disabled="saving">{{ saving ? 'Guardando…' : 'Guardar' }}</button>
+              <button type="submit" class="btn primary" :disabled="saving">
+                {{ saving ? 'Guardando…' : modalMode === 'create' ? 'Crear' : 'Guardar' }}
+              </button>
             </div>
           </form>
         </div>
@@ -326,60 +575,46 @@ const pageSummary = computed(() => {
 </template>
 
 <style scoped>
-.page {
-  max-width: 1100px;
-  margin: 0 auto;
+/* Mismo criterio que Empresas (CompaniesListView): ancho completo y tabla card + table. */
+.page.page--fluid {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+  box-sizing: border-box;
 }
 
 .head {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 1rem;
   margin-bottom: 1rem;
 }
 
-h1 {
-  margin: 0 0 0.35rem;
+.head-main {
+  min-width: 0;
+}
+
+.head-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.35rem;
+  width: 100%;
+}
+
+.head-title-row h1 {
+  margin: 0;
   font-size: 1.35rem;
   color: #f8fafc;
+  min-width: 0;
 }
 
 .lede {
   margin: 0;
-  max-width: 36rem;
+  max-width: min(48rem, 100%);
   font-size: 0.88rem;
   color: #94a3b8;
-}
-
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  align-items: end;
-}
-
-.lbl {
-  display: block;
-  font-size: 0.8rem;
-  color: #94a3b8;
-  margin-bottom: 0.35rem;
-}
-
-.grow {
-  flex: 1;
-  min-width: 200px;
-}
-
-.input {
-  width: 100%;
-  max-width: 420px;
-  border-radius: 10px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(2, 6, 23, 0.35);
-  color: #f8fafc;
-  padding: 0.5rem 0.65rem;
-  font: inherit;
+  line-height: 1.45;
 }
 
 .card {
@@ -390,18 +625,97 @@ h1 {
   margin-bottom: 1rem;
 }
 
-.banner.err {
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.grow {
+  flex: 1;
+  min-width: 200px;
+}
+
+.lbl {
+  display: block;
+  font-size: 0.8rem;
+  color: #94a3b8;
+  margin-bottom: 0.35rem;
+}
+
+.input {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(2, 6, 23, 0.35);
+  color: #f8fafc;
+  padding: 0.5rem 0.65rem;
+  font: inherit;
+}
+
+.input:focus {
+  outline: none;
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35);
+}
+
+.banner {
   padding: 0.65rem 0.85rem;
   border-radius: 10px;
-  background: rgba(248, 113, 113, 0.12);
-  border: 1px solid rgba(248, 113, 113, 0.45);
-  color: #fecaca;
   margin-bottom: 1rem;
 }
 
-.meta-line {
-  font-size: 0.8rem;
-  margin: 0 0 0.65rem;
+.banner.err {
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  color: #fecaca;
+}
+
+.banner.focus {
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #bae6fd;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.banner.info {
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #e0f2fe;
+  margin-bottom: 1rem;
+}
+
+.link-btn {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #7dd3fc;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.link-btn:hover {
+  color: #bae6fd;
+}
+
+.modal-banner-err {
+  margin-top: 0;
+}
+
+.table-wrap {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-inline-end: 2px;
 }
 
 .table {
@@ -423,46 +737,63 @@ h1 {
   font-weight: 600;
   font-size: 0.78rem;
   text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
-.name {
+.cell-sm {
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.name-plain {
   font-weight: 600;
   color: #f1f5f9;
 }
 
 .pill {
   display: inline-block;
-  padding: 0.12rem 0.45rem;
+  padding: 0.15rem 0.5rem;
   border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 600;
-}
-
-.pill[data-rol='empleado'] {
-  color: #7dd3fc;
-  border: 1px solid rgba(56, 189, 248, 0.35);
-}
-.pill[data-rol='admin'],
-.pill[data-rol='super_admin'] {
-  color: #fde68a;
-  border: 1px solid rgba(251, 191, 36, 0.35);
+  text-transform: capitalize;
 }
 
 .pill[data-st='activo'] {
+  background: rgba(34, 197, 94, 0.15);
   color: #86efac;
-  border: 1px solid rgba(74, 222, 128, 0.35);
+  border: 1px solid rgba(34, 197, 94, 0.35);
 }
+
 .pill[data-st='inactivo'] {
-  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.12);
+  color: #cbd5e1;
   border: 1px solid rgba(148, 163, 184, 0.3);
 }
 
+button.pill {
+  font: inherit;
+}
+
+button.pill-estado {
+  display: inline-block;
+  cursor: pointer;
+  text-transform: none;
+}
+
+button.pill-estado:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline-offset: 2px;
+}
+
 .actions-col {
-  white-space: nowrap;
+  white-space: normal;
+  min-width: 11rem;
+  max-width: 22rem;
 }
 
 .link {
-  margin-right: 0.65rem;
+  margin-right: 0.75rem;
   padding: 0;
   border: none;
   background: none;
@@ -473,51 +804,90 @@ h1 {
   text-decoration: underline;
 }
 
-.toggle {
-  position: relative;
+.link:hover {
+  color: #bae6fd;
+}
+
+a.link {
+  display: inline;
+}
+
+.link-inline-block {
   display: inline-block;
-  width: 2.5rem;
-  height: 1.35rem;
-  vertical-align: middle;
+  margin-top: 0.25rem;
+}
+
+.link-ok {
+  color: #86efac;
+}
+
+.link-warn {
+  color: #fbbf24;
+}
+
+.name-link {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: #f1f5f9;
+  text-align: left;
   cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(125, 211, 252, 0.45);
+  text-underline-offset: 0.15em;
 }
 
-.toggle input {
-  opacity: 0;
-  width: 0;
-  height: 0;
+a.name-link {
+  display: inline;
 }
 
-.slider {
-  position: absolute;
-  inset: 0;
-  border-radius: 999px;
-  background: #475569;
-  transition: background 0.15s ease;
+button.name-link {
+  display: inline;
 }
 
-.slider::before {
-  content: '';
-  position: absolute;
-  width: 1.05rem;
-  height: 1.05rem;
-  left: 0.15rem;
-  top: 0.15rem;
-  border-radius: 50%;
-  background: #fff;
-  transition: transform 0.15s ease;
+.name-link:hover {
+  color: #7dd3fc;
+  text-decoration-color: rgba(125, 211, 252, 0.85);
 }
 
-.toggle input:checked + .slider {
-  background: linear-gradient(90deg, #2563eb, #0ea5e9);
+.name-link:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
-.toggle input:checked + .slider::before {
-  transform: translateX(1.15rem);
+.row--focus {
+  background: rgba(56, 189, 248, 0.08);
+  box-shadow: inset 0 0 0 2px rgba(56, 189, 248, 0.45);
+}
+
+.correo-solicitado {
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  color: #fde68a;
+}
+
+.correo-solicitado .badge {
+  display: inline-block;
+  margin-right: 0.35rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  background: rgba(251, 191, 36, 0.2);
+  color: #fde68a;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.meta-line {
+  font-size: 0.8rem;
+  margin: 0 0 0.65rem;
 }
 
 .empty {
-  padding: 2rem;
+  padding: 2rem 1rem;
   text-align: center;
 }
 
@@ -535,10 +905,13 @@ h1 {
   justify-content: center;
   gap: 1rem;
   margin-top: 1rem;
+  flex-wrap: wrap;
 }
 
 .btn {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0.55rem 1rem;
   border-radius: 10px;
   font-weight: 600;
@@ -579,12 +952,43 @@ h1 {
   max-width: 440px;
   max-height: 90vh;
   overflow-y: auto;
+  margin: 0;
+}
+
+.modal-emp {
+  padding-top: 1.1rem;
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
 }
 
 .modal-title {
-  margin: 0 0 1rem;
+  margin: 0;
   font-size: 1.15rem;
   color: #f8fafc;
+}
+
+.modal-close {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.modal-close:hover {
+  color: #f8fafc;
+  background: rgba(148, 163, 184, 0.28);
 }
 
 .modal-form {
@@ -593,28 +997,63 @@ h1 {
   gap: 0.85rem;
 }
 
-.field span,
-.field legend {
+.modal-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 1rem;
+}
+
+@media (max-width: 480px) {
+  .modal-row-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.field span {
   display: block;
   font-size: 0.82rem;
   color: #cbd5e1;
   margin-bottom: 0.35rem;
 }
 
-.field fieldset {
-  border: none;
-  padding: 0;
-  margin: 0;
+.info-p {
+  margin: 0 0 0.5rem;
 }
 
-.radio {
-  display: inline-flex;
+.muted-note {
+  font-size: 0.82rem;
+  opacity: 0.9;
+}
+
+.password-wrap {
+  position: relative;
+  display: block;
+}
+
+.input--password {
+  padding-right: 2.75rem;
+}
+
+.pw-toggle {
+  position: absolute;
+  right: 0.35rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
   align-items: center;
-  gap: 0.35rem;
-  margin-right: 1rem;
-  font-size: 0.9rem;
-  color: #e2e8f0;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #94a3b8;
   cursor: pointer;
+}
+
+.pw-toggle:hover {
+  color: #e2e8f0;
+  background: rgba(148, 163, 184, 0.12);
 }
 
 .err {
@@ -629,5 +1068,11 @@ h1 {
   margin-top: 0.5rem;
   padding-top: 0.75rem;
   border-top: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.correo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 </style>

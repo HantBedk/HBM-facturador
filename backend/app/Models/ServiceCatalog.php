@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ServiceCatalog extends Model
@@ -14,9 +15,11 @@ class ServiceCatalog extends Model
     protected $table = 'service_catalog';
 
     protected $fillable = [
+        'company_id',
         'name',
         'description',
         'base_price',
+        'technician_discount_percent',
         'status',
     ];
 
@@ -24,7 +27,13 @@ class ServiceCatalog extends Model
     {
         return [
             'base_price' => 'decimal:2',
+            'technician_discount_percent' => 'decimal:2',
         ];
+    }
+
+    public function company(): BelongsTo
+    {
+        return $this->belongsTo(Company::class);
     }
 
     public function services(): HasMany
@@ -35,5 +44,14 @@ class ServiceCatalog extends Model
     public function scopeActivos($query)
     {
         return $query->where('status', self::STATUS_ACTIVO);
+    }
+
+    /** Ítems globales (empresa) o de una empresa concreta. */
+    public function scopeForCompany($query, int $companyId)
+    {
+        return $query->where(function ($q) use ($companyId) {
+            $q->whereNull('company_id')
+                ->orWhere('company_id', $companyId);
+        });
     }
 }

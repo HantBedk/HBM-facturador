@@ -32,11 +32,129 @@ class AdminPanelNotificationTest extends TestCase
 
         $this->getJson('/api/admin/notifications/unread-count')
             ->assertOk()
-            ->assertJsonPath('count', 1);
+            ->assertJsonPath('count', 1)
+            ->assertJsonPath('by_category.facturas', 1)
+            ->assertJsonPath('by_category.empleados', 0)
+            ->assertJsonPath('by_category.servicios', 0);
 
         $this->getJson('/api/admin/notifications')
             ->assertOk()
-            ->assertJsonCount(1, 'data');
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.category', 'facturas');
+    }
+
+    public function test_admin_notifications_filter_by_category(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        PanelNotification::query()->create([
+            'user_id' => $admin->id,
+            'type' => PanelNotification::TYPE_INVOICE_DRAFT,
+            'message' => 'Factura',
+            'read' => false,
+            'meta' => null,
+        ]);
+        PanelNotification::query()->create([
+            'user_id' => $admin->id,
+            'type' => PanelNotification::TYPE_SERVICE_CREATED,
+            'message' => 'Servicio',
+            'read' => false,
+            'meta' => null,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/admin/notifications?category=facturas')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.type', PanelNotification::TYPE_INVOICE_DRAFT);
+
+        $this->getJson('/api/admin/notifications?category=servicios')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.type', PanelNotification::TYPE_SERVICE_CREATED);
+    }
+
+    public function test_notification_list_resolves_link_from_type_and_meta_ids(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        PanelNotification::query()->create([
+            'user_id' => $admin->id,
+            'type' => PanelNotification::TYPE_EMPLEADO_PERFIL_COMPLETADO,
+            'message' => 'Perfil',
+            'read' => false,
+            'meta' => ['empleado_id' => 7],
+        ]);
+        PanelNotification::query()->create([
+            'user_id' => $admin->id,
+            'type' => PanelNotification::TYPE_INVOICE_DRAFT,
+            'message' => 'Factura sin link explícito',
+            'read' => false,
+            'meta' => ['invoice_id' => 42],
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $r = $this->getJson('/api/admin/notifications')->assertOk();
+        $links = collect($r->json('data'))->pluck('link')->filter()->values()->all();
+        $this->assertContains('/admin/facturas/42', $links);
+        $this->assertContains('/admin/empleados/7/perfil', $links);
+    }
+
+    public function test_email_change_request_resolves_link_to_cuentas_with_usuario_id(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        PanelNotification::query()->create([
+            'user_id' => $admin->id,
+            'type' => PanelNotification::TYPE_EMAIL_CHANGE_REQUEST,
+            'message' => 'Solicitud de correo',
+            'read' => false,
+            'meta' => [
+                'empleado_id' => 12,
+                'link' => '/admin/empleados/12/perfil',
+            ],
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/admin/notifications')->assertOk()
+            ->assertJsonPath('data.0.link', '/admin/empleados/rendimiento?usuario_id=12');
+    }
+
+    public function test_empleado_first_profile_completion_notifies_admins(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        $emp = User::factory()->create([
+            'rol' => User::ROL_EMPLEADO,
+            'perfil_completado_at' => null,
+        ]);
+
+        Sanctum::actingAs($emp);
+
+        $payload = [
+            'nombre' => 'Técnico Test',
+            'telefono' => '3001234567',
+            'tipo_documento' => 'CC',
+            'numero_documento' => '12345678',
+            'ciudad' => 'Bogotá',
+            'departamento' => 'Cundinamarca',
+            'banco_codigo' => 'BANCOLOMBIA',
+            'cuenta_tipo' => 'ahorros',
+            'cuenta_numero' => '12345678901',
+        ];
+
+        $this->putJson('/api/empleado/perfil', $payload)->assertOk();
+
+        $this->assertSame(1, PanelNotification::query()
+            ->where('user_id', $admin->id)
+            ->where('type', PanelNotification::TYPE_EMPLEADO_PERFIL_COMPLETADO)
+            ->count());
+
+        $this->putJson('/api/empleado/perfil', array_merge($payload, ['nombre' => 'Otro nombre']))->assertOk();
+
+        $this->assertSame(1, PanelNotification::query()
+            ->where('user_id', $admin->id)
+            ->where('type', PanelNotification::TYPE_EMPLEADO_PERFIL_COMPLETADO)
+            ->count());
     }
 
     public function test_admin_can_mark_notification_read(): void
@@ -63,6 +181,7 @@ class AdminPanelNotificationTest extends TestCase
     {
         $company = Company::query()->create([
             'nombre' => 'Co',
+            'factura_sigla' => 'CNO',
             'nit' => '9001-1',
             'estado' => Company::ESTADO_ACTIVO,
         ]);
@@ -111,6 +230,7 @@ class AdminPanelNotificationTest extends TestCase
 
         $company = Company::query()->create([
             'nombre' => 'Co Cut',
+            'factura_sigla' => 'CCU',
             'nit' => '9002-2',
             'estado' => Company::ESTADO_ACTIVO,
         ]);

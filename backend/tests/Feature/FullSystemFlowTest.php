@@ -6,7 +6,6 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\Service;
 use App\Models\User;
-use App\Services\InvoicePublicAccessService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -22,6 +21,7 @@ class FullSystemFlowTest extends TestCase
     {
         $company = Company::query()->create([
             'nombre' => 'Empresa Flujo',
+            'factura_sigla' => 'EFL',
             'nit' => '900555666-1',
             'estado' => Company::ESTADO_ACTIVO,
         ]);
@@ -75,12 +75,11 @@ class FullSystemFlowTest extends TestCase
         $this->assertStringContainsString('pdf', (string) $pdf->headers->get('Content-Type'));
 
         $invoice = Invoice::query()->findOrFail($invoiceId);
-        app(InvoicePublicAccessService::class)->setPlainToken($invoice, 'TOKEN-CLIENTE-TEST');
 
         $this->postJson('/api/public/invoices/consult', [
-            'code' => $invoice->code,
-            'verification_code' => 'TOKEN-CLIENTE-TEST',
+            'query' => $invoice->code,
         ])->assertOk()
+            ->assertJsonPath('kind', 'invoice')
             ->assertJsonPath('invoice.code', $invoice->code);
     }
 
@@ -88,6 +87,7 @@ class FullSystemFlowTest extends TestCase
     {
         $company = Company::query()->create([
             'nombre' => 'Co',
+            'factura_sigla' => 'COA',
             'nit' => '900111222-3',
             'estado' => Company::ESTADO_ACTIVO,
         ]);
@@ -128,6 +128,7 @@ class FullSystemFlowTest extends TestCase
     {
         $company = Company::query()->create([
             'nombre' => 'Co2',
+            'factura_sigla' => 'COD',
             'nit' => '900111222-4',
             'estado' => Company::ESTADO_ACTIVO,
         ]);

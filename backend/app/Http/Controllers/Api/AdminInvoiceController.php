@@ -9,6 +9,7 @@ use App\Models\Invoice;
 use App\Models\PanelNotification;
 use App\Models\Payment;
 use App\Models\Service;
+use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Services\InvoiceCodeGenerator;
 use App\Services\InvoicePublicAccessService;
@@ -28,7 +29,10 @@ class AdminInvoiceController extends Controller
 {
     public function index(Request $request): AnonymousResourceCollection
     {
-        $q = Invoice::query()->with(['company:id,nombre,nit'])->orderByDesc('period_year')->orderByDesc('period_month')->orderByDesc('id');
+        $q = Invoice::query()->with([
+            'company:id,nombre,nit',
+            'payments:id,invoice_id,amount',
+        ]);
 
         if ($request->filled('company_id')) {
             $q->where('company_id', $request->integer('company_id'));
@@ -50,6 +54,37 @@ class AdminInvoiceController extends Controller
             $raw = $request->string('q')->toString();
             $term = '%'.addcslashes($raw, '%_\\').'%';
             $q->where('code', 'like', $term);
+        }
+
+        $sort = $request->query('sort');
+        $sortDir = strtolower((string) $request->query('sort_dir', 'desc')) === 'asc' ? 'asc' : 'desc';
+        $allowedSorts = ['code', 'company_nombre', 'period', 'status', 'total', 'balance', 'created_at'];
+
+        if (is_string($sort) && in_array($sort, $allowedSorts, true)) {
+            match ($sort) {
+                'code' => $q->orderBy('invoices.code', $sortDir)->orderBy('invoices.id', $sortDir),
+                'status' => $q->orderBy('invoices.status', $sortDir)->orderBy('invoices.id', $sortDir),
+                'total' => $q->orderBy('invoices.total', $sortDir)->orderBy('invoices.id', $sortDir),
+                'created_at' => $q->orderBy('invoices.created_at', $sortDir)->orderBy('invoices.id', $sortDir),
+                'company_nombre' => $q->leftJoin('companies', 'invoices.company_id', '=', 'companies.id')
+                    ->select('invoices.*')
+                    ->orderBy('companies.nombre', $sortDir)
+                    ->orderBy('invoices.id', $sortDir),
+                'period' => $q->orderBy('invoices.period_year', $sortDir)
+                    ->orderBy('invoices.period_month', $sortDir)
+                    ->orderBy('invoices.id', $sortDir),
+                'balance' => $q->orderByRaw(
+                    '(invoices.total - COALESCE((SELECT SUM(amount) FROM payments WHERE payments.invoice_id = invoices.id), 0)) '
+                    .($sortDir === 'asc' ? 'asc' : 'desc')
+                )->orderBy('invoices.id', $sortDir),
+                default => $q->orderByDesc('invoices.period_year')
+                    ->orderByDesc('invoices.period_month')
+                    ->orderByDesc('invoices.id'),
+            };
+        } else {
+            $q->orderByDesc('invoices.period_year')
+                ->orderByDesc('invoices.period_month')
+                ->orderByDesc('invoices.id');
         }
 
         return AdminInvoiceResource::collection(
@@ -88,7 +123,7 @@ class AdminInvoiceController extends Controller
             ->all();
 
         $currentIds = $exceptInvoiceId
-            ? Invoice::query()->findOrFail($exceptInvoiceId)->services()->pluck('services.id')->all()
+            ? DB::table('invoice_service')->where('invoice_id', $exceptInvoiceId)->pluck('service_id')->all()
             : [];
 
         $rows = Service::query()
@@ -133,6 +168,12 @@ class AdminInvoiceController extends Controller
                 'company_id' => ['La empresa debe estar activa para generar facturas.'],
             ]);
         }
+        $sigla = strtoupper(preg_replace('/[^A-Za-z]/', '', (string) $company->factura_sigla) ?? '');
+        if (strlen($sigla) !== 3) {
+            throw ValidationException::withMessages([
+                'company_id' => ['La empresa debe tener una sigla de facturación de 3 letras (A-Z). Edítela en Empresas.'],
+            ]);
+        }
 
         $this->assertServicesAttachable(
             $data['company_id'],
@@ -144,8 +185,14 @@ class AdminInvoiceController extends Controller
 
         $total = $this->sumServiceAmounts($data['service_ids']);
 
-        $invoice = DB::transaction(function () use ($data, $total, $codes) {
-            $code = $codes->nextForYearMonth((int) $data['period_year'], (int) $data['period_month']);
+        $invoice = DB::transaction(function () use ($data, $total, $codes, $company) {
+            try {
+                $code = $codes->nextForCompanyOnDate($company, Carbon::now(config('app.timezone')));
+            } catch (\InvalidArgumentException $e) {
+                throw ValidationException::withMessages(['company_id' => [$e->getMessage()]]);
+            } catch (\RuntimeException $e) {
+                throw ValidationException::withMessages(['company_id' => [$e->getMessage()]]);
+            }
 
             $inv = Invoice::query()->create([
                 'code' => $code,
@@ -215,6 +262,11 @@ class AdminInvoiceController extends Controller
 
         $total = $this->sumServiceAmounts($data['service_ids']);
 
+        $prevServiceIds = DB::table('invoice_service')
+            ->where('invoice_id', $invoice->id)
+            ->pluck('service_id')
+            ->all();
+
         DB::transaction(function () use ($invoice, $data, $total) {
             $invoice->company_id = $data['company_id'];
             $invoice->period_month = $data['period_month'];
@@ -226,6 +278,31 @@ class AdminInvoiceController extends Controller
         });
 
         $invoice->refresh()->load(['company:id,nombre,nit', 'services.user', 'services.catalog:id,name', 'payments']);
+
+        $removedIds = array_values(array_diff($prevServiceIds, $data['service_ids']));
+        if ($removedIds !== []) {
+            $dispatcher = app(PanelNotificationDispatcher::class);
+            foreach ($removedIds as $sid) {
+                $svc = Service::query()->with('user')->find((int) $sid);
+                if ($svc === null) {
+                    continue;
+                }
+                $owner = $svc->user;
+                if ($owner === null || $owner->rol !== User::ROL_EMPLEADO) {
+                    continue;
+                }
+                $dispatcher->notifyUser(
+                    (int) $owner->id,
+                    PanelNotification::TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR,
+                    'Se quitó su servicio '.$svc->code.' del borrador de factura '.$invoice->code.'.',
+                    [
+                        'invoice_id' => $invoice->id,
+                        'service_id' => $svc->id,
+                        'link' => '/empleado/servicio/'.$svc->id,
+                    ]
+                );
+            }
+        }
 
         ActivityLogger::log(
             $request->user(),
@@ -310,9 +387,13 @@ class AdminInvoiceController extends Controller
             $filename = 'factura-'.preg_replace('/[^a-zA-Z0-9_-]/', '_', $invoice->code).$suffix.'.pdf';
 
             return Pdf::loadView('pdf.public_invoice', ['data' => $data])->download($filename);
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            report($e);
+
             return response()->json([
-                'message' => 'No se pudo generar el PDF.',
+                'message' => config('app.debug')
+                    ? ('No se pudo generar el PDF: '.$e->getMessage())
+                    : 'No se pudo generar el PDF.',
             ], 500);
         }
     }
@@ -355,7 +436,8 @@ class AdminInvoiceController extends Controller
         $invoice->load(['company:id,nombre,nit', 'services.user', 'services.catalog:id,name', 'payments']);
 
         if ($data['status'] === Invoice::STATUS_APROBADA) {
-            app(PanelNotificationDispatcher::class)->notifyAdmins(
+            $dispatcher = app(PanelNotificationDispatcher::class);
+            $dispatcher->notifyAdmins(
                 PanelNotification::TYPE_INVOICE_PENDING_SEND,
                 'Factura '.$invoice->code.' aprobada; pendiente de envío o de corte automático.',
                 [
@@ -363,6 +445,31 @@ class AdminInvoiceController extends Controller
                     'link' => '/admin/facturas/'.$invoice->id,
                 ]
             );
+
+            $techFirstServiceId = [];
+            foreach ($invoice->services as $svc) {
+                $u = $svc->user;
+                if ($u === null || $u->rol !== User::ROL_EMPLEADO) {
+                    continue;
+                }
+                $uid = (int) $u->id;
+                if (! isset($techFirstServiceId[$uid])) {
+                    $techFirstServiceId[$uid] = (int) $svc->id;
+                }
+            }
+            foreach ($techFirstServiceId as $uid => $firstSid) {
+                $dispatcher->notifyUser(
+                    $uid,
+                    PanelNotification::TYPE_EMP_SERVICIO_FACTURA_APROBADA,
+                    'La factura '.$invoice->code.' fue aprobada e incluye sus servicios (periodo '.$invoice->period_month.'/'.$invoice->period_year.').',
+                    [
+                        'invoice_id' => $invoice->id,
+                        'service_id' => $firstSid,
+                        'link' => '/empleado/servicio/'.$firstSid,
+                    ],
+                    'emp_inv_appr_'.$invoice->id
+                );
+            }
         }
 
         $actor = $request->user();
@@ -447,7 +554,7 @@ class AdminInvoiceController extends Controller
 
         $statusBeforePayment = $invoice->status;
 
-        Payment::query()->create([
+        $payment = Payment::query()->create([
             'invoice_id' => $invoice->id,
             'amount' => $data['amount'],
             'payment_date' => $data['payment_date'],
@@ -469,6 +576,25 @@ class AdminInvoiceController extends Controller
                     'previous_status' => $statusBeforePayment,
                 ],
                 'partial_inv_'.$invoice->id
+            );
+        }
+
+        $dispatcher = app(PanelNotificationDispatcher::class);
+        $empleadoIds = $invoice->services->pluck('user_id')->unique()->filter(fn ($id) => $id !== null && (int) $id > 0)->values();
+        foreach ($empleadoIds as $uid) {
+            $u = User::query()->find((int) $uid);
+            if ($u === null || $u->rol !== User::ROL_EMPLEADO) {
+                continue;
+            }
+            $dispatcher->notifyUser(
+                (int) $uid,
+                PanelNotification::TYPE_EMP_PAGO_FACTURA,
+                'Se registró un pago en la factura '.$invoice->code.' (periodo '.$invoice->period_month.'/'.$invoice->period_year.').',
+                [
+                    'link' => '/empleado',
+                    'invoice_id' => $invoice->id,
+                ],
+                'pago_'.$payment->id.'_u_'.$uid
             );
         }
 

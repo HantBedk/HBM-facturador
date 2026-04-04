@@ -24,7 +24,8 @@ const redirectTarget = computed(() => {
   return typeof r === 'string' ? r : null
 })
 
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+/** Permite dominios de desarrollo sin punto (p. ej. user@intranet) y @hbm.local */
+const emailPattern = /^[^\s@]+@[^\s@]+(\.[^\s@]+)*$/
 
 function syncLoginFieldsFromDom() {
   const emailNode = correoInputEl.value
@@ -54,6 +55,11 @@ function validateLocal() {
 }
 
 function mapServerError(e) {
+  if (e?.status === 429) {
+    globalError.value =
+      'Demasiados intentos. Espere un minuto y vuelva a intentar o reinicie el servidor si está en desarrollo.'
+    return
+  }
   if (e?.data?.errors) {
     const err = { ...e.data.errors }
     if (err.correo?.length) {
@@ -96,10 +102,6 @@ async function onSubmit(e) {
   globalError.value = ''
   fieldErrors.value = {}
   loading.value = true
-
-  console.warn("⚠️ [DEBUG LOGIN] Correo enviado:", correo.value);
-  console.warn("⚠️ [DEBUG LOGIN] Longitud de la contraseña enviada:", password.value.length);
-  // Si la longitud de la contraseña no es 8 (que es el tamaño de "1qwer432"), el autocompletado está inyectando una clave incorrecta.
 
   try {
     const user = await auth.login(

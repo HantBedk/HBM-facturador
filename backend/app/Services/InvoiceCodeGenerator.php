@@ -2,33 +2,43 @@
 
 namespace App\Services;
 
+use App\Models\Company;
 use App\Models\Invoice;
+use Carbon\Carbon;
 
 class InvoiceCodeGenerator
 {
     /**
-     * FAC-{año}-{mes}-{consecutivo 3 dígitos} — consecutivo reinicia cada mes (ETAPA 4).
-     * Ej.: FAC-2026-03-001, FAC-2026-03-002
+     * Formato FAC-YYMMDD-SIGLA. Máximo una factura por empresa y día (fecha de creación del borrador, zona app).
      */
-    public function nextForYearMonth(int $year, int $month): string
+    public function nextForCompanyOnDate(Company $company, Carbon $at): string
     {
-        $prefix = sprintf('FAC-%d-%02d-', $year, $month);
+        $sigla = strtoupper((string) $company->factura_sigla);
+        if (strlen($sigla) !== 3 || ! ctype_alpha($sigla)) {
+            throw new \InvalidArgumentException('La empresa debe tener una sigla de facturación de 3 letras (A-Z).');
+        }
 
-        $lastCode = Invoice::query()
-            ->where('code', 'like', $prefix.'%')
-            ->orderByDesc('code')
+        $tz = config('app.timezone');
+        $d = $at->copy()->timezone($tz);
+        $code = sprintf(
+            'FAC-%02d%02d%02d-%s',
+            $d->year % 100,
+            (int) $d->format('n'),
+            (int) $d->format('j'),
+            $sigla
+        );
+
+        $exists = Invoice::query()
+            ->where('code', $code)
             ->lockForUpdate()
-            ->value('code');
+            ->exists();
 
-        $next = 1;
-        if ($lastCode !== null && preg_match('/-(\d{3})$/', $lastCode, $m)) {
-            $next = (int) $m[1] + 1;
+        if ($exists) {
+            throw new \RuntimeException(
+                'Ya existe una factura para esta empresa el '.$d->format('d/m/Y').' (máximo 1 por día). Código: '.$code.'.'
+            );
         }
 
-        if ($next > 999) {
-            throw new \RuntimeException('Consecutivo de factura agotado para el periodo.');
-        }
-
-        return $prefix.str_pad((string) $next, 3, '0', STR_PAD_LEFT);
+        return $code;
     }
 }

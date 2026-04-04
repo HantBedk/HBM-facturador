@@ -60,7 +60,11 @@ class BillingDailyRemindersCommand extends Command
         $dispatcher->notifyAdmins(
             PanelNotification::TYPE_CUTOFF_APPROACHING,
             $msg,
-            ['cutoff_date' => $cutoffDate->toDateString(), 'draft_count' => $draftCount],
+            [
+                'cutoff_date' => $cutoffDate->toDateString(),
+                'draft_count' => $draftCount,
+                'link' => '/admin/facturas',
+            ],
             $dedupe
         );
     }

@@ -1,13 +1,16 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
-import { fetchService, updateService } from '@/services/servicesApi.js'
+import { archiveService, fetchService, updateService } from '@/services/servicesApi.js'
 import ServiceCorrectionFields from '@/components/services/ServiceCorrectionFields.vue'
+import { useUiDialogStore } from '@/stores/uiDialog'
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
+const uiDialog = useUiDialogStore()
 
 const service = ref(null)
 const loading = ref(true)
@@ -32,6 +35,14 @@ const backHref = computed(() =>
 const canAdminEdit = computed(
   () =>
     isAdmin.value &&
+    service.value &&
+    !service.value.invoiced &&
+    service.value.status !== 'eliminado'
+)
+
+const canEmpleadoManage = computed(
+  () =>
+    !isAdmin.value &&
     service.value &&
     !service.value.invoiced &&
     service.value.status !== 'eliminado'
@@ -119,7 +130,8 @@ async function onSaveCorrections() {
   const msg =
     '¿Confirmar los cambios en cliente, tipo, descripción y valor?\n\n' +
     'Estos datos afectan la facturación y lo que verá el cliente.'
-  if (!window.confirm(msg)) return
+  const ok = await uiDialog.confirm({ title: 'Guardar correcciones', message: msg })
+  if (!ok) return
 
   saving.value = true
   try {
@@ -129,12 +141,40 @@ async function onSaveCorrections() {
       description: f.description.trim(),
       amount: Number(f.amount),
     })
-    window.alert('Cambios guardados correctamente.')
+    await uiDialog.alert({ title: 'Listo', message: 'Cambios guardados correctamente.' })
   } catch (e) {
     if (e.data?.errors) fieldErrors.value = e.data.errors
     else saveError.value = e.data?.message || e.message || 'No se pudo guardar.'
   } finally {
     saving.value = false
+  }
+}
+
+async function onEmpleadoArchive() {
+  const s = service.value
+  if (!s || s.invoiced || s.status === 'eliminado') return
+  const typed = await uiDialog.prompt({
+    title: 'Confirmar eliminación',
+    message: `Para eliminar este registro, escribe exactamente el código del servicio (${s.code}):`,
+    placeholder: s.code,
+    danger: true,
+    confirmLabel: 'Eliminar',
+  })
+  if (typed?.trim() !== s.code) {
+    if (typed != null && typed.trim() !== '') {
+      await uiDialog.alert({ title: 'Código incorrecto', message: 'El código no coincide.' })
+    }
+    return
+  }
+  try {
+    await archiveService(s.id)
+    await uiDialog.alert({ title: 'Listo', message: 'Servicio marcado como eliminado.' })
+    await router.push(`${base.value}/listado-servicios`)
+  } catch (e) {
+    await uiDialog.alert({
+      title: 'Error',
+      message: e.data?.message || e.message || 'No se pudo eliminar.',
+    })
   }
 }
 </script>
@@ -153,6 +193,10 @@ async function onSaveCorrections() {
         <RouterLink class="btn secondary" :to="`${base}/servicios/${service.id}/editar`">
           Editar en vista ampliada
         </RouterLink>
+      </div>
+      <div v-else-if="service && canEmpleadoManage" class="actions actions-emp">
+        <RouterLink class="btn primary" :to="`${base}/servicio/${service.id}/editar`">Editar</RouterLink>
+        <button type="button" class="btn danger" @click="onEmpleadoArchive">Eliminar</button>
       </div>
     </header>
 
@@ -608,6 +652,24 @@ dd {
 .btn.primary:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+.btn.secondary {
+  border-color: rgba(148, 163, 184, 0.45);
+}
+
+.btn.danger {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(127, 29, 29, 0.35);
+  color: #fecaca;
+}
+
+.btn.danger:hover {
+  background: rgba(153, 27, 27, 0.45);
+}
+
+.actions-emp {
+  align-items: center;
 }
 
 .photo-grid {

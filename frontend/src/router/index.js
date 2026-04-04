@@ -8,8 +8,14 @@ import CompaniesListView from '@/views/admin/CompaniesListView.vue'
 import InvoicesListView from '@/views/admin/InvoicesListView.vue'
 import InvoiceEditorView from '@/views/admin/InvoiceEditorView.vue'
 import InvoiceDetailView from '@/views/admin/InvoiceDetailView.vue'
+import AdminConfiguracionLayout from '@/layouts/AdminConfiguracionLayout.vue'
+import AdminEmpleadoNotificacionesView from '@/views/admin/AdminEmpleadoNotificacionesView.vue'
+import AdminHistorialMovimientosView from '@/views/admin/AdminHistorialMovimientosView.vue'
+import AdminEmpleadoPerfilView from '@/views/admin/AdminEmpleadoPerfilView.vue'
 import EmpleadosListView from '@/views/admin/EmpleadosListView.vue'
 import EmpleadoDashboardView from '@/views/empleado/EmpleadoDashboardView.vue'
+import EmpleadoConfiguracionView from '@/views/empleado/EmpleadoConfiguracionView.vue'
+import EmpleadoOnboardingView from '@/views/empleado/EmpleadoOnboardingView.vue'
 import EmployeeHistorialView from '@/views/empleado/EmployeeHistorialView.vue'
 import ServicesListView from '@/views/services/ServicesListView.vue'
 import ServiceRegisterView from '@/views/services/ServiceRegisterView.vue'
@@ -18,6 +24,7 @@ import ServiceEditView from '@/views/services/ServiceEditView.vue'
 import ServiceCatalogView from '@/views/admin/ServiceCatalogView.vue'
 import PublicInvoiceConsultView from '@/views/public/PublicInvoiceConsultView.vue'
 import { isAdminPanelRole } from '@/utils/roles.js'
+import { isEmpleadoPerfilIncomplete } from '@/utils/empleadoPerfil.js'
 
 const routes = [
   {
@@ -58,7 +65,27 @@ const routes = [
       },
       { path: 'facturas', name: 'admin-facturas', component: InvoicesListView },
       { path: 'empresas', name: 'admin-empresas', component: CompaniesListView },
-      { path: 'empleados', name: 'admin-empleados-list', component: EmpleadosListView },
+      {
+        path: 'configuracion',
+        component: AdminConfiguracionLayout,
+        redirect: { name: 'admin-notificaciones-tecnicos' },
+        children: [
+          {
+            path: 'cuentas',
+            redirect: { name: 'admin-emp-rendimiento' },
+          },
+          {
+            path: 'notificaciones-tecnicos',
+            name: 'admin-notificaciones-tecnicos',
+            component: AdminEmpleadoNotificacionesView,
+          },
+          {
+            path: 'historial',
+            name: 'admin-config-historial',
+            component: AdminHistorialMovimientosView,
+          },
+        ],
+      },
       {
         path: 'empleados/rendimiento/:userId(\\d+)',
         name: 'admin-emp-rendimiento-user',
@@ -68,8 +95,15 @@ const routes = [
       {
         path: 'empleados/rendimiento',
         name: 'admin-emp-rendimiento',
-        component: EmployeeHistorialView,
+        component: EmpleadosListView,
       },
+      {
+        path: 'empleados/:userId(\\d+)/perfil',
+        name: 'admin-empleado-perfil',
+        component: AdminEmpleadoPerfilView,
+        props: true,
+      },
+      { path: 'empleados', redirect: { name: 'admin-emp-rendimiento' } },
     ],
   },
   {
@@ -77,11 +111,26 @@ const routes = [
     component: EmpleadoLayout,
     meta: { auth: true, roles: ['empleado'] },
     children: [
+      {
+        path: 'completar-perfil',
+        redirect: (to) => ({ name: 'empleado-perfil', query: to.query }),
+      },
+      {
+        path: 'perfil',
+        name: 'empleado-perfil',
+        component: EmpleadoOnboardingView,
+      },
+      {
+        path: 'configuracion',
+        name: 'empleado-configuracion',
+        component: EmpleadoConfiguracionView,
+      },
       { path: '', name: 'empleado-dashboard', component: EmpleadoDashboardView },
-      { path: 'historial', name: 'emp-historial', component: EmployeeHistorialView },
+      { path: 'historial', redirect: { name: 'empleado-dashboard' } },
       { path: 'registro-servicio', name: 'emp-registro-servicio', component: ServiceRegisterView },
       { path: 'listado-servicios', name: 'emp-listado-servicios', component: ServicesListView },
       { path: 'servicio/:id(\\d+)', name: 'emp-servicio-detalle', component: ServiceDetailView, props: true },
+      { path: 'servicio/:id(\\d+)/editar', name: 'emp-servicio-editar', component: ServiceEditView, props: true },
       { path: 'servicios/nuevo', redirect: '/empleado/registro-servicio' },
       {
         path: 'servicios/:id(\\d+)',
@@ -126,6 +175,24 @@ router.beforeEach(async (to) => {
     return isAdminPanelRole(auth.user.rol)
       ? { name: 'admin-dashboard' }
       : { name: 'empleado-dashboard' }
+  }
+
+  /** Técnicos: si faltan datos obligatorios solo se permite /empleado/perfil y /empleado/configuracion (contraseña y avisos). */
+  if (auth.isAuthenticated && auth.user?.rol === 'empleado') {
+    const incomplete = isEmpleadoPerfilIncomplete(auth.user)
+    if (
+      to.path === '/empleado/perfil' ||
+      to.path === '/empleado/completar-perfil' ||
+      to.path === '/empleado/configuracion'
+    ) {
+      return true
+    }
+    if (incomplete) {
+      return {
+        path: '/empleado/perfil',
+        query: { redirect: to.fullPath },
+      }
+    }
   }
 
   return true

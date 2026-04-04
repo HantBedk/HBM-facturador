@@ -1,11 +1,16 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+import { isAdminPanelRole } from '@/utils/roles.js'
 import ServiceCorrectionFields from '@/components/services/ServiceCorrectionFields.vue'
 import { fetchService, fetchServiceCatalogActive, updateService } from '@/services/servicesApi.js'
+import { useUiDialogStore } from '@/stores/uiDialog'
 
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
+const uiDialog = useUiDialogStore()
 
 const service = ref(null)
 const loading = ref(true)
@@ -22,6 +27,12 @@ const form = ref({
   description: '',
   amount: '',
 })
+
+const isAdmin = computed(() => isAdminPanelRole(auth.user?.rol))
+
+const detailPath = computed(() =>
+  isAdmin.value ? `/admin/servicios/${route.params.id}` : `/empleado/servicio/${route.params.id}`
+)
 
 const canEdit = computed(
   () => service.value && !service.value.invoiced && service.value.status !== 'eliminado'
@@ -73,14 +84,12 @@ function validateLocal() {
 
 onMounted(async () => {
   try {
-    catalogItems.value = await fetchServiceCatalogActive()
-  } catch {
-    catalogItems.value = []
-  }
-  try {
     service.value = await fetchService(route.params.id)
+    const cid = service.value?.company_id
+    catalogItems.value = cid ? await fetchServiceCatalogActive(cid) : []
   } catch (e) {
     globalError.value = e.data?.message || e.message || 'No se pudo cargar.'
+    catalogItems.value = []
   } finally {
     loading.value = false
   }
@@ -95,13 +104,12 @@ async function onSubmit() {
     return
   }
   const f = form.value
-  if (
-    !window.confirm(
-      '¿Confirmar los cambios? Estos datos afectan la facturación y lo que verá el cliente.'
-    )
-  ) {
-    return
-  }
+  const msg = isAdmin.value
+    ? '¿Confirmar los cambios? Estos datos afectan la facturación y lo que verá el cliente.'
+    : '¿Guardar los cambios en tu servicio?'
+  const ok = await uiDialog.confirm({ title: 'Guardar cambios', message: msg })
+  if (!ok) return
+
   saving.value = true
   try {
     const payload = {
@@ -116,8 +124,8 @@ async function onSubmit() {
       payload.catalog_id = null
     }
     await updateService(route.params.id, payload)
-    window.alert('Cambios guardados.')
-    await router.push(`/admin/servicios/${route.params.id}`)
+    await uiDialog.alert({ title: 'Listo', message: 'Cambios guardados.' })
+    await router.push(detailPath.value)
   } catch (e) {
     if (e.data?.errors) fieldErrors.value = e.data.errors
     else globalError.value = e.data?.message || e.message || 'No se pudo guardar.'
@@ -131,9 +139,15 @@ async function onSubmit() {
   <section class="page">
     <header class="head">
       <div>
-        <RouterLink class="back" :to="`/admin/servicios/${route.params.id}`">← Volver al detalle</RouterLink>
-        <h1>Editar servicio (corrección administrativa)</h1>
-        <p class="lede">Solo puede modificar cliente, tipo, descripción y valor. Código, fecha, empresa y técnico no se alteran.</p>
+        <RouterLink class="back" :to="detailPath">← Volver al detalle</RouterLink>
+        <h1>{{ isAdmin ? 'Editar servicio (administración)' : 'Editar mi servicio' }}</h1>
+        <p class="lede">
+          {{
+            isAdmin
+              ? 'Cliente, tipo, descripción y valor. Código, fecha, empresa y técnico no se alteran.'
+              : 'Puedes corregir cliente, tipo, descripción y valor si te equivocaste al registrar. No debe estar facturado.'
+          }}
+        </p>
       </div>
     </header>
 
@@ -141,7 +155,7 @@ async function onSubmit() {
     <template v-else-if="service">
       <p v-if="service.invoiced" class="banner banner-warn">
         Este servicio ya está en una factura. No es editable.
-        <RouterLink class="link" :to="`/admin/servicios/${service.id}`">Ir al detalle</RouterLink>
+        <RouterLink class="link" :to="detailPath">Ir al detalle</RouterLink>
       </p>
       <p v-else-if="service.status === 'eliminado'" class="banner banner-warn">
         Servicio eliminado; no admite edición.
@@ -175,7 +189,7 @@ async function onSubmit() {
       </article>
 
       <form v-if="canEdit" class="card form-card" @submit.prevent="onSubmit">
-        <h2 class="h2">Datos corregibles</h2>
+        <h2 class="h2">Datos editables</h2>
         <ServiceCorrectionFields
           v-model="form"
           :catalog-items="catalogItems"
@@ -183,7 +197,7 @@ async function onSubmit() {
           :disabled="saving"
         />
         <div class="actions">
-          <RouterLink class="btn secondary" :to="`/admin/servicios/${route.params.id}`">Cancelar</RouterLink>
+          <RouterLink class="btn secondary" :to="detailPath">Cancelar</RouterLink>
           <button class="btn primary" type="submit" :disabled="saving">
             {{ saving ? 'Guardando…' : 'Guardar cambios' }}
           </button>

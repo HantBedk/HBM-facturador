@@ -50,7 +50,7 @@ class DemoPublicInvoiceSeeder extends Seeder
 
         $subtotal = 245000.00;
         $invoice = Invoice::query()->updateOrCreate(
-            ['code' => 'FAC-2026-DEMO001'],
+            ['code' => 'FAC-260312-SYF'],
             [
                 'company_id' => $company->id,
                 'period_month' => 3,
@@ -92,7 +92,7 @@ class DemoPublicInvoiceSeeder extends Seeder
         );
 
         $draft = Invoice::query()->updateOrCreate(
-            ['code' => 'FAC-2026-DEMO002'],
+            ['code' => 'FAC-260318-SYF'],
             [
                 'company_id' => $company->id,
                 'period_month' => 3,

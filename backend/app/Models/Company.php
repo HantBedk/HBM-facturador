@@ -14,11 +14,22 @@ class Company extends Model
 
     protected $fillable = [
         'nombre',
+        'factura_sigla',
         'nit',
         'estado',
         'telefono',
         'correo',
     ];
+
+    protected static function booted(): void
+    {
+        static::saving(function (Company $company) {
+            if ($company->factura_sigla !== null && $company->factura_sigla !== '') {
+                $letters = strtoupper(preg_replace('/[^A-Za-z]/', '', (string) $company->factura_sigla) ?? '');
+                $company->factura_sigla = strlen($letters) >= 3 ? substr($letters, 0, 3) : str_pad($letters, 3, 'X');
+            }
+        });
+    }
 
     public function scopeActivas(Builder $query): Builder
     {

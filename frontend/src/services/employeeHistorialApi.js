@@ -18,14 +18,6 @@ function historialQueryString(period) {
 }
 
 /**
- * @param {{ year: number, month: number, company_id?: string|number, q?: string }} period
- */
-export function fetchMyHistorial(period) {
-  const s = historialQueryString(period)
-  return api(`/empleado/historial?${s}`).then((r) => r.data)
-}
-
-/**
  * @param {number|string} userId
  * @param {{ year: number, month: number, company_id?: string|number, q?: string }} period
  */

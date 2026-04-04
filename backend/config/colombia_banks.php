@@ -1,0 +1,40 @@
+<?php
+
+/**
+ * Entidades financieras en Colombia (lista desplegable para pagos).
+ */
+return [
+    ['codigo' => 'BANCOLOMBIA', 'nombre' => 'Bancolombia'],
+    ['codigo' => 'BANCO_DE_BOGOTA', 'nombre' => 'Banco de Bogotá'],
+    ['codigo' => 'BBVA_COLOMBIA', 'nombre' => 'BBVA Colombia'],
+    ['codigo' => 'DAVIVIENDA', 'nombre' => 'Davivienda'],
+    ['codigo' => 'BANCO_POPULAR', 'nombre' => 'Banco Popular'],
+    ['codigo' => 'BANCO_OCCIDENTE', 'nombre' => 'Banco de Occidente'],
+    ['codigo' => 'BANCO_AGRARIO', 'nombre' => 'Banco Agrario de Colombia'],
+    ['codigo' => 'BANCO_CAJA_SOCIAL', 'nombre' => 'Banco Caja Social BCSC'],
+    ['codigo' => 'BANCO_AV_VILLAS', 'nombre' => 'Banco AV Villas'],
+    ['codigo' => 'SCOTIABANK_COLPATRIA', 'nombre' => 'Scotiabank Colpatria'],
+    ['codigo' => 'ITAU', 'nombre' => 'Itaú Corpbanca'],
+    ['codigo' => 'BANCO_FALABELLA', 'nombre' => 'Banco Falabella'],
+    ['codigo' => 'BANCO_PICHINCHA', 'nombre' => 'Banco Pichincha'],
+    ['codigo' => 'COOFINEP', 'nombre' => 'Coofinep'],
+    ['codigo' => 'FINANDINA', 'nombre' => 'Banco Finandina'],
+    ['codigo' => 'GNB_SUDAMERIS', 'nombre' => 'GNB Sudameris'],
+    ['codigo' => 'LULO_BANK', 'nombre' => 'Lulo Bank'],
+    ['codigo' => 'MOVII', 'nombre' => 'Movii'],
+    ['codigo' => 'NEQUI', 'nombre' => 'Nequi'],
+    ['codigo' => 'DAVIPLATA', 'nombre' => 'DaviPlata'],
+    ['codigo' => 'BANCOOMEVA', 'nombre' => 'Bancoomeva'],
+    ['codigo' => 'BANCO_FIDUCIARIO', 'nombre' => 'Banco Fiduciario'],
+    ['codigo' => 'COOPCENTRAL', 'nombre' => 'Coopcentral'],
+    ['codigo' => 'JFK_COOPERATIVA', 'nombre' => 'Cooperativa JFK'],
+    ['codigo' => 'BANCO_SERFINANZA', 'nombre' => 'Banco Serfinanza'],
+    ['codigo' => 'MIBANCO_SA', 'nombre' => 'MiBanco'],
+    ['codigo' => 'BANCO_SANTANDER_CO', 'nombre' => 'Banco Santander Colombia'],
+    ['codigo' => 'CITIBANK_CO', 'nombre' => 'Citibank Colombia'],
+    ['codigo' => 'BANCO_CREDITO', 'nombre' => 'Banco de Crédito'],
+    ['codigo' => 'CONFIAR_COOPERATIVA', 'nombre' => 'Confiar Cooperativa Financiera'],
+    ['codigo' => 'COLTEFINANCIERA', 'nombre' => 'Coltefinanciera'],
+    ['codigo' => 'IRIS', 'nombre' => 'IRIS (Red de cooperativas)'],
+    ['codigo' => 'OTRA_ENTIDAD', 'nombre' => 'Otra entidad (indicar en observaciones al admin)'],
+];

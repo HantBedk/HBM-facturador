@@ -1,15 +1,26 @@
 <?php
 
+use App\Http\Controllers\Api\AdminActivityLogController;
 use App\Http\Controllers\Api\AdminCompanyController;
 use App\Http\Controllers\Api\AdminDashboardController;
 use App\Http\Controllers\Api\AdminExportController;
 use App\Http\Controllers\Api\AdminInvoiceController;
 use App\Http\Controllers\Api\AdminPanelNotificationController;
 use App\Http\Controllers\Api\AdminServiceCatalogController;
+use App\Http\Controllers\Api\AdminServiceCatalogSuggestionController;
+use App\Http\Controllers\Api\AdminTechnicianCatalogPricingController;
+use App\Http\Controllers\Api\AdminCorreoSolicitudController;
+use App\Http\Controllers\Api\AdminEmpleadoNotificacionSettingsController;
+use App\Http\Controllers\Api\AdminEmpleadoPerfilController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CompanyController;
+use App\Http\Controllers\Api\EmpleadoCorreoSolicitudController;
 use App\Http\Controllers\Api\EmpleadoDashboardController;
+use App\Http\Controllers\Api\EmpleadoNotificacionPreferenciasController;
+use App\Http\Controllers\Api\EmpleadoPanelNotificationController;
+use App\Http\Controllers\Api\EmpleadoPasswordController;
+use App\Http\Controllers\Api\EmpleadoPerfilController;
 use App\Http\Controllers\Api\EmployeeHistorialController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\PublicInvoiceController;
@@ -42,16 +53,34 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::post('/admin/companies', [AdminCompanyController::class, 'store']);
         Route::put('/admin/companies/{company}', [AdminCompanyController::class, 'update']);
         Route::patch('/admin/companies/{company}/estado', [AdminCompanyController::class, 'updateEstado']);
+        Route::delete('/admin/companies/{company}', [AdminCompanyController::class, 'destroy']);
+        Route::get('/admin/companies/{company}/monthly-dashboard', [AdminCompanyController::class, 'monthlyDashboard']);
 
         Route::get('/admin/users', [AdminUserController::class, 'index']);
         Route::post('/admin/users', [AdminUserController::class, 'store']);
         Route::put('/admin/users/{user}', [AdminUserController::class, 'update']);
         Route::patch('/admin/users/{user}/estado', [AdminUserController::class, 'updateEstado']);
+        Route::post('/admin/users/{user}/correo-solicitud/approve', [AdminCorreoSolicitudController::class, 'approve']);
+        Route::post('/admin/users/{user}/correo-solicitud/reject', [AdminCorreoSolicitudController::class, 'reject']);
+        Route::get('/admin/users/{user}/empleado-perfil', [AdminEmpleadoPerfilController::class, 'show']);
+        Route::post('/admin/users/{user}/empleado-perfil/borrar-datos-pago', [AdminEmpleadoPerfilController::class, 'clearDatosPago']);
+        Route::get('/admin/settings/empleado-notificaciones', [AdminEmpleadoNotificacionSettingsController::class, 'show']);
+        Route::put('/admin/settings/empleado-notificaciones', [AdminEmpleadoNotificacionSettingsController::class, 'update']);
 
         Route::get('/admin/service-catalog', [AdminServiceCatalogController::class, 'index']);
         Route::post('/admin/service-catalog', [AdminServiceCatalogController::class, 'store']);
+        Route::post('/admin/service-catalog/import', [AdminServiceCatalogController::class, 'import']);
+        Route::post('/admin/service-catalog/bulk-destroy', [AdminServiceCatalogController::class, 'bulkDestroy']);
+        Route::get('/admin/service-catalog/technician-pricing', [AdminTechnicianCatalogPricingController::class, 'show']);
+        Route::put('/admin/service-catalog/technician-pricing', [AdminTechnicianCatalogPricingController::class, 'update']);
+        Route::get('/admin/service-catalog/{service_catalog}', [AdminServiceCatalogController::class, 'show']);
         Route::put('/admin/service-catalog/{service_catalog}', [AdminServiceCatalogController::class, 'update']);
         Route::patch('/admin/service-catalog/{service_catalog}/estado', [AdminServiceCatalogController::class, 'updateEstado']);
+        Route::delete('/admin/service-catalog/{service_catalog}', [AdminServiceCatalogController::class, 'destroy']);
+
+        Route::get('/admin/service-catalog-suggestions', [AdminServiceCatalogSuggestionController::class, 'index']);
+        Route::post('/admin/service-catalog-suggestions/{service_catalog_suggestion}/approve', [AdminServiceCatalogSuggestionController::class, 'approve']);
+        Route::post('/admin/service-catalog-suggestions/{service_catalog_suggestion}/reject', [AdminServiceCatalogSuggestionController::class, 'reject']);
 
         Route::get('/admin/notifications/unread-count', [AdminPanelNotificationController::class, 'unreadCount']);
         Route::get('/admin/notifications', [AdminPanelNotificationController::class, 'index']);
@@ -60,6 +89,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
 
         Route::get('/admin/export/services', [AdminExportController::class, 'services']);
         Route::get('/admin/export/invoices', [AdminExportController::class, 'invoices']);
+        Route::get('/admin/activity-logs', [AdminActivityLogController::class, 'index']);
 
         Route::get('/admin/invoices/available-services', [AdminInvoiceController::class, 'availableServices']);
         Route::get('/admin/invoices', [AdminInvoiceController::class, 'index']);
@@ -80,11 +110,21 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::get('/admin/dashboard', [AdminDashboardController::class, 'index'])->middleware('role:admin,super_admin');
 
     Route::get('/empleado/dashboard', [EmpleadoDashboardController::class, 'index'])->middleware('role:empleado');
-    Route::get('/empleado/historial', [EmployeeHistorialController::class, 'mine'])->middleware('role:empleado');
+    Route::get('/empleado/perfil', [EmpleadoPerfilController::class, 'show'])->middleware('role:empleado');
+    Route::put('/empleado/perfil', [EmpleadoPerfilController::class, 'update'])->middleware('role:empleado');
+    Route::post('/empleado/correo-solicitud', [EmpleadoCorreoSolicitudController::class, 'store'])->middleware('role:empleado');
+    Route::delete('/empleado/correo-solicitud', [EmpleadoCorreoSolicitudController::class, 'destroy'])->middleware('role:empleado');
+    Route::get('/empleado/notifications/unread-count', [EmpleadoPanelNotificationController::class, 'unreadCount'])->middleware('role:empleado');
+    Route::get('/empleado/notifications', [EmpleadoPanelNotificationController::class, 'index'])->middleware('role:empleado');
+    Route::patch('/empleado/notifications/{panel_notification}/read', [EmpleadoPanelNotificationController::class, 'markRead'])->middleware('role:empleado');
+    Route::post('/empleado/notifications/read-all', [EmpleadoPanelNotificationController::class, 'readAll'])->middleware('role:empleado');
+    Route::put('/empleado/password', [EmpleadoPasswordController::class, 'update'])->middleware('role:empleado');
+    Route::get('/empleado/notificaciones-preferencias', [EmpleadoNotificacionPreferenciasController::class, 'show'])->middleware('role:empleado');
+    Route::put('/empleado/notificaciones-preferencias', [EmpleadoNotificacionPreferenciasController::class, 'update'])->middleware('role:empleado');
 
     Route::get('/services', [ServiceController::class, 'index']);
     Route::post('/services', [ServiceController::class, 'store']);
     Route::get('/services/{service}', [ServiceController::class, 'show']);
-    Route::put('/services/{service}', [ServiceController::class, 'update'])->middleware('role:admin,super_admin');
-    Route::patch('/services/{service}/archive', [ServiceController::class, 'archive'])->middleware('role:admin,super_admin');
+    Route::put('/services/{service}', [ServiceController::class, 'update']);
+    Route::patch('/services/{service}/archive', [ServiceController::class, 'archive']);
 });

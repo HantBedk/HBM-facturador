@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\AppSetting;
 use App\Models\Company;
 use App\Models\ServiceCatalog;
 use App\Models\User;
@@ -16,6 +17,7 @@ class DatabaseSeeder extends Seeder
             [
                 'nombre' => 'Ferretería SYF',
                 'estado' => Company::ESTADO_ACTIVO,
+                'factura_sigla' => 'SYF',
             ]
         );
 
@@ -24,6 +26,7 @@ class DatabaseSeeder extends Seeder
             [
                 'nombre' => 'Tech Solutions Colombia S.A.S.',
                 'estado' => Company::ESTADO_ACTIVO,
+                'factura_sigla' => 'TEC',
             ]
         );
 
@@ -32,6 +35,7 @@ class DatabaseSeeder extends Seeder
             [
                 'nit' => null,
                 'estado' => Company::ESTADO_ACTIVO,
+                'factura_sigla' => 'CVA',
             ]
         );
 
@@ -68,6 +72,8 @@ class DatabaseSeeder extends Seeder
                 'estado' => User::ESTADO_ACTIVO,
             ]
         );
+
+        AppSetting::setValue(AppSetting::KEY_TECHNICIAN_CATALOG_DISCOUNT_PERCENT, '10');
 
         $catalogSeeds = [
             ['name' => 'Revisión de equipo', 'description' => 'Inspección y diagnóstico inicial del equipo o instalación.', 'base_price' => 75000],
