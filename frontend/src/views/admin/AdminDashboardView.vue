@@ -4,6 +4,7 @@ import { api } from '@/services/api.js'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import AdminDashboardPendingInvoicesPanel from '@/components/admin/AdminDashboardPendingInvoicesPanel.vue'
 import AdminDashboardServicesPanel from '@/components/admin/AdminDashboardServicesPanel.vue'
+import AdminDashboardTechnicianPendingPanel from '@/components/admin/AdminDashboardTechnicianPendingPanel.vue'
 
 const VueApexCharts = defineAsyncComponent(() => import('vue3-apexcharts'))
 
@@ -88,6 +89,7 @@ async function loadDashboard() {
 
 const pendingInvoicesPanelOpen = ref(false)
 const servicesPanelOpen = ref(false)
+const technicianPendingPanelOpen = ref(false)
 
 onMounted(() => {
   loadDashboard()
@@ -107,6 +109,14 @@ function openServicesPanel() {
 
 function closeServicesPanel() {
   servicesPanelOpen.value = false
+}
+
+function openTechnicianPendingPanel() {
+  technicianPendingPanelOpen.value = true
+}
+
+function closeTechnicianPendingPanel() {
+  technicianPendingPanelOpen.value = false
 }
 
 /** Facturas con posible acción (alineado con el panel lateral). */
@@ -196,6 +206,20 @@ function getStatusClasses(status) {
   if (s.includes('vencida') || s.includes('anulada')) return 'bg-[#3b1c20] text-[#ef4444] border border-[#ef4444]/20'
   return 'bg-slate-700/30 text-slate-400 border border-slate-600/30'
 }
+
+const netAfterTechnicians = computed(() => {
+  const raw = metrics.value?.net_collected_after_technician_payouts
+  if (raw === undefined || raw === null || raw === '') return null
+  const n = Number(raw)
+  return Number.isNaN(n) ? null : n
+})
+
+const netAfterTechniciansClass = computed(() => {
+  const n = netAfterTechnicians.value
+  if (n == null) return 'text-slate-400'
+  if (n < 0) return 'text-rose-400'
+  return 'text-emerald-400'
+})
 </script>
 
 <template>
@@ -210,6 +234,9 @@ function getStatusClasses(status) {
         <div v-for="i in 4" :key="i" class="h-[120px] bg-[#1e2532] rounded-2xl"></div>
       </div>
       <div class="h-[400px] bg-[#1e2532] rounded-2xl"></div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div v-for="j in 4" :key="'b'+j" class="h-[120px] bg-[#1e2532] rounded-2xl"></div>
+      </div>
     </div>
 
     <template v-else>
@@ -414,6 +441,91 @@ function getStatusClasses(status) {
 
         </div>
       </div>
+
+      <!-- ROW 3: flujo técnico + placeholders -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-7">
+        <button
+          type="button"
+          class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between text-left w-full min-h-[120px] transition hover:ring-2 hover:ring-amber-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
+          @click="openTechnicianPendingPanel"
+        >
+          <div class="flex items-center gap-3 mb-2">
+            <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-amber-500/10 text-amber-400">
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+            </div>
+            <h3 class="text-[0.85rem] font-medium text-slate-300">Pago a técnicos pendiente</h3>
+          </div>
+          <div>
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">
+              {{ metrics?.technician_unpaid_services_count != null ? metrics.technician_unpaid_services_count : '—' }}
+            </p>
+            <p class="text-[0.75rem] font-medium text-slate-400">
+              {{ data?.period?.label ? `${data.period.label} · ` : '' }}
+              ref.
+              {{
+                metrics?.technician_unpaid_services_total != null
+                  ? formatMoney(metrics.technician_unpaid_services_total)
+                  : '—'
+              }}
+              · Clic para ver
+            </p>
+          </div>
+        </button>
+
+        <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between min-h-[120px]">
+          <div class="flex items-center gap-3 mb-2">
+            <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-violet-500/10 text-violet-400">
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <h3 class="text-[0.85rem] font-medium text-slate-300">Cobrado − pagos a técnicos (mes)</h3>
+          </div>
+          <div>
+            <p class="text-[1.85rem] font-bold tracking-tight leading-none mb-1.5">
+              <span :class="netAfterTechniciansClass">
+                {{ netAfterTechnicians != null ? formatMoney(netAfterTechnicians) : '—' }}
+              </span>
+            </p>
+            <p class="text-[0.75rem] font-medium text-slate-400">
+              Cobrado {{ metrics?.received_month != null ? formatMoney(metrics.received_month) : '—' }} − abonos técn.
+              {{ metrics?.technician_payouts_month != null ? formatMoney(metrics.technician_payouts_month) : '—' }}
+            </p>
+          </div>
+        </article>
+
+        <article class="bg-[#1e2532]/80 rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between min-h-[120px] border border-dashed border-slate-600/50">
+          <div class="flex items-center gap-3 mb-2">
+            <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-slate-600/20 text-slate-500">
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+            </div>
+            <h3 class="text-[0.85rem] font-medium text-slate-500">En construcción</h3>
+          </div>
+          <div>
+            <p class="text-[1.25rem] font-semibold text-slate-500 leading-snug">Próximamente</p>
+            <p class="text-[0.75rem] text-slate-600 mt-2">Reservado para otra métrica.</p>
+          </div>
+        </article>
+
+        <article class="bg-[#1e2532]/80 rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between min-h-[120px] border border-dashed border-slate-600/50">
+          <div class="flex items-center gap-3 mb-2">
+            <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-slate-600/20 text-slate-500">
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+            </div>
+            <h3 class="text-[0.85rem] font-medium text-slate-500">En construcción</h3>
+          </div>
+          <div>
+            <p class="text-[1.25rem] font-semibold text-slate-500 leading-snug">Próximamente</p>
+            <p class="text-[0.75rem] text-slate-600 mt-2">Reservado para otra métrica.</p>
+          </div>
+        </article>
+      </div>
     </template>
 
     <AdminDashboardPendingInvoicesPanel
@@ -428,6 +540,15 @@ function getStatusClasses(status) {
       :month="data?.period?.month"
       :period-label="data?.period?.label || ''"
       @close="closeServicesPanel"
+    />
+
+    <AdminDashboardTechnicianPendingPanel
+      :open="technicianPendingPanelOpen"
+      :year="data?.period?.year"
+      :month="data?.period?.month"
+      :period-label="data?.period?.label || ''"
+      @close="closeTechnicianPendingPanel"
+      @changed="loadDashboard"
     />
   </div>
 </template>

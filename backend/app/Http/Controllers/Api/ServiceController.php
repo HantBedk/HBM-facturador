@@ -79,6 +79,26 @@ class ServiceController extends Controller
             });
         }
 
+        if ($user->isAdminEquipo() && filter_var($request->query('technician_unpaid'), FILTER_VALIDATE_BOOLEAN)) {
+            $sub = Service::query()->visibles()->whereNull('technician_paid_at');
+            if ($request->filled('service_date_from')) {
+                $sub->whereDate('service_date', '>=', $request->date('service_date_from')->format('Y-m-d'));
+            }
+            if ($request->filled('service_date_to')) {
+                $sub->whereDate('service_date', '<=', $request->date('service_date_to')->format('Y-m-d'));
+            }
+            $ids = $sub->withSum('items', 'technician_line_amount')
+                ->withCount('items')
+                ->get()
+                ->filter(fn (Service $s) => $s->technicianReferenceTotalValue() > 0.00001)
+                ->pluck('id');
+            if ($ids->isEmpty()) {
+                $q->whereRaw('0 = 1');
+            } else {
+                $q->whereIn('services.id', $ids->all());
+            }
+        }
+
         $sort = $request->query('sort');
         $sortDir = strtolower((string) $request->query('sort_dir', 'asc')) === 'desc' ? 'desc' : 'asc';
         $allowedSorts = [
@@ -378,6 +398,43 @@ class ServiceController extends Controller
             $request->user(),
             'servicio_editado',
             'Editó servicio '.$service->code.' (ID '.$service->id.').'
+        );
+
+        return new ServiceResource($service);
+    }
+
+    /**
+     * Marca o limpia el registro interno de pago al técnico (no modifica líneas ni facturas).
+     */
+    public function patchTechnicianPaid(Request $request, Service $service): ServiceResource|JsonResponse
+    {
+        $this->authorize('view', $service);
+        if (! $request->user()->isAdminEquipo()) {
+            return response()->json(['message' => 'Solo el equipo administrador puede registrar este estado.'], 403);
+        }
+
+        if ($service->status === Service::STATUS_ELIMINADO) {
+            return response()->json(['message' => 'No aplica a servicios eliminados.'], 422);
+        }
+
+        $data = $request->validate([
+            'technician_paid_at' => ['nullable', 'date'],
+        ]);
+
+        $service->technician_paid_at = isset($data['technician_paid_at']) && $data['technician_paid_at'] !== null
+            ? Carbon::parse($data['technician_paid_at'], config('app.timezone'))->startOfDay()
+            : null;
+        $service->save();
+
+        $service->loadCount('invoices');
+        $service->load(['company', 'user', 'photos', 'catalog:id,name', 'items.catalogSuggestion']);
+
+        ActivityLogger::log(
+            $request->user(),
+            'servicio_pago_tecnico',
+            ($service->technician_paid_at
+                ? 'Marcó pago al técnico para servicio '.$service->code.' (ID '.$service->id.').'
+                : 'Quitó marca de pago al técnico en servicio '.$service->code.' (ID '.$service->id.').')
         );
 
         return new ServiceResource($service);

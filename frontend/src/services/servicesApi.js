@@ -177,6 +177,14 @@ export function archiveService(id) {
   return api(`/services/${id}/archive`, { method: 'PATCH' }).then((r) => r.data)
 }
 
+/** Solo admin: marca o anula la fecha de pago registrada al técnico (`Y-m-d` o null). */
+export function patchServiceTechnicianPaid(id, payload) {
+  return api(`/services/${id}/technician-paid`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  }).then((r) => r.data)
+}
+
 const DRAFT_KEY = 'hbm_service_draft'
 const CLIENTS_KEY = 'hbm_recent_client_names'
 

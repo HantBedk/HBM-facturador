@@ -26,6 +26,8 @@ class Service extends Model
         'amount',
         'service_date',
         'status',
+        /** Marca contable interna: cuándo se registró el abono/pago al técnico (no sustituye nómina ni comprobantes). */
+        'technician_paid_at',
     ];
 
     protected function casts(): array
@@ -33,7 +35,31 @@ class Service extends Model
         return [
             'service_date' => 'date',
             'amount' => 'decimal:2',
+            'technician_paid_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Importe de referencia pagadero al técnico (coherente con ServiceResource::technician_line_total).
+     *
+     * Requiere `withCount('items')` y `withSum('items', 'technician_line_amount')` cuando se usa desde listados.
+     */
+    public function technicianReferenceTotalValue(): float
+    {
+        if ($this->relationLoaded('items') && $this->items->isNotEmpty()) {
+            return (float) $this->items->sum(fn ($i) => (float) ($i->technician_line_amount ?? 0));
+        }
+
+        $cnt = (int) ($this->items_count ?? 0);
+        $sum = $this->items_sum_technician_line_amount;
+        if ($cnt > 0 && $sum !== null) {
+            return (float) $sum;
+        }
+        if ($cnt > 0) {
+            return (float) $this->amount;
+        }
+
+        return (float) $this->amount;
     }
 
     public function catalog(): BelongsTo

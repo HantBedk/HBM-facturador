@@ -38,6 +38,10 @@ class ServiceResource extends JsonResource
             ])->values()->all()),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
+            'technician_paid_at' => $this->when(
+                $request->user()?->isAdminEquipo(),
+                fn () => $this->technician_paid_at?->toIso8601String()
+            ),
             'catalog' => $this->whenLoaded('catalog', fn () => $this->catalog ? [
                 'id' => $this->catalog->id,
                 'name' => $this->catalog->name,

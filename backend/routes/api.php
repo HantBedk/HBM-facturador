@@ -127,4 +127,5 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::get('/services/{service}', [ServiceController::class, 'show']);
     Route::put('/services/{service}', [ServiceController::class, 'update']);
     Route::patch('/services/{service}/archive', [ServiceController::class, 'archive']);
+    Route::patch('/services/{service}/technician-paid', [ServiceController::class, 'patchTechnicianPaid']);
 });
