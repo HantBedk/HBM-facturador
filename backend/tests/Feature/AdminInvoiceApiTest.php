@@ -212,6 +212,42 @@ class AdminInvoiceApiTest extends TestCase
         $this->getJson('/api/admin/invoices/'.$s['invoice']->id)->assertForbidden();
     }
 
+    public function test_admin_can_delete_borrador_invoice(): void
+    {
+        $s = $this->seedInvoiceScenario();
+        Sanctum::actingAs($s['admin']);
+
+        $this->deleteJson('/api/admin/invoices/'.$s['invoice']->id)
+            ->assertOk()
+            ->assertJsonPath('message', 'Factura eliminada.');
+
+        $this->assertDatabaseMissing('invoices', ['id' => $s['invoice']->id]);
+    }
+
+    public function test_admin_can_delete_aprobada_invoice_without_payments(): void
+    {
+        $s = $this->seedInvoiceScenario();
+        $s['invoice']->update(['status' => Invoice::STATUS_APROBADA]);
+        Sanctum::actingAs($s['admin']);
+
+        $this->deleteJson('/api/admin/invoices/'.$s['invoice']->id)->assertOk();
+
+        $this->assertDatabaseMissing('invoices', ['id' => $s['invoice']->id]);
+    }
+
+    public function test_cannot_delete_enviada_invoice(): void
+    {
+        $s = $this->seedInvoiceScenario();
+        $s['invoice']->update([
+            'status' => Invoice::STATUS_ENVIADA,
+            'sent_at' => now(),
+        ]);
+        Sanctum::actingAs($s['admin']);
+
+        $this->deleteJson('/api/admin/invoices/'.$s['invoice']->id)
+            ->assertStatus(422);
+    }
+
     public function test_store_invoice_generates_fac_code_one_per_company_per_day(): void
     {
         $tz = config('app.timezone');

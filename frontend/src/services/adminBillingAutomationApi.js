@@ -6,6 +6,7 @@ export function fetchBillingAutomationSettings() {
 
 /**
  * @param {{
+ *   current_password: string
  *   draft_generation_enabled: boolean
  *   draft_generation_day: number
  *   draft_generation_period: 'current' | 'previous'

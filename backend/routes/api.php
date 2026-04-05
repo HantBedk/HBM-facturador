@@ -104,6 +104,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::post('/admin/invoices/{invoice}/public-access-token', [AdminInvoiceController::class, 'regeneratePublicAccess']);
         Route::get('/admin/invoices/{invoice}', [AdminInvoiceController::class, 'show']);
         Route::put('/admin/invoices/{invoice}', [AdminInvoiceController::class, 'update']);
+        Route::delete('/admin/invoices/{invoice}', [AdminInvoiceController::class, 'destroy']);
     });
 
     Route::get('/empleados', [UserController::class, 'empleadosActivos'])->middleware('role:admin,super_admin');

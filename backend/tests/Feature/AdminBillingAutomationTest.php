@@ -43,6 +43,7 @@ class AdminBillingAutomationTest extends TestCase
         Sanctum::actingAs($admin);
 
         $this->putJson('/api/admin/settings/billing-automation', [
+            'current_password' => 'password',
             'draft_generation_enabled' => true,
             'draft_generation_day' => 18,
             'draft_generation_period' => 'current',
@@ -67,10 +68,26 @@ class AdminBillingAutomationTest extends TestCase
         Sanctum::actingAs($admin);
 
         $this->putJson('/api/admin/settings/billing-automation', [
+            'current_password' => 'password',
             'draft_generation_enabled' => true,
             'draft_generation_day' => 29,
             'draft_generation_period' => 'current',
         ])
             ->assertStatus(422);
+    }
+
+    public function test_rejects_wrong_current_password(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        $this->putJson('/api/admin/settings/billing-automation', [
+            'current_password' => 'mala-clave',
+            'draft_generation_enabled' => true,
+            'draft_generation_day' => 15,
+            'draft_generation_period' => 'current',
+        ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['current_password']);
     }
 }

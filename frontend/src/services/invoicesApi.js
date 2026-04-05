@@ -65,6 +65,13 @@ export function updateInvoice(id, payload) {
   }).then((r) => r.data)
 }
 
+/** Solo borrador o aprobada sin pagos. */
+export function deleteAdminInvoice(id) {
+  return api(`/admin/invoices/${id}`, {
+    method: 'DELETE',
+  })
+}
+
 export function patchInvoiceStatus(id, status) {
   return api(`/admin/invoices/${id}/status`, {
     method: 'PATCH',

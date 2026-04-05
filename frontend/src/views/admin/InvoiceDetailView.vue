@@ -1,8 +1,9 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   addInvoicePayment,
+  deleteAdminInvoice,
   deleteInvoicePayment,
   downloadInvoicePdfBlob,
   fetchAdminInvoice,
@@ -22,6 +23,7 @@ function formatDateShort(iso) {
 }
 
 const route = useRoute()
+const router = useRouter()
 const id = computed(() => route.params.id)
 
 const invoice = ref(null)
@@ -121,6 +123,18 @@ const canDeletePayment = computed(() => {
   const st = invoice.value?.status
   if (!st || !['enviada', 'parcialmente_pagada', 'pagada'].includes(st)) return false
   return (invoice.value?.payments || []).length > 0
+})
+
+/** Borrador siempre; aprobada solo si aún no hay pagos (no aplica a enviada/cobrada). */
+const canDeleteInvoice = computed(() => {
+  if (!invoice.value) return false
+  const st = invoice.value.status
+  if (st === 'borrador') return true
+  if (st === 'aprobada') {
+    const payments = invoice.value.payments || []
+    return payments.length === 0
+  }
+  return false
 })
 
 const issuedAtLabel = computed(() => formatDateShort(invoice.value?.created_at))
@@ -228,6 +242,24 @@ async function onPdfOfficialDownload() {
     actionError.value = e.message || 'No se pudo descargar el PDF.'
   }
 }
+
+async function onDeleteInvoice() {
+  const ok = await uiDialog.confirm({
+    title: 'Eliminar factura',
+    message:
+      'Se eliminará esta factura. Los servicios incluidos volverán a poder facturarse. La acción queda registrada en Configuración → Historial (quién y cuándo). No se puede deshacer.',
+    danger: true,
+    confirmLabel: 'Eliminar factura',
+  })
+  if (!ok) return
+  actionError.value = ''
+  try {
+    await deleteAdminInvoice(id.value)
+    await router.push({ name: 'admin-facturas' })
+  } catch (e) {
+    actionError.value = e.data?.message || e.message || 'No se pudo eliminar.'
+  }
+}
 </script>
 
 <template>
@@ -249,6 +281,7 @@ async function onPdfOfficialDownload() {
           <button type="button" class="btn secondary" @click="onPdfOfficialDownload">Descargar PDF</button>
         </template>
         <RouterLink v-if="canEdit" class="btn primary" :to="`/admin/facturas/${invoice.id}/editar`">Editar borrador</RouterLink>
+        <button v-if="canDeleteInvoice" type="button" class="btn danger" @click="onDeleteInvoice">Eliminar factura</button>
       </div>
     </header>
 
@@ -261,6 +294,11 @@ async function onPdfOfficialDownload() {
         <span class="pill" :data-st="invoice.status">{{ invoice.status_label }}</span>
         <span v-if="invoice.sent_at" class="muted">Enviada: {{ new Date(invoice.sent_at).toLocaleString('es-CO') }}</span>
       </div>
+
+      <p v-if="canDeleteInvoice" class="delete-hint muted small">
+        Puede eliminar esta factura si quedó mal: los servicios quedan libres para un nuevo borrador. Una vez
+        <strong>enviada al cliente</strong> o con <strong>pagos</strong>, no se borra desde aquí (queda auditoría).
+      </p>
 
       <div v-if="invoice.status !== 'borrador'" class="card">
         <h2>Consulta pública</h2>
@@ -750,6 +788,24 @@ h2 {
 .btn.secondary:hover {
   border-color: #38bdf8;
   color: #fff;
+}
+
+.btn.danger {
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #fecaca;
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.btn.danger:hover {
+  border-color: #f87171;
+  color: #fff;
+  background: rgba(220, 38, 38, 0.35);
+}
+
+.delete-hint {
+  margin: 0 0 0.75rem;
+  max-width: 44rem;
+  line-height: 1.45;
 }
 
 .preview-sheet {

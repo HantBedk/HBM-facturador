@@ -18,6 +18,9 @@ const draftGenerationPeriod = ref('current')
 /** @type {import('vue').Ref<Record<string, boolean>>} */
 const storedInDatabase = ref({})
 
+const currentPassword = ref('')
+const passwordFieldError = ref('')
+
 const dayOptions = computed(() =>
   Array.from({ length: 28 }, (_, i) => ({
     value: i + 1,
@@ -47,13 +50,16 @@ async function load() {
 async function save() {
   error.value = ''
   toast.value = ''
+  passwordFieldError.value = ''
   saving.value = true
   try {
     const r = await updateBillingAutomationSettings({
+      current_password: currentPassword.value,
       draft_generation_enabled: draftGenerationEnabled.value,
       draft_generation_day: draftGenerationDay.value,
       draft_generation_period: draftGenerationPeriod.value,
     })
+    currentPassword.value = ''
     toast.value = r.message || 'Guardado.'
     const d = r.data || {}
     draftGenerationEnabled.value = !!d.draft_generation_enabled
@@ -61,6 +67,10 @@ async function save() {
     draftGenerationPeriod.value = d.draft_generation_period === 'previous' ? 'previous' : 'current'
     storedInDatabase.value = d.stored_in_database || {}
   } catch (e) {
+    const pw = e.data?.errors?.current_password
+    if (Array.isArray(pw) && pw[0]) {
+      passwordFieldError.value = pw[0]
+    }
     error.value = e.data?.message || e.message || 'No se pudo guardar.'
   } finally {
     saving.value = false
@@ -83,9 +93,9 @@ onMounted(load)
         </p>
         <h1>Facturación automática (borradores)</h1>
         <p class="lede">
-          Defina el día del mes en que el sistema intentará crear los borradores de factura por empresa (servicios del
-          periodo aún sin facturar). El envío automático de facturas aprobadas sigue configurándose en el servidor
-          (<code class="inline">AUTOMATION_CUTOFF_*</code>).
+          Aquí solo se programa la <strong>creación automática de borradores</strong> (agrupa servicios sin facturar). El
+          envío automático de facturas ya aprobadas sigue en el servidor (<code class="inline">AUTOMATION_CUTOFF_*</code>).
+          Cada guardado exige su contraseña y queda en <strong>Configuración → Historial</strong>.
         </p>
       </div>
     </header>
@@ -120,15 +130,41 @@ onMounted(load)
       </div>
 
       <div class="field">
-        <label class="lab" for="draft-period">Periodo a incluir en el borrador</label>
+        <label class="lab" for="draft-period">¿Qué servicios entran en el borrador automático?</label>
         <select id="draft-period" v-model="draftGenerationPeriod" class="select wide">
-          <option value="current">Mes en curso (calendario)</option>
-          <option value="previous">Mes calendario anterior</option>
+          <option value="current">
+            Recomendado: fecha de servicio en el mes calendario en curso (mismo mes que «hoy»)
+          </option>
+          <option value="previous">Fecha de servicio en el mes calendario anterior (cierre del mes pasado)</option>
         </select>
+        <p class="field-hint">
+          El sistema usa la <strong>fecha del servicio</strong> (no la fecha de hoy al crear el borrador) para decidir si
+          entra en ese mes de facturación. Lo habitual es dejar
+          <strong>mes en curso</strong> para facturar lo trabajado en el mes que corre.
+        </p>
+      </div>
+
+      <div class="field password-block">
+        <label class="lab" for="admin-pw">Su contraseña para guardar cambios</label>
+        <input
+          id="admin-pw"
+          v-model="currentPassword"
+          type="password"
+          class="input-pw"
+          autocomplete="current-password"
+          placeholder="Contraseña de su usuario"
+        />
+        <p v-if="passwordFieldError" class="pw-err">{{ passwordFieldError }}</p>
+        <p class="field-hint">Evita cambios accidentales del día de generación o del periodo.</p>
       </div>
 
       <div class="actions">
-        <button type="button" class="btn primary" :disabled="saving" @click="save">
+        <button
+          type="button"
+          class="btn primary"
+          :disabled="saving || !String(currentPassword).trim()"
+          @click="save"
+        >
           {{ saving ? 'Guardando…' : 'Guardar en el sistema' }}
         </button>
       </div>
@@ -281,6 +317,29 @@ h1 {
   font-size: 0.78rem;
   color: #64748b;
   max-width: 36rem;
+}
+
+.password-block {
+  padding-top: 0.5rem;
+  margin-top: 0.5rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.input-pw {
+  width: 100%;
+  max-width: 22rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.9);
+  color: #f1f5f9;
+  font-size: 0.9rem;
+}
+
+.pw-err {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  color: #fca5a5;
 }
 
 .badge {

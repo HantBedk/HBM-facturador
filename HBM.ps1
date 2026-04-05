@@ -1,8 +1,9 @@
-# Arranque completo: Docker, hbm:sync (migrate+seed), Vite.
-#   .\HBM              → up, php artisan hbm:sync, Vite
+# Arranque: Docker, hbm:sync (migrate + login demo si users vacío; seeder completo solo si no hay empresas), Vite.
+#   .\HBM              → up, hbm:sync, Vite
 #   .\HBM -Build       → rebuild imágenes
-#   .\HBM -SoloMigrar  → up, hbm:sync sin Vite (migrate + seed; evita BD sin usuarios)
-#   migrate:fresh+datos: docker compose exec laravel php artisan hbm:sync --fresh
+#   .\HBM -SoloMigrar  → up, hbm:sync sin Vite (no ejecuta DatabaseSeeder completo si ya hay empresas)
+#   Resembrar demo completo: docker compose exec laravel php artisan hbm:sync --demo
+#   Borrar TODA la base:   docker compose exec laravel php artisan hbm:sync --fresh
 # En PowerShell, desde la raiz del repo: .\HBM
 param(
     [switch]$Build,
@@ -19,7 +20,7 @@ if ($Build) {
     docker compose up -d
 }
 
-Write-Host "Esperando MySQL: migraciones + datos iniciales (hbm:sync)..." -ForegroundColor Cyan
+Write-Host "Esperando MySQL (hbm:sync: migrate; seed completo solo si la BD no tiene empresas)..." -ForegroundColor Cyan
 Start-Sleep -Seconds 6
 docker compose exec -T laravel php artisan hbm:sync --no-interaction
 
