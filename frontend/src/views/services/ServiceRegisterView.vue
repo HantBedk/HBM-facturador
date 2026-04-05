@@ -278,13 +278,6 @@ async function onSubmit() {
 <template>
   <section :class="isEmpleadoRegistro ? 'mx-auto max-w-md pb-8' : 'page'">
     <header :class="isEmpleadoRegistro ? 'mb-6 text-center' : 'head'">
-      <RouterLink
-        v-if="isEmpleadoRegistro"
-        to="/empleado"
-        class="mb-4 inline-block text-sm font-semibold text-sky-400/90 hover:text-sky-300"
-      >
-        ← Volver al panel
-      </RouterLink>
       <h1
         :class="
           isEmpleadoRegistro

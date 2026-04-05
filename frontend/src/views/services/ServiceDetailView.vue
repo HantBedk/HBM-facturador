@@ -95,6 +95,50 @@ const summaryAmountDisplay = computed(() => {
   return a != null ? Number(a) : null
 })
 
+/** Líneas del servicio (payload multilínea). */
+const serviceItems = computed(() =>
+  Array.isArray(service.value?.items) ? service.value.items : []
+)
+
+const showLiquidacionBlock = computed(
+  () => isAdmin.value && service.value != null && serviceItems.value.length > 0
+)
+
+function numMoneyBase(v) {
+  const n = Number(v)
+  return Number.isNaN(n) ? 0 : n
+}
+
+function lineBilledAmount(it) {
+  return numMoneyBase(it.amount)
+}
+
+function lineTechnicianAmount(it) {
+  if (it.technician_line_amount != null && String(it.technician_line_amount).trim() !== '') {
+    return numMoneyBase(it.technician_line_amount)
+  }
+  return lineBilledAmount(it)
+}
+
+function lineCompanyMargin(it) {
+  return lineBilledAmount(it) - lineTechnicianAmount(it)
+}
+
+/** Totales guardados en servidor (conciliación técnico vs factura). */
+const storedBilledTotal = computed(() => numMoneyBase(service.value?.amount))
+
+const storedTechnicianTotal = computed(() => {
+  const raw = service.value?.technician_line_total
+  if (raw == null || raw === '') return null
+  const n = Number(raw)
+  return Number.isNaN(n) ? null : n
+})
+
+const companyMarginTotal = computed(() => {
+  if (storedTechnicianTotal.value == null) return null
+  return storedBilledTotal.value - storedTechnicianTotal.value
+})
+
 function validateLocal() {
   const f = editForm.value
   const errs = {}
@@ -330,6 +374,43 @@ async function onEmpleadoArchive() {
             </div>
           </article>
 
+          <article v-if="showLiquidacionBlock" class="card block">
+            <h2 class="block-title">D. Facturado vs base técnico <span class="tag">Liquidación</span></h2>
+            <p class="block-hint">
+              <strong>Factura (cliente):</strong> importe que va en la factura a la empresa.
+              <strong>Base técnico:</strong> referencia alineada con lo que manejó el técnico al registrar (sin el incremento
+              del margen). La diferencia es lo que retiene la operación antes de liquidar al empleado.
+            </p>
+            <div class="liq-table-wrap">
+              <table class="liq-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Concepto</th>
+                    <th scope="col" class="num">Factura (cliente)</th>
+                    <th scope="col" class="num">Base técnico</th>
+                    <th scope="col" class="num">Margen empresa</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="it in serviceItems" :key="it.id">
+                    <td>{{ it.label || '—' }}</td>
+                    <td class="num">{{ money(lineBilledAmount(it)) }}</td>
+                    <td class="num">{{ money(lineTechnicianAmount(it)) }}</td>
+                    <td class="num">{{ money(lineCompanyMargin(it)) }}</td>
+                  </tr>
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <th scope="row">Totales</th>
+                    <td class="num">{{ money(storedBilledTotal) }}</td>
+                    <td class="num">{{ money(storedTechnicianTotal ?? 0) }}</td>
+                    <td class="num">{{ money(companyMarginTotal ?? 0) }}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </article>
+
           <article v-if="service.photos?.length" class="card block">
             <h2 class="block-title">Evidencias</h2>
             <div class="photo-grid">
@@ -376,6 +457,31 @@ async function onEmpleadoArchive() {
             </p>
             <p class="aside-amount">
               {{ summaryAmountDisplay != null ? money(summaryAmountDisplay) : '—' }}
+            </p>
+            <p class="aside-sub muted">Valor total del servicio</p>
+            <div v-if="showLiquidacionBlock" class="aside-liq">
+              <p class="aside-liq-title">Liquidación técnico</p>
+              <p class="aside-liq-row">
+                <span class="aside-liq-k">Factura (cliente)</span>
+                <span class="aside-liq-v">{{ money(storedBilledTotal) }}</span>
+              </p>
+              <p class="aside-liq-row">
+                <span class="aside-liq-k">Base técnico</span>
+                <span class="aside-liq-v">{{ money(storedTechnicianTotal ?? 0) }}</span>
+              </p>
+              <p
+                v-if="companyMarginTotal != null && companyMarginTotal > 0.005"
+                class="aside-liq-row aside-liq-margin"
+              >
+                <span class="aside-liq-k">Margen empresa</span>
+                <span class="aside-liq-v">{{ money(companyMarginTotal) }}</span>
+              </p>
+              <p v-if="canAdminEdit" class="aside-liq-sync muted">
+                Cifras según último guardado; usa «Guardar correcciones» en B para actualizar.
+              </p>
+            </div>
+            <p v-else class="aside-liq-note muted">
+              Sin líneas detalladas en este registro; solo hay un total único (factura = referencia guardada).
             </p>
             <p class="aside-company">{{ service.company?.nombre || '—' }}</p>
           </div>
@@ -490,6 +596,105 @@ h1 {
   font-size: 1.5rem;
   font-weight: 700;
   color: #38bdf8;
+}
+
+.aside-sub {
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+}
+
+.aside-liq {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 0.82rem;
+}
+
+.aside-liq-title {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.aside-liq-row {
+  margin: 0.35rem 0 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.aside-liq-k {
+  color: #94a3b8;
+}
+
+.aside-liq-v {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #f1f5f9;
+}
+
+.aside-liq-margin .aside-liq-v {
+  color: #a7f3d0;
+}
+
+.aside-liq-sync {
+  margin: 0.6rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.aside-liq-note {
+  margin: 0.75rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.liq-table-wrap {
+  overflow-x: auto;
+  margin-top: 0.5rem;
+}
+
+.liq-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.liq-table th,
+.liq-table td {
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  text-align: left;
+}
+
+.liq-table thead th {
+  color: #94a3b8;
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.liq-table tbody td:first-child {
+  color: #e2e8f0;
+}
+
+.liq-table tfoot th,
+.liq-table tfoot td {
+  border-bottom: none;
+  padding-top: 0.75rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.liq-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .aside-company {

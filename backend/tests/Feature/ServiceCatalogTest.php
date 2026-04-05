@@ -315,7 +315,7 @@ class ServiceCatalogTest extends TestCase
         $this->assertSame(0, ServiceCatalogSuggestion::query()->where('status', ServiceCatalogSuggestion::STATUS_PENDING)->count());
     }
 
-    public function test_admin_pendientes_hides_suggestions_redundant_with_catalog(): void
+    public function test_admin_pendientes_lists_all_pending_even_if_name_overlaps_catalog(): void
     {
         $admin = User::factory()->create(['rol' => User::ROL_SUPER_ADMIN]);
         Sanctum::actingAs($admin);
@@ -335,11 +335,11 @@ class ServiceCatalogTest extends TestCase
             'status' => ServiceCatalog::STATUS_ACTIVO,
         ]);
 
-        ServiceCatalogSuggestion::query()->create([
+        $overlap = ServiceCatalogSuggestion::query()->create([
             'company_id' => $company->id,
             'user_id' => $admin->id,
             'name' => 'Mantenimiento',
-            'description' => 'Propuesta antigua duplicada.',
+            'description' => 'Propuesta que se solapa semánticamente con catálogo; el admin debe poder verla y rechazarla.',
             'suggested_price' => 95000,
             'status' => ServiceCatalogSuggestion::STATUS_PENDING,
         ]);
@@ -357,7 +357,8 @@ class ServiceCatalogTest extends TestCase
         $r->assertOk();
         $ids = collect($r->json('data'))->pluck('id')->all();
         $this->assertContains($unique->id, $ids);
-        $this->assertCount(1, $ids);
+        $this->assertContains($overlap->id, $ids);
+        $this->assertCount(2, $ids);
     }
 
     public function test_service_catalog_line_stores_list_price_even_if_client_sends_discounted_amount(): void

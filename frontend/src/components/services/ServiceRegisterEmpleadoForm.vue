@@ -126,6 +126,7 @@ function addCatalogLine(item) {
       line_description: descFromCatalog(item),
       amount: base,
       propose_catalog: false,
+      isOtherLine: false,
     }
   } else {
     row = {
@@ -135,8 +136,9 @@ function addCatalogLine(item) {
       custom_name: label,
       line_description: descFromCatalog(item),
       amount: base,
-      /** Plantilla sin id de BD: no es «Otro» explícito; no proponer al catálogo. */
-      propose_catalog: false,
+      /** Sin fila en servidor (lista orientativa): mismo criterio que «Otro» para propuesta al admin. */
+      propose_catalog: true,
+      isOtherLine: false,
     }
   }
   patch(syncTypeAndAmount([...lines.value, row]))
@@ -151,8 +153,8 @@ function addOtherLine() {
     custom_name: '',
     line_description: '',
     amount: '',
-    /** Solo líneas añadidas con «Otro…» generan propuesta de catálogo global. */
     propose_catalog: true,
+    isOtherLine: true,
   }
   patch(syncTypeAndAmount([...lines.value, row]))
   afterLineAdded()
@@ -397,16 +399,15 @@ const totalDisplay = computed(() => {
               {{
                 row.catalog_id != null
                   ? row.label
-                  : row.propose_catalog
+                  : row.isOtherLine
                     ? 'Otro — nuevo ítem'
-                    : 'Plantilla (sin catálogo en servidor)'
+                    : 'Orientativo (sin fila en catálogo servidor)'
               }}
             </p>
             <p v-if="row.catalog_id == null" class="mt-1 text-[0.7rem] text-slate-500">
               <template v-if="row.propose_catalog">
-                Al guardar se puede enviar al administrador como propuesta para el catálogo global.
+                Al guardar se envía al administrador como propuesta para el catálogo global (si no está ya cubierta por un ítem activo).
               </template>
-              <template v-else> No se genera propuesta de catálogo; elige «Otro…» en el panel si es un servicio nuevo para todos. </template>
             </p>
           </div>
           <button

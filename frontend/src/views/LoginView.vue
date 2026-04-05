@@ -24,13 +24,33 @@ const redirectTarget = computed(() => {
   return typeof r === 'string' ? r : null
 })
 
-/** Permite dominios de desarrollo sin punto (p. ej. user@intranet) y @hbm.local */
-const emailPattern = /^[^\s@]+@[^\s@]+(\.[^\s@]+)*$/
+/** Misma regla mínima que el backend (AuthController): local@dominio, Unicode con /u. */
+const emailPattern = /^[^\s@]+@[^\s@]+$/u
+
+/**
+ * Valores reales del formulario (no confiar solo en v-model: autocompletado / extensiones
+ * rellenan el DOM sin disparar actualización de Vue).
+ */
+function readCredentialsFromForm(form) {
+  if (!(form instanceof HTMLFormElement)) return null
+  const emailEl = form.querySelector('#correo')
+  const passEl = form.querySelector('#password')
+  const c = emailEl && typeof emailEl.value === 'string' ? emailEl.value.trim() : ''
+  const p = passEl && typeof passEl.value === 'string' ? passEl.value : ''
+  return { c, p }
+}
 
 function syncLoginFieldsFromDom() {
+  const form = correoInputEl.value?.form ?? passwordInputEl.value?.form
+  const fromForm = readCredentialsFromForm(form)
+  if (fromForm) {
+    correo.value = fromForm.c
+    password.value = fromForm.p
+    return
+  }
   const emailNode = correoInputEl.value
   const passNode = passwordInputEl.value
-  if (emailNode && typeof emailNode.value === 'string') correo.value = emailNode.value
+  if (emailNode && typeof emailNode.value === 'string') correo.value = emailNode.value.trim()
   if (passNode && typeof passNode.value === 'string') password.value = passNode.value
 }
 
@@ -63,9 +83,19 @@ function mapServerError(e) {
   if (e?.data?.errors) {
     const err = { ...e.data.errors }
     if (err.correo?.length) {
-      err.correo = err.correo.map((m) =>
-        String(m).includes('incorrectos') || String(m).toLowerCase().includes('invalid')
-          ? 'Correo o contraseña incorrectos.'
+      err.correo = err.correo.map((m) => {
+        const s = String(m)
+        if (s.includes('incorrectos')) return 'Correo o contraseña incorrectos.'
+        if (/formato|válid|valid|regex|correo electr/i.test(s)) {
+          return 'Revisa el formato del correo (ej. usuario@empresa.com o usuario@hbm.local).'
+        }
+        return m
+      })
+    }
+    if (err.password?.length) {
+      err.password = err.password.map((m) =>
+        String(m).toLowerCase().includes('obligator') || String(m).includes('requerid')
+          ? 'La contraseña es obligatoria.'
           : m
       )
     }
@@ -89,15 +119,18 @@ function mapServerError(e) {
 }
 
 async function onSubmit(e) {
-  if (e && e.target) {
-    const emailNode = e.target.querySelector('input[type="email"]')
-    const passNode = e.target.querySelector('input[type="password"]')
-    if (emailNode && emailNode.value) correo.value = emailNode.value
-    if (passNode && passNode.value) password.value = passNode.value
+  const form = e?.target instanceof HTMLFormElement ? e.target : null
+  const creds = readCredentialsFromForm(form)
+  if (creds) {
+    correo.value = creds.c
+    password.value = creds.p
   } else {
     syncLoginFieldsFromDom()
   }
   if (!validateLocal()) return
+
+  const correoEnviar = correo.value.trim()
+  const passwordEnviar = password.value
 
   globalError.value = ''
   fieldErrors.value = {}
@@ -106,8 +139,8 @@ async function onSubmit(e) {
   try {
     const user = await auth.login(
       {
-        correo: correo.value.trim(),
-        password: password.value,
+        correo: correoEnviar,
+        password: passwordEnviar,
         device_name: 'web',
       },
       { remember: remember.value }
@@ -199,7 +232,14 @@ async function onSubmit(e) {
           {{ globalError }}
         </p>
 
-        <form class="flex flex-col gap-5" novalidate @submit.prevent="onSubmit">
+        <form
+          class="flex flex-col gap-5"
+          method="post"
+          action="#"
+          autocomplete="on"
+          novalidate
+          @submit.prevent="onSubmit"
+        >
           <label class="block">
             <span class="mb-1.5 block text-xs font-medium text-slate-400">Correo electrónico</span>
             <div
@@ -216,7 +256,7 @@ async function onSubmit(e) {
                 name="correo"
                 ref="correoInputEl"
                 v-model="correo"
-                type="email"
+                type="text"
                 autocomplete="username"
                 inputmode="email"
                 placeholder="correo@algo.com"
