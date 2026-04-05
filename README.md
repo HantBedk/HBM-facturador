@@ -105,7 +105,9 @@ Incluye flujos completos (servicio → factura → aprobación → envío → pa
 ## Mantenimiento
 
 - Actualizar dependencias: `composer update` / `npm update` con revisión de changelog.
-- Tras cambios de esquema: `php artisan migrate`.
+- Tras cambios de esquema: `php artisan migrate` (solo aplica migraciones nuevas; **no borra** filas existentes).
+- **No uses** en una BD con datos reales: `migrate:fresh`, `migrate:refresh` ni `db:wipe` (recrean o vacían tablas). Con Docker, **no** uses `docker compose down -v` (el `-v` elimina el volumen de MySQL y pierdes todo).
+- Arranque local (PowerShell, carpeta raíz del repo): **`.\HBM`** (archivo sin extensión que llama a `HBM.ps1`). Alternativas: `.\HBM.ps1` o `HBM.cmd`. Opcional `-Build`.
 - Revisar logs (`storage/logs`) y espacio en disco de respaldos (`DB_BACKUP_RETAIN_DAYS`).
 
 ## Despliegue

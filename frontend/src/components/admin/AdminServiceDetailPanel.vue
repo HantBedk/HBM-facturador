@@ -7,6 +7,8 @@ import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 const props = defineProps({
   open: { type: Boolean, default: false },
   serviceId: { type: [Number, String], default: null },
+  /** z-index cuando el drawer se abre sobre otro overlay (p. ej. panel del dashboard). */
+  overlayZIndex: { type: Number, default: 90 },
 })
 
 const emit = defineEmits(['close'])
@@ -83,7 +85,7 @@ defineExpose({ reload })
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="drawer-root" aria-hidden="false">
+    <div v-if="open" class="drawer-root" :style="{ zIndex: overlayZIndex }" aria-hidden="false">
       <div class="drawer-backdrop" @click.self="emit('close')" />
       <aside
         class="drawer-panel"
@@ -221,7 +223,6 @@ defineExpose({ reload })
 .drawer-root {
   position: fixed;
   inset: 0;
-  z-index: 90;
   pointer-events: none;
 }
 

@@ -41,7 +41,7 @@ class AdminDashboardController extends Controller
     }
 
     /**
-     * @return array{invoiced_month: string, received_month: string, pending_collect: string, invoices_count_month: int}
+     * @return array{invoiced_month: string, received_month: string, pending_collect: string, invoices_count_month: int, services_count_month: int}
      */
     private function buildMetrics(int $year, int $month): array
     {
@@ -70,11 +70,18 @@ class AdminDashboardController extends Controller
             ->where('status', '!=', Invoice::STATUS_BORRADOR)
             ->count();
 
+        $servicesCountMonth = Service::query()
+            ->visibles()
+            ->whereYear('service_date', $year)
+            ->whereMonth('service_date', $month)
+            ->count();
+
         return [
             'invoiced_month' => $invoicedMonth,
             'received_month' => $receivedMonth,
             'pending_collect' => number_format($pendingCollect, 2, '.', ''),
             'invoices_count_month' => $invoicesCountMonth,
+            'services_count_month' => $servicesCountMonth,
         ];
     }
 

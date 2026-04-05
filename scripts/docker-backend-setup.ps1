@@ -14,8 +14,11 @@ Write-Host "Esperando a MySQL..." -ForegroundColor Cyan
 docker compose up -d mysql
 Start-Sleep -Seconds 12
 
-Write-Host "Migrando y sembrando datos..." -ForegroundColor Cyan
-docker compose run --rm laravel php artisan migrate --force --seed
+Write-Host "Migrando esquema (sin borrar datos si la BD ya existía)..." -ForegroundColor Cyan
+docker compose run --rm laravel php artisan migrate --force
+
+Write-Host "Primera vez en esta BD: ejecuta una sola vez el seed (usuarios/catálogo demo):" -ForegroundColor Yellow
+Write-Host "  docker compose exec laravel php artisan db:seed --force" -ForegroundColor Gray
 
 Write-Host "Listo. Levanta el stack con: docker compose up -d" -ForegroundColor Green
 Write-Host "API: http://localhost:8080  |  Frontend: http://localhost:5173  |  Adminer: http://localhost:8081" -ForegroundColor Green

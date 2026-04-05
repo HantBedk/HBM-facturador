@@ -1,5 +1,10 @@
 # Desarrollo: backend + MySQL + Nginx + Adminer. El frontend (Vite) corre en el host: `cd frontend && npm run dev`.
 # Build de producción del SPA: `cd frontend && npm run build` (servir estáticos con Nginx o CDN cuando corresponda).
+#
+# Base de datos: el volumen `mysql_data` conserva MySQL entre reinicios de contenedores.
+# NO uses `docker compose down -v` (la opción -v elimina volúmenes y borra todos los datos).
+# Para esquema: `php artisan migrate` (solo aplica migraciones pendientes; no borra filas).
+# Evita en datos reales: `migrate:fresh`, `migrate:refresh`, `db:wipe` (destruyen o vacían tablas).
 services:
   mysql:
     image: mysql:8.0

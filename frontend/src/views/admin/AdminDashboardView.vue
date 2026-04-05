@@ -1,8 +1,9 @@
 <script setup>
 import { onMounted, ref, computed, defineAsyncComponent } from 'vue'
-import { RouterLink } from 'vue-router'
 import { api } from '@/services/api.js'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
+import AdminDashboardPendingInvoicesPanel from '@/components/admin/AdminDashboardPendingInvoicesPanel.vue'
+import AdminDashboardServicesPanel from '@/components/admin/AdminDashboardServicesPanel.vue'
 
 const VueApexCharts = defineAsyncComponent(() => import('vue3-apexcharts'))
 
@@ -85,8 +86,39 @@ async function loadDashboard() {
   }
 }
 
+const pendingInvoicesPanelOpen = ref(false)
+const servicesPanelOpen = ref(false)
+
 onMounted(() => {
   loadDashboard()
+})
+
+function openPendingInvoicesPanel() {
+  pendingInvoicesPanelOpen.value = true
+}
+
+function closePendingInvoicesPanel() {
+  pendingInvoicesPanelOpen.value = false
+}
+
+function openServicesPanel() {
+  servicesPanelOpen.value = true
+}
+
+function closeServicesPanel() {
+  servicesPanelOpen.value = false
+}
+
+/** Facturas con posible acción (alineado con el panel lateral). */
+const pendingAttentionCount = computed(() => {
+  const c = data.value?.invoice_status_counts
+  if (!c) return null
+  return (
+    (c.borrador ?? 0) +
+    (c.aprobada ?? 0) +
+    (c.enviada ?? 0) +
+    (c.parcialmente_pagada ?? 0)
+  )
 })
 
 const metrics = computed(() => data.value?.metrics)
@@ -202,8 +234,12 @@ function getStatusClasses(status) {
           </div>
         </article>
 
-        <!-- Tarjeta 2: Servicios Realizados -->
-        <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between">
+        <!-- Tarjeta 2: Servicios Realizados (clic → panel centrado) -->
+        <button
+          type="button"
+          class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between text-left w-full min-h-[120px] transition hover:ring-2 hover:ring-blue-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50"
+          @click="openServicesPanel"
+        >
           <div class="flex items-center gap-3 mb-2">
              <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
                <!-- Gear Icon -->
@@ -212,16 +248,21 @@ function getStatusClasses(status) {
              <h3 class="text-[0.85rem] font-medium text-slate-300">Servicios Realizados (Mes)</h3>
           </div>
           <div>
-            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ recent.services?.length || 187 }}</p>
-            <p class="text-[0.75rem] font-bold text-emerald-400 flex items-center gap-1">
-              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
-              +8%
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">
+              {{ metrics?.services_count_month != null ? metrics.services_count_month : (recent.services?.length ?? '—') }}
+            </p>
+            <p class="text-[0.75rem] font-medium text-slate-400">
+              {{ data?.period?.label ? `${data.period.label} · ` : '' }}Clic para ver listado
             </p>
           </div>
-        </article>
+        </button>
 
-        <!-- Tarjeta 3: Facturas Pendientes -->
-        <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between">
+        <!-- Tarjeta 3: Facturas Pendientes (clic → panel con acciones) -->
+        <button
+          type="button"
+          class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between text-left w-full min-h-[120px] transition hover:ring-2 hover:ring-red-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
+          @click="openPendingInvoicesPanel"
+        >
           <div class="flex items-center gap-3 mb-2">
              <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-red-500/10 text-red-500">
                <!-- Clock Icon -->
@@ -231,9 +272,14 @@ function getStatusClasses(status) {
           </div>
           <div>
             <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ metrics?.pending_collect ? formatMoney(metrics.pending_collect) : '$ 12.450.000' }}</p>
-            <p class="text-[0.75rem] font-medium text-slate-400">{{ data?.invoice_status_counts?.borrador || 25 }} facturas</p>
+            <p class="text-[0.75rem] font-medium text-slate-400">
+              <template v-if="pendingAttentionCount != null">
+                {{ pendingAttentionCount }} factura{{ pendingAttentionCount === 1 ? '' : 's' }} con gestión · Clic para ver
+              </template>
+              <template v-else>Clic para ver listado y acciones</template>
+            </p>
           </div>
-        </article>
+        </button>
 
         <!-- Tarjeta 4: Facturas Pagadas -->
         <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between">
@@ -369,6 +415,20 @@ function getStatusClasses(status) {
         </div>
       </div>
     </template>
+
+    <AdminDashboardPendingInvoicesPanel
+      :open="pendingInvoicesPanelOpen"
+      @close="closePendingInvoicesPanel"
+      @changed="loadDashboard"
+    />
+
+    <AdminDashboardServicesPanel
+      :open="servicesPanelOpen"
+      :year="data?.period?.year"
+      :month="data?.period?.month"
+      :period-label="data?.period?.label || ''"
+      @close="closeServicesPanel"
+    />
   </div>
 </template>
 

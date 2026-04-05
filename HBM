@@ -1,0 +1,2 @@
+$__d = Split-Path -Parent $MyInvocation.MyCommand.Path
+& "$__d\HBM.ps1" @args
