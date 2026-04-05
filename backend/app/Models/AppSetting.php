@@ -8,22 +8,89 @@ class AppSetting extends Model
 {
     public const KEY_TECHNICIAN_CATALOG_DISCOUNT_PERCENT = 'technician_catalog_discount_percent';
 
+    public const KEY_AUTOMATION_DRAFT_GENERATION_ENABLED = 'automation_draft_generation_enabled';
+
+    public const KEY_AUTOMATION_DRAFT_GENERATION_DAY = 'automation_draft_generation_day';
+
+    public const KEY_AUTOMATION_DRAFT_PERIOD = 'automation_draft_period';
+
     protected $fillable = [
         'key',
         'value',
     ];
 
+    protected function casts(): array
+    {
+        return [
+            'value' => 'json',
+        ];
+    }
+
     public static function getFloat(string $key, float $default = 0.0): float
     {
         $row = static::query()->where('key', $key)->first();
-        if ($row === null || $row->value === '') {
+        if ($row === null || $row->value === null || $row->value === '') {
             return $default;
         }
 
         return (float) $row->value;
     }
 
+    public static function getInt(string $key, int $default): int
+    {
+        $row = static::query()->where('key', $key)->first();
+        if ($row === null || $row->value === null || $row->value === '') {
+            return $default;
+        }
+
+        return (int) $row->value;
+    }
+
+    public static function getBool(string $key, bool $default): bool
+    {
+        $row = static::query()->where('key', $key)->first();
+        if ($row === null || $row->value === null) {
+            return $default;
+        }
+
+        $v = $row->value;
+        if (is_bool($v)) {
+            return $v;
+        }
+        if (is_int($v) || is_float($v)) {
+            return ((int) $v) === 1;
+        }
+        if (is_string($v)) {
+            $s = strtolower(trim($v));
+
+            return in_array($s, ['1', 'true', 'yes', 'on'], true);
+        }
+
+        return $default;
+    }
+
+    public static function getString(string $key, string $default): string
+    {
+        $row = static::query()->where('key', $key)->first();
+        if ($row === null || $row->value === null || $row->value === '') {
+            return $default;
+        }
+
+        return (string) $row->value;
+    }
+
     public static function setValue(string $key, string $value): void
+    {
+        static::query()->updateOrCreate(
+            ['key' => $key],
+            ['value' => $value]
+        );
+    }
+
+    /**
+     * @param  mixed  $value  Escalar o estructura serializable a JSON (columna json).
+     */
+    public static function setJsonValue(string $key, mixed $value): void
     {
         static::query()->updateOrCreate(
             ['key' => $key],

@@ -12,6 +12,7 @@ const InvoiceDetailView = () => import('@/views/admin/InvoiceDetailView.vue')
 const AdminConfiguracionLayout = () => import('@/layouts/AdminConfiguracionLayout.vue')
 const AdminEmpleadoNotificacionesView = () => import('@/views/admin/AdminEmpleadoNotificacionesView.vue')
 const AdminHistorialMovimientosView = () => import('@/views/admin/AdminHistorialMovimientosView.vue')
+const AdminBillingAutomationView = () => import('@/views/admin/AdminBillingAutomationView.vue')
 const AdminEmpleadoPerfilView = () => import('@/views/admin/AdminEmpleadoPerfilView.vue')
 const EmpleadosListView = () => import('@/views/admin/EmpleadosListView.vue')
 const EmpleadoDashboardView = () => import('@/views/empleado/EmpleadoDashboardView.vue')
@@ -84,6 +85,11 @@ const routes = [
             path: 'historial',
             name: 'admin-config-historial',
             component: AdminHistorialMovimientosView,
+          },
+          {
+            path: 'facturacion-automatica',
+            name: 'admin-config-billing-automation',
+            component: AdminBillingAutomationView,
           },
         ],
       },

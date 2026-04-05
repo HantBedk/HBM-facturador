@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AdminActivityLogController;
+use App\Http\Controllers\Api\AdminBillingAutomationController;
 use App\Http\Controllers\Api\AdminCompanyController;
 use App\Http\Controllers\Api\AdminDashboardController;
 use App\Http\Controllers\Api\AdminExportController;
@@ -66,6 +67,8 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::post('/admin/users/{user}/empleado-perfil/borrar-datos-pago', [AdminEmpleadoPerfilController::class, 'clearDatosPago']);
         Route::get('/admin/settings/empleado-notificaciones', [AdminEmpleadoNotificacionSettingsController::class, 'show']);
         Route::put('/admin/settings/empleado-notificaciones', [AdminEmpleadoNotificacionSettingsController::class, 'update']);
+        Route::get('/admin/settings/billing-automation', [AdminBillingAutomationController::class, 'show']);
+        Route::put('/admin/settings/billing-automation', [AdminBillingAutomationController::class, 'update']);
 
         Route::get('/admin/service-catalog', [AdminServiceCatalogController::class, 'index']);
         Route::post('/admin/service-catalog', [AdminServiceCatalogController::class, 'store']);

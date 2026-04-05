@@ -16,6 +16,7 @@ import {
   saveServiceDraft,
 } from '@/services/servicesApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
+import { isLineDescriptionStillTemplate } from '@/utils/serviceLineDescriptionTemplate.js'
 
 const auth = useAuthStore()
 const uiDialog = useUiDialogStore()
@@ -226,6 +227,21 @@ async function onSubmit() {
   globalError.value = ''
   if (!validateBeforeSubmit()) return
 
+  if (isEmpleadoRegistro.value) {
+    const ls = Array.isArray(form.value.lines) ? form.value.lines : []
+    const anyTemplate = ls.some((row) => isLineDescriptionStillTemplate(row, catalogItems.value))
+    if (anyTemplate) {
+      const proceed = await uiDialog.confirm({
+        title: 'Descripciones sin personalizar',
+        message:
+          'Una o más líneas siguen con el texto automático del catálogo (no lo editaste). Es mejor aclarar qué trabajo hiciste en cada concepto. ¿Deseas enviar igualmente?',
+        confirmLabel: 'Enviar igual',
+        cancelLabel: 'Revisar líneas',
+      })
+      if (!proceed) return
+    }
+  }
+
   loading.value = true
   try {
     const payload = {
@@ -287,6 +303,9 @@ async function onSubmit() {
       >
         Registrar servicio
       </h1>
+      <p v-if="isEmpleadoRegistro" class="mx-auto mt-2 max-w-md text-center text-sm leading-relaxed text-slate-400">
+        Cuatro pasos: datos del cliente, conceptos del catálogo, relato de lo hecho en obra y fotos si aplica.
+      </p>
       <p v-if="!isEmpleadoRegistro" class="muted">
         Completa los datos del trabajo realizado. El código se genera al guardar (formato SERV-YYMMDDNN según la fecha del servicio).
       </p>

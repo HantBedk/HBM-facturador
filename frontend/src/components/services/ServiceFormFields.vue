@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { templateLineDescription } from '@/utils/serviceLineDescriptionTemplate.js'
 
 const props = defineProps({
   modelValue: {
@@ -32,9 +33,7 @@ function moneyShort(v) {
 }
 
 function descFromCatalog(c) {
-  const d = (c.description || '').trim()
-  if (d.length >= 8) return d
-  return `Servicio estándar: ${c.name}. Detalle del trabajo realizado según visita en sitio.`
+  return templateLineDescription(c.name, c.description)
 }
 
 function onCatalogChange(ev) {

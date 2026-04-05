@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onUnmounted, ref, useId, watch } from 'vue'
 import { SERVICE_TYPE_CATALOG } from '@/constants/serviceTypeCatalog.js'
+import { isLineDescriptionStillTemplate, templateLineDescription } from '@/utils/serviceLineDescriptionTemplate.js'
 
 const clientListId = useId()
 const photoInputId = useId()
@@ -24,10 +25,14 @@ function lineKey() {
 }
 
 function descFromCatalog(item) {
-  const d = (item.description || '').trim()
   const label = item.label || item.name
-  if (d.length >= 8) return d
-  return `Servicio estándar: ${label}. Detalle del trabajo realizado según visita en sitio.`
+  return templateLineDescription(label, item.description)
+}
+
+function lineHasTemplateOnly(idx) {
+  const row = lines.value[idx]
+  if (!row) return false
+  return isLineDescriptionStillTemplate(row, props.catalogItems)
 }
 
 watch(
@@ -239,7 +244,15 @@ const totalDisplay = computed(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-5">
+  <div class="flex flex-col gap-8">
+    <!-- Paso 1 -->
+    <section class="step-section" aria-labelledby="reg-svc-step1">
+      <h2 id="reg-svc-step1" class="step-title">
+        <span class="step-badge" aria-hidden="true">1</span>
+        Empresa y cliente
+      </h2>
+      <p class="step-lede">¿Para qué empresa fue el trabajo y quién recibió el servicio?</p>
+
     <!-- Empresa -->
     <div>
       <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -309,11 +322,22 @@ const totalDisplay = computed(() => {
       </div>
       <p v-if="fieldErrors.client_name" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.client_name[0] }}</p>
     </div>
+    </section>
+
+    <!-- Paso 2 -->
+    <section class="step-section" aria-labelledby="reg-svc-step2">
+      <h2 id="reg-svc-step2" class="step-title">
+        <span class="step-badge" aria-hidden="true">2</span>
+        Conceptos cobrados
+      </h2>
+      <p class="step-lede">
+        Añade cada trabajo desde el catálogo de la empresa o «Otro…». Cada línea debe reflejar un concepto que se factura.
+      </p>
 
     <!-- Catálogo: panel inline (no desplegable flotante) -->
     <div class="rounded-2xl border border-slate-700/60 bg-slate-900/30 p-3">
       <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Ítems del servicio <span class="text-red-400">*</span>
+        Añadir desde catálogo <span class="text-red-400">*</span>
       </label>
       <div class="flex flex-col gap-2 sm:flex-row sm:items-stretch sm:gap-2">
         <button
@@ -379,8 +403,10 @@ const totalDisplay = computed(() => {
       </p>
       <p v-if="!inner.company_id" class="mt-2 text-[0.75rem] text-amber-500/90">Primero elige empresa; luego abre «Ver catálogo» y toca cada ítem que quieras sumar.</p>
       <p v-else-if="inner.company_id" class="mt-2 text-[0.75rem] text-slate-500">
-        <template v-if="catalogItems.length">{{ catalogItems.length }} ítem(s) de tu empresa en servidor.</template>
-        <template v-else>Sin ítems en servidor para esta empresa: se muestra lista orientativa.</template>
+        <template v-if="catalogItems.length">{{ catalogItems.length }} ítem(s) en catálogo de la empresa (servidor).</template>
+        <template v-else
+          >No hay catálogo cargado para esta empresa: ves una lista orientativa; al guardar, lo nuevo puede enviarse como propuesta al administrador.</template
+        >
         Puedes tocar varios ítems seguidos sin cerrar el panel.
       </p>
       <p v-if="fieldErrors.items" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.items[0] }}</p>
@@ -427,14 +453,29 @@ const totalDisplay = computed(() => {
           class="mb-2 w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white outline-none focus:border-sky-500"
           @input="updateLine(idx, { custom_name: $event.target.value })"
         />
-        <label class="mb-1 block text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">Descripción de la línea</label>
+        <label class="mb-1 block text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500"
+          >Qué hiciste en este concepto</label
+        >
+        <p class="mb-1.5 text-[0.7rem] leading-snug text-slate-500">
+          No basta el nombre del ítem: indica trabajo real (falla, repuesto, zona, duración…).
+        </p>
         <textarea
           :value="row.line_description"
           rows="2"
           :disabled="disabled"
-          class="mb-3 w-full resize-y rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+          :class="[
+            'w-full resize-y rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2 text-sm text-white outline-none focus:border-sky-500',
+            lineHasTemplateOnly(idx) ? 'mb-1' : 'mb-3',
+          ]"
           @input="updateLine(idx, { line_description: $event.target.value })"
         />
+        <p
+          v-if="lineHasTemplateOnly(idx)"
+          class="mb-3 text-[0.7rem] font-medium text-amber-400/95"
+          role="status"
+        >
+          Sigues con el texto sugerido por el catálogo. Personalízalo antes de enviar.
+        </p>
         <label class="mb-1 block text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">Importe (COP)</label>
         <div class="relative">
           <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
@@ -455,12 +496,26 @@ const totalDisplay = computed(() => {
     <p v-if="lines.length" class="rounded-2xl border border-sky-500/25 bg-sky-500/10 px-4 py-3 text-center text-sm font-semibold text-sky-100">
       Total del servicio: {{ totalDisplay }}
     </p>
+    </section>
+
+    <!-- Paso 3 -->
+    <section class="step-section" aria-labelledby="reg-svc-step3">
+      <h2 id="reg-svc-step3" class="step-title">
+        <span class="step-badge" aria-hidden="true">3</span>
+        Relato de la visita
+      </h2>
+      <p class="step-lede">
+        Aquí va la explicación global: qué pasó en obra, cómo quedó y cualquier dato que ayude a facturar y auditar.
+      </p>
 
     <!-- Tipo de servicio (resumen editable) -->
     <div>
       <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Tipo de servicio (resumen) <span class="text-red-400">*</span>
+        Resumen en una línea <span class="text-red-400">*</span>
       </label>
+      <p class="mb-2 text-[0.75rem] leading-relaxed text-slate-500">
+        Se arma solo con los nombres de los ítems; puedes acortarlo o ajustarlo para que se entienda de un vistazo.
+      </p>
       <input
         :value="inner.service_type"
         type="text"
@@ -474,18 +529,30 @@ const totalDisplay = computed(() => {
     <!-- Descripción general -->
     <div>
       <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Descripción general <span class="text-red-400">*</span>
+        Qué se hizo en obra <span class="text-red-400">*</span>
       </label>
+      <p class="mb-2 text-[0.75rem] leading-relaxed text-slate-500">
+        Ej.: falla reportada, diagnóstico, repuestos usados, pruebas, tiempo en sitio, persona de contacto, pendientes.
+      </p>
       <textarea
         :value="inner.description"
         rows="4"
-        placeholder="Resumen del trabajo realizado (visita, alcance…)"
+        placeholder="Ej.: Cliente reportó fuga en línea fría. Se reemplazó empaque de servicio, se purgó circuito y se dejó en operación. Contacto: nombre y teléfono."
         :disabled="disabled"
         class="w-full resize-y rounded-2xl border border-slate-700/90 bg-[#141a22] px-4 py-3.5 text-[0.9375rem] text-white placeholder:text-slate-600 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
         @input="patch({ description: $event.target.value })"
       />
       <p v-if="fieldErrors.description" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.description[0] }}</p>
     </div>
+    </section>
+
+    <!-- Paso 4 -->
+    <section class="step-section" aria-labelledby="reg-svc-step4">
+      <h2 id="reg-svc-step4" class="step-title">
+        <span class="step-badge" aria-hidden="true">4</span>
+        Fecha y evidencias
+      </h2>
+      <p class="step-lede">La fecha es la del día de registro. Las fotos ayudan a respaldar el trabajo (opcional).</p>
 
     <!-- Fecha del servicio (solo lectura) -->
     <div>
@@ -563,13 +630,61 @@ const totalDisplay = computed(() => {
         </li>
       </ul>
     </div>
+    </section>
 
     <button
       type="submit"
-      class="mt-2 w-full rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 py-4 text-base font-bold text-white shadow-lg shadow-sky-500/25 transition hover:brightness-110 active:scale-[0.99] disabled:opacity-50"
+      class="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 py-4 text-base font-bold text-white shadow-lg shadow-sky-500/25 transition hover:brightness-110 active:scale-[0.99] disabled:opacity-50"
       :disabled="disabled"
     >
       {{ disabled ? 'Guardando…' : 'Guardar servicio' }}
     </button>
   </div>
 </template>
+
+<style scoped>
+.step-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.35);
+}
+
+.step-section:last-of-type {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.step-title {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  letter-spacing: 0.02em;
+}
+
+.step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  background: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.step-lede {
+  margin: -0.25rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #94a3b8;
+}
+</style>
