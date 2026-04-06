@@ -796,8 +796,9 @@ async function submitDeleteCompanyModal() {
           Clientes del sistema. Solo las activas aparecen al registrar servicios. Solo se puede eliminar una empresa si no
           tiene servicios ni ítems de catálogo asociados (las facturas se eliminan en cascada si aplica). Para eliminar debe
           confirmar escribiendo la sigla de factura.
-          Pulse el nombre para ver facturas, el listado de servicios fijos mensuales, servicios registrados y métricas del mes.
-          Para <strong>añadir</strong> un cargo fijo use el ícono de calendario en <strong>Acciones</strong>.
+          Pulse el nombre para ver facturas, servicios fijos, servicios registrados y métricas. Los cargos fijos mensuales se
+          gestionan con el ícono de calendario en <strong>Acciones</strong> o con <strong>Gestionar todo</strong> dentro del
+          panel de la empresa (listado, alta, edición y baja en una sola ventana).
         </p>
       </div>
     </header>
@@ -2161,6 +2162,15 @@ h1 {
 }
 
 .recurring-section-title {
+  margin-bottom: 0;
+}
+
+.recurring-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
   margin-bottom: 0.35rem;
 }
 
@@ -2228,7 +2238,107 @@ h1 {
 }
 
 .recurring-modal {
-  max-width: 480px;
+  width: 100%;
+  max-width: min(760px, 98vw);
+  max-height: 92vh;
+  overflow-y: auto;
+  margin: 0;
+}
+
+.recurring-modal-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin-bottom: 0.25rem;
+}
+
+.recurring-modal-title-main {
+  margin: 0;
+  flex: 1 1 12rem;
+  font-size: 1.12rem;
+}
+
+.recurring-modal-close-top {
+  flex-shrink: 0;
+}
+
+.recurring-modal-lede {
+  margin: 0 0 0.85rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.recurring-modal-empty {
+  margin-bottom: 0.65rem;
+}
+
+.recurring-modal-table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  margin-bottom: 0.85rem;
+}
+
+.recurring-modal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.recurring-modal-table th,
+.recurring-modal-table td {
+  padding: 0.5rem 0.55rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.recurring-modal-table th {
+  color: #94a3b8;
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.recurring-modal-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.recurring-modal-detail {
+  max-width: 14rem;
+}
+
+.recurring-modal-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.recurring-modal-toolbar {
+  margin-bottom: 0.75rem;
+}
+
+.recurring-modal-form-block {
+  margin-top: 0.25rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.recurring-form-block-title {
+  margin: 0 0 0.65rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.recurring-modal-footer {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
 }
 
 textarea.input {
