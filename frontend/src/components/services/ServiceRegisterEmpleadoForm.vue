@@ -1,6 +1,5 @@
 <script setup>
 import { computed, onUnmounted, ref, useId, watch } from 'vue'
-import { SERVICE_TYPE_CATALOG } from '@/constants/serviceTypeCatalog.js'
 import { isLineDescriptionStillTemplate, templateLineDescription } from '@/utils/serviceLineDescriptionTemplate.js'
 
 const clientListId = useId()
@@ -206,19 +205,17 @@ function dismissCatalogHint(index) {
   updateLine(index, { catalog_hint_dismissed: true })
 }
 
-const effectiveTypeCatalog = computed(() => {
-  if (props.catalogItems.length > 0) {
-    return props.catalogItems.map((c) => ({
-      id: `db-${c.id}`,
-      label: c.name,
-      basePrice: Number(c.base_price),
-      description: c.description,
-      catalog_id: c.id,
-      isOther: false,
-    }))
-  }
-  return SERVICE_TYPE_CATALOG.map((c) => ({ ...c, catalog_id: null, isOther: false }))
-})
+/** Solo ítems que devuelve el servidor. Si el admin vació el catálogo, no se muestra lista orientativa local. */
+const effectiveTypeCatalog = computed(() =>
+  props.catalogItems.map((c) => ({
+    id: `db-${c.id}`,
+    label: c.name,
+    basePrice: Number(c.base_price),
+    description: c.description,
+    catalog_id: c.id,
+    isOther: false,
+  }))
+)
 
 const catalogWithOther = computed(() => [
   ...effectiveTypeCatalog.value,
@@ -432,8 +429,8 @@ const totalDisplay = computed(() => {
       </p>
       <p v-if="!inner.company_id" class="mt-2 text-[0.75rem] text-amber-500/90">Primero elige empresa; luego abre «Ver catálogo» y toca cada ítem que quieras sumar.</p>
       <p v-else-if="inner.company_id" class="mt-2 text-[0.75rem] text-slate-500">
-        <template v-if="catalogItems.length">{{ catalogItems.length }} ítem(s) en catálogo de la empresa (servidor).</template>
-        <template v-else>Lista orientativa local: crea la línea y completa nombre, descripción e importe.</template>
+        <template v-if="catalogItems.length">{{ catalogItems.length }} ítem(s) en catálogo (definidos por administración).</template>
+        <template v-else>Sin ítems en catálogo: use solo «Otro…» y complete nombre del concepto, descripción e importe.</template>
         Puedes tocar varios ítems seguidos sin cerrar el panel.
       </p>
       <p v-if="fieldErrors.items" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.items[0] }}</p>

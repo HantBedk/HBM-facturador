@@ -56,6 +56,7 @@ class ServiceCatalogTest extends TestCase
 
         $this->getJson('/api/service-catalog/active')
             ->assertOk()
+            ->assertHeader('Cache-Control', 'private, no-store, must-revalidate')
             ->assertJsonCount(1, 'data');
     }
 

@@ -4,8 +4,10 @@ namespace Tests\Feature;
 
 use App\Models\AppSetting;
 use App\Models\Company;
+use App\Models\CompanyRecurringService;
 use App\Models\Invoice;
 use App\Models\Service;
+use App\Models\ServiceCatalog;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -256,5 +258,53 @@ class BillingGenerateDraftInvoicesTest extends TestCase
         $this->assertNotNull($inv);
         $this->assertSame(2, (int) $inv->period_month);
         $this->assertSame(2026, (int) $inv->period_year);
+    }
+
+    public function test_creates_draft_from_recurring_templates_when_no_field_services(): void
+    {
+        config([
+            'automation.draft_generation_enabled' => true,
+            'automation.draft_generation_day' => 28,
+            'automation.draft_generation_period' => 'current',
+        ]);
+
+        $tz = config('app.timezone');
+        Carbon::setTestNow(Carbon::parse('2026-03-28 10:00:00', $tz));
+
+        User::factory()->create(['rol' => User::ROL_ADMIN, 'estado' => User::ESTADO_ACTIVO]);
+
+        $company = Company::query()->create([
+            'nombre' => 'Empresa Recurrente',
+            'factura_sigla' => 'REC',
+            'nit' => '900111444-1',
+            'estado' => Company::ESTADO_ACTIVO,
+        ]);
+
+        $catalog = ServiceCatalog::query()->create([
+            'name' => 'Internet dedicado',
+            'description' => null,
+            'base_price' => 0,
+            'status' => ServiceCatalog::STATUS_ACTIVO,
+        ]);
+
+        CompanyRecurringService::query()->create([
+            'company_id' => $company->id,
+            'catalog_id' => $catalog->id,
+            'service_type' => null,
+            'description' => 'Cargo mensual membresía',
+            'amount' => 125000.5,
+            'is_active' => true,
+            'sort_order' => 0,
+        ]);
+
+        Artisan::call('billing:generate-draft-invoices');
+
+        $this->assertSame(1, Invoice::query()->count());
+        $inv = Invoice::query()->first();
+        $this->assertSame(Invoice::STATUS_BORRADOR, $inv->status);
+        $this->assertSame(1, $inv->services()->count());
+        $svc = $inv->services()->first();
+        $this->assertNotNull($svc->recurring_service_id);
+        $this->assertSame('125000.50', number_format((float) $svc->amount, 2, '.', ''));
     }
 }

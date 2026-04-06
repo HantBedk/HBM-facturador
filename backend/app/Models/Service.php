@@ -28,6 +28,8 @@ class Service extends Model
         'status',
         /** Marca contable interna: cuándo se registró el abono/pago al técnico (no sustituye nómina ni comprobantes). */
         'technician_paid_at',
+        /** Origen plantilla mensual (servicio fijo); null si lo cargó un técnico. */
+        'recurring_service_id',
     ];
 
     protected function casts(): array
@@ -65,6 +67,11 @@ class Service extends Model
     public function catalog(): BelongsTo
     {
         return $this->belongsTo(ServiceCatalog::class, 'catalog_id');
+    }
+
+    public function recurringTemplate(): BelongsTo
+    {
+        return $this->belongsTo(CompanyRecurringService::class, 'recurring_service_id');
     }
 
     public function company(): BelongsTo

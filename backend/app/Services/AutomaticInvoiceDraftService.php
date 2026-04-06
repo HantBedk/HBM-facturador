@@ -15,6 +15,7 @@ class AutomaticInvoiceDraftService
         private InvoiceCodeGenerator $codes,
         private PanelNotificationDispatcher $dispatcher,
         private AutomationSettings $automation,
+        private CompanyRecurringInvoiceLinesService $recurringLines,
     ) {}
 
     /**
@@ -61,6 +62,21 @@ class AutomaticInvoiceDraftService
                 $candidates,
                 fn (int $id) => ! in_array($id, $blockedIds, true)
             ));
+
+            try {
+                $recurringIds = $this->recurringLines->ensureServicesForPeriod($company, $year, $month, $start, $end);
+            } catch (\Throwable $e) {
+                report($e);
+                $recurringIds = [];
+            }
+
+            $serviceIds = array_values(array_unique(array_merge(
+                $serviceIds,
+                array_values(array_filter(
+                    $recurringIds,
+                    fn (int $id) => ! in_array($id, $blockedIds, true)
+                ))
+            )));
 
             if ($serviceIds === []) {
                 continue;
