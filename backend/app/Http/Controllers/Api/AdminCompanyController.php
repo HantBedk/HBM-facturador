@@ -8,7 +8,6 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\Service;
-use App\Models\ServiceCatalog;
 use App\Models\ServiceCatalogSuggestion;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -122,9 +121,6 @@ class AdminCompanyController extends Controller
         $blockers = [];
         if ($company->services()->exists()) {
             $blockers[] = 'tiene servicios registrados';
-        }
-        if (ServiceCatalog::query()->where('company_id', $company->id)->exists()) {
-            $blockers[] = 'tiene ítems en el catálogo de servicios';
         }
         if (ServiceCatalogSuggestion::query()->where('company_id', $company->id)->exists()) {
             $blockers[] = 'tiene propuestas de catálogo asociadas';

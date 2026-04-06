@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import {
   fetchBillingAutomationSettings,
@@ -18,8 +18,10 @@ const draftGenerationPeriod = ref('current')
 /** @type {import('vue').Ref<Record<string, boolean>>} */
 const storedInDatabase = ref({})
 
-const currentPassword = ref('')
-const passwordFieldError = ref('')
+const passwordModalOpen = ref(false)
+const modalPassword = ref('')
+const modalPasswordError = ref('')
+const modalPwInputRef = ref(null)
 
 const dayOptions = computed(() =>
   Array.from({ length: 28 }, (_, i) => ({
@@ -47,19 +49,42 @@ async function load() {
   }
 }
 
-async function save() {
+function openSavePasswordModal() {
+  error.value = ''
+  modalPassword.value = ''
+  modalPasswordError.value = ''
+  passwordModalOpen.value = true
+  nextTick(() => {
+    modalPwInputRef.value?.focus?.()
+  })
+}
+
+function closeSavePasswordModal() {
+  if (saving.value) return
+  passwordModalOpen.value = false
+  modalPassword.value = ''
+  modalPasswordError.value = ''
+}
+
+async function confirmSaveWithPassword() {
   error.value = ''
   toast.value = ''
-  passwordFieldError.value = ''
+  modalPasswordError.value = ''
+  const pw = String(modalPassword.value).trim()
+  if (!pw) {
+    modalPasswordError.value = 'Indique su contraseña para confirmar.'
+    return
+  }
   saving.value = true
   try {
     const r = await updateBillingAutomationSettings({
-      current_password: currentPassword.value,
+      current_password: pw,
       draft_generation_enabled: draftGenerationEnabled.value,
       draft_generation_day: draftGenerationDay.value,
       draft_generation_period: draftGenerationPeriod.value,
     })
-    currentPassword.value = ''
+    modalPassword.value = ''
+    passwordModalOpen.value = false
     toast.value = r.message || 'Guardado.'
     const d = r.data || {}
     draftGenerationEnabled.value = !!d.draft_generation_enabled
@@ -67,9 +92,9 @@ async function save() {
     draftGenerationPeriod.value = d.draft_generation_period === 'previous' ? 'previous' : 'current'
     storedInDatabase.value = d.stored_in_database || {}
   } catch (e) {
-    const pw = e.data?.errors?.current_password
-    if (Array.isArray(pw) && pw[0]) {
-      passwordFieldError.value = pw[0]
+    const pwe = e.data?.errors?.current_password
+    if (Array.isArray(pwe) && pwe[0]) {
+      modalPasswordError.value = pwe[0]
     }
     error.value = e.data?.message || e.message || 'No se pudo guardar.'
   } finally {
@@ -81,7 +106,19 @@ function usingDb(key) {
   return !!storedInDatabase.value[key]
 }
 
+function onDocumentEscape(ev) {
+  if (ev.key !== 'Escape' || !passwordModalOpen.value || saving.value) return
+  ev.preventDefault()
+  closeSavePasswordModal()
+}
+
+watch(passwordModalOpen, (open) => {
+  if (open) document.addEventListener('keydown', onDocumentEscape)
+  else document.removeEventListener('keydown', onDocumentEscape)
+})
+
 onMounted(load)
+onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
 </script>
 
 <template>
@@ -95,7 +132,8 @@ onMounted(load)
         <p class="lede">
           Aquí solo se programa la <strong>creación automática de borradores</strong> (agrupa servicios sin facturar). El
           envío automático de facturas ya aprobadas sigue en el servidor (<code class="inline">AUTOMATION_CUTOFF_*</code>).
-          Cada guardado exige su contraseña y queda en <strong>Configuración → Historial</strong>.
+          Al pulsar <strong>Guardar en el sistema</strong> se pedirá su contraseña; el cambio queda en
+          <strong>Configuración → Historial</strong>.
         </p>
       </div>
     </header>
@@ -144,31 +182,48 @@ onMounted(load)
         </p>
       </div>
 
-      <div class="field password-block">
-        <label class="lab" for="admin-pw">Su contraseña para guardar cambios</label>
-        <input
-          id="admin-pw"
-          v-model="currentPassword"
-          type="password"
-          class="input-pw"
-          autocomplete="current-password"
-          placeholder="Contraseña de su usuario"
-        />
-        <p v-if="passwordFieldError" class="pw-err">{{ passwordFieldError }}</p>
-        <p class="field-hint">Evita cambios accidentales del día de generación o del periodo.</p>
-      </div>
-
       <div class="actions">
-        <button
-          type="button"
-          class="btn primary"
-          :disabled="saving || !String(currentPassword).trim()"
-          @click="save"
-        >
-          {{ saving ? 'Guardando…' : 'Guardar en el sistema' }}
+        <button type="button" class="btn primary" :disabled="saving" @click="openSavePasswordModal">
+          Guardar en el sistema
         </button>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="passwordModalOpen"
+        class="modal-backdrop"
+        role="presentation"
+        @click.self="closeSavePasswordModal"
+      >
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="billing-save-pw-title">
+          <h2 id="billing-save-pw-title" class="modal-title">Confirmar guardado</h2>
+          <p class="modal-lede">
+            Introduzca la contraseña de su usuario administrador para aplicar los cambios en la facturación automática.
+          </p>
+          <label class="lab" for="billing-modal-pw">Contraseña</label>
+          <input
+            id="billing-modal-pw"
+            ref="modalPwInputRef"
+            v-model="modalPassword"
+            type="password"
+            class="input-pw"
+            autocomplete="current-password"
+            placeholder="Contraseña de su usuario"
+            @keydown.enter.prevent="confirmSaveWithPassword"
+          />
+          <p v-if="modalPasswordError" class="pw-err">{{ modalPasswordError }}</p>
+          <div class="modal-actions">
+            <button type="button" class="btn secondary" :disabled="saving" @click="closeSavePasswordModal">
+              Cancelar
+            </button>
+            <button type="button" class="btn primary" :disabled="saving" @click="confirmSaveWithPassword">
+              {{ saving ? 'Guardando…' : 'Confirmar y guardar' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </section>
 </template>
 
@@ -319,12 +374,6 @@ h1 {
   max-width: 36rem;
 }
 
-.password-block {
-  padding-top: 0.5rem;
-  margin-top: 0.5rem;
-  border-top: 1px solid rgba(148, 163, 184, 0.12);
-}
-
 .input-pw {
   width: 100%;
   max-width: 22rem;
@@ -378,6 +427,12 @@ h1 {
   color: #fff;
 }
 
+.btn.secondary {
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #e2e8f0;
+  background: transparent;
+}
+
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -389,5 +444,50 @@ h1 {
 
 .pad {
   padding: 1rem;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 1.25rem 1.35rem;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.98);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+}
+
+.modal-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+  color: #f8fafc;
+}
+
+.modal-lede {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: #94a3b8;
+  line-height: 1.45;
+}
+
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  margin-top: 1.15rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
 }
 </style>

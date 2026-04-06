@@ -10,6 +10,8 @@ const props = defineProps({
   fieldErrors: { type: Object, default: () => ({}) },
   disabled: { type: Boolean, default: false },
   readonly: { type: Boolean, default: false },
+  /** Oculta el bloque de descripción global (p. ej. empleado con líneas: el detalle va por concepto). */
+  hideDescription: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -93,7 +95,7 @@ function onCatalogChange(ev) {
       <small v-if="fieldErrors.service_type" class="err">{{ fieldErrors.service_type[0] }}</small>
     </label>
 
-    <label class="field wide">
+    <label v-if="!hideDescription" class="field wide">
       <span>Descripción <abbr title="obligatorio">*</abbr></span>
       <textarea
         :value="inner.description"

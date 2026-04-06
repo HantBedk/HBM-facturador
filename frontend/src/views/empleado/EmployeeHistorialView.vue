@@ -52,7 +52,7 @@ const {
     description: (s) => s.description || '',
     amount: (s) => Number(s.amount) || 0,
   },
-  { initialKey: 'service_date', initialDir: 'desc' }
+  { initialKey: 'code', initialDir: 'desc' }
 )
 
 const detailBase = computed(() => (isAdmin.value ? '/admin/servicios' : '/empleado/servicio'))
@@ -429,8 +429,13 @@ function serviceTypeClass(tipo) {
           <article class="kpi-card">
             <h3 class="kpi-lbl">Día más activo</h3>
             <p v-if="summary?.busiest_day" class="kpi-val kpi-val--sm">
-              {{ formatDate(summary.busiest_day.date) }}
-              <span class="kpi-sub">({{ summary.busiest_day.services_count }})</span>
+              <template v-if="isAdmin">
+                {{ formatDate(summary.busiest_day.date) }}
+                <span class="kpi-sub">({{ summary.busiest_day.services_count }})</span>
+              </template>
+              <template v-else>
+                <span class="kpi-sub">{{ summary.busiest_day.services_count }} servicios (día de mayor carga)</span>
+              </template>
             </p>
             <p v-else class="kpi-val kpi-val--muted">—</p>
           </article>
@@ -445,7 +450,7 @@ function serviceTypeClass(tipo) {
             <table class="data-table">
               <thead>
                 <tr>
-                  <th scope="col" :aria-sort="histSvcAriaSort('service_date')">
+                  <th v-if="isAdmin" scope="col" :aria-sort="histSvcAriaSort('service_date')">
                     <button type="button" class="th-sort" @click="toggleHistorialSvcSort('service_date')">
                       Fecha<span class="sort-ind" aria-hidden="true">{{ histSvcSortInd('service_date') }}</span>
                     </button>
@@ -480,7 +485,7 @@ function serviceTypeClass(tipo) {
               </thead>
               <tbody>
                 <tr v-for="s in sortedHistorialServices" :key="s.id">
-                  <td>{{ formatDate(s.service_date) }}</td>
+                  <td v-if="isAdmin">{{ formatDate(s.service_date) }}</td>
                   <td class="mono">{{ s.code }}</td>
                   <td>{{ s.company_name || '—' }}</td>
                   <td>

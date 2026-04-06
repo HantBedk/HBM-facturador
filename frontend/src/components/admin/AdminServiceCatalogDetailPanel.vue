@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { fetchAdminServiceCatalogItem } from '@/services/servicesApi.js'
 
 const props = defineProps({
@@ -54,12 +54,6 @@ watch(
     await reload()
   }
 )
-
-const ambitoLabel = computed(() => {
-  if (!item.value) return '—'
-  if (item.value.company_id == null) return 'Global (todas las empresas)'
-  return item.value.company?.nombre || `Empresa #${item.value.company_id}`
-})
 
 defineExpose({ reload })
 </script>
@@ -123,7 +117,6 @@ defineExpose({ reload })
                 </template>
                 <template v-else> Usa el porcentaje global de la pestaña «Importar y precios» del catálogo. </template>
               </p>
-              <p><span class="label">Ámbito</span> {{ ambitoLabel }}</p>
               <p class="muted small">
                 Creado: {{ formatDateShort(item.created_at) }} · Actualizado: {{ formatDateShort(item.updated_at) }}
               </p>

@@ -261,10 +261,6 @@ async function onEmpleadoArchive() {
               <dd class="cap">{{ service.status }}</dd>
             </div>
             <div>
-              <dt>Fecha del servicio</dt>
-              <dd>{{ service.service_date }}</dd>
-            </div>
-            <div>
               <dt>Valor</dt>
               <dd>{{ money(service.amount) }}</dd>
             </div>
@@ -287,7 +283,19 @@ async function onEmpleadoArchive() {
               <dt>Referencia catálogo</dt>
               <dd>{{ service.catalog.name }}</dd>
             </div>
-            <div class="wide">
+            <div v-if="serviceItems.length" class="wide">
+              <dt>Conceptos</dt>
+              <dd>
+                <ul class="emp-items">
+                  <li v-for="it in serviceItems" :key="it.id" class="emp-item">
+                    <p class="emp-item-label">{{ it.label || '—' }}</p>
+                    <p class="pre emp-item-desc">{{ it.line_description || '—' }}</p>
+                    <p class="emp-item-amt">{{ money(lineBilledAmount(it)) }}</p>
+                  </li>
+                </ul>
+              </dd>
+            </div>
+            <div v-else class="wide">
               <dt>Descripción</dt>
               <dd class="pre">{{ service.description }}</dd>
             </div>
@@ -825,6 +833,44 @@ dd {
 
 .pre {
   white-space: pre-wrap;
+}
+
+.emp-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.emp-item {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.emp-item-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.emp-item-desc {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+}
+
+.emp-item-amt {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #7dd3fc;
 }
 
 .cap {

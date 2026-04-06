@@ -66,7 +66,6 @@ class AdminServiceCatalogSuggestionController extends Controller
 
         $dup = ServiceCatalog::query()
             ->where('name', $name)
-            ->whereNull('company_id')
             ->exists();
         if ($dup) {
             throw ValidationException::withMessages([
@@ -76,7 +75,6 @@ class AdminServiceCatalogSuggestionController extends Controller
 
         DB::transaction(function () use ($service_catalog_suggestion, $name, $description, $basePrice) {
             $cat = ServiceCatalog::query()->create([
-                'company_id' => null,
                 'name' => $name,
                 'description' => $description,
                 'base_price' => $basePrice,

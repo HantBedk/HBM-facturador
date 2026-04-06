@@ -38,6 +38,12 @@ const canEdit = computed(
   () => service.value && !service.value.invoiced && service.value.status !== 'eliminado'
 )
 
+const serviceLinesCount = computed(() =>
+  Array.isArray(service.value?.items) ? service.value.items.length : 0
+)
+
+const hideGlobalDescription = computed(() => !isAdmin.value && serviceLinesCount.value > 0)
+
 function money(v) {
   const n = Number(v)
   if (Number.isNaN(n)) return '—'
@@ -85,8 +91,7 @@ function validateLocal() {
 onMounted(async () => {
   try {
     service.value = await fetchService(route.params.id)
-    const cid = service.value?.company_id
-    catalogItems.value = cid ? await fetchServiceCatalogActive(cid) : []
+    catalogItems.value = await fetchServiceCatalogActive()
   } catch (e) {
     globalError.value = e.data?.message || e.message || 'No se pudo cargar.'
     catalogItems.value = []
@@ -145,7 +150,9 @@ async function onSubmit() {
           {{
             isAdmin
               ? 'Cliente, tipo, descripción y valor. Código, fecha, empresa y técnico no se alteran.'
-              : 'Puedes corregir cliente, tipo, descripción y valor si te equivocaste al registrar. No debe estar facturado.'
+              : hideGlobalDescription
+                ? 'Puedes corregir cliente, tipo y valor si te equivocaste al registrar. El detalle por concepto no se edita aquí. No debe estar facturado.'
+                : 'Puedes corregir cliente, tipo, descripción y valor si te equivocaste al registrar. No debe estar facturado.'
           }}
         </p>
       </div>
@@ -169,7 +176,7 @@ async function onSubmit() {
             <dt>Código</dt>
             <dd class="mono">{{ service.code }}</dd>
           </div>
-          <div>
+          <div v-if="isAdmin">
             <dt>Fecha</dt>
             <dd>{{ formatDateLong(service.service_date) }}</dd>
           </div>
@@ -195,6 +202,7 @@ async function onSubmit() {
           :catalog-items="catalogItems"
           :field-errors="fieldErrors"
           :disabled="saving"
+          :hide-description="hideGlobalDescription"
         />
         <div class="actions">
           <RouterLink class="btn secondary" :to="detailPath">Cancelar</RouterLink>

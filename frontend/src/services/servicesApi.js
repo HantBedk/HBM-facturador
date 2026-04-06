@@ -4,11 +4,9 @@ export function fetchCompanies() {
   return api('/companies').then((r) => r.data)
 }
 
-/** Catálogo activo para una empresa (ítems globales + de esa empresa). */
-export function fetchServiceCatalogActive(companyId) {
-  const id = Number(companyId)
-  if (!id) return Promise.resolve([])
-  return api(`/service-catalog/active?company_id=${encodeURIComponent(id)}`).then((r) => r.data ?? [])
+/** Catálogo activo (único listado para todas las empresas). */
+export function fetchServiceCatalogActive() {
+  return api('/service-catalog/active').then((r) => r.data ?? [])
 }
 
 /** @param {Record<string, string|number>} [params] */
@@ -60,16 +58,12 @@ export function bulkDestroyServiceCatalogItems(ids) {
 }
 
 /**
- * Importación masiva desde Excel (.xlsx, .xls) o CSV (UTF-8).
+ * Importación masiva desde Excel (.xlsx, .xls) o CSV (UTF-8). Siempre catálogo global.
  * @param {File} file
- * @param {string|number|null|undefined} companyId vacío = catálogo global
  */
-export function importServiceCatalogFromSpreadsheet(file, companyId) {
+export function importServiceCatalogFromSpreadsheet(file) {
   const fd = new FormData()
   fd.append('file', file)
-  if (companyId !== '' && companyId != null) {
-    fd.append('company_id', String(companyId))
-  }
   return api('/admin/service-catalog/import', {
     method: 'POST',
     body: fd,
@@ -85,30 +79,6 @@ export function updateTechnicianCatalogDiscount(technician_catalog_discount_perc
   return api('/admin/service-catalog/technician-pricing', {
     method: 'PUT',
     body: JSON.stringify({ technician_catalog_discount_percent }),
-  }).then((r) => r.data)
-}
-
-/** @param {Record<string, string|number|boolean>} [params] */
-export function fetchServiceCatalogSuggestions(params = {}) {
-  const qs = new URLSearchParams()
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== '' && v !== null && v !== undefined) qs.set(k, String(v))
-  })
-  const s = qs.toString()
-  return api(`/admin/service-catalog-suggestions${s ? `?${s}` : ''}`)
-}
-
-export function approveServiceCatalogSuggestion(id, payload = {}) {
-  return api(`/admin/service-catalog-suggestions/${id}/approve`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  }).then((r) => r.data)
-}
-
-export function rejectServiceCatalogSuggestion(id) {
-  return api(`/admin/service-catalog-suggestions/${id}/reject`, {
-    method: 'POST',
-    body: JSON.stringify({}),
   }).then((r) => r.data)
 }
 
@@ -143,7 +113,6 @@ export function createService(payload, photoFiles = []) {
     fd.append('service_type', String(payload.service_type ?? ''))
     fd.append('description', String(payload.description ?? ''))
     fd.append('amount', String(payload.amount))
-    fd.append('service_date', String(payload.service_date ?? ''))
     if (hasItems) {
       fd.append('items', JSON.stringify(payload.items))
     } else if (payload.catalog_id != null && payload.catalog_id !== '') {
@@ -158,6 +127,7 @@ export function createService(payload, photoFiles = []) {
     }).then((r) => r.data)
   }
   const body = { ...payload }
+  delete body.service_date
   if (body.catalog_id === '' || body.catalog_id == null) delete body.catalog_id
   if (!hasItems) delete body.items
   return api('/services', {

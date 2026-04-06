@@ -7,6 +7,7 @@ use App\Models\Invoice;
 use App\Models\Service;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -17,8 +18,16 @@ class FullSystemFlowTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
+
     public function test_flujo_completo_admin_empleado_y_consulta_publica(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-04-10 11:00:00', config('app.timezone')));
+
         $company = Company::query()->create([
             'nombre' => 'Empresa Flujo',
             'factura_sigla' => 'EFL',
@@ -36,7 +45,6 @@ class FullSystemFlowTest extends TestCase
             'service_type' => 'Tipo',
             'description' => 'Descripción del servicio de prueba con texto suficiente.',
             'amount' => 250000.5,
-            'service_date' => '2026-04-10',
         ]);
         $svc->assertCreated();
         $serviceId = $svc->json('data.id');

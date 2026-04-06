@@ -117,10 +117,23 @@ function syncTypeAndAmount(list) {
   }
 }
 
+function formatHintMoneyCop(n) {
+  const x = Number(n)
+  if (Number.isNaN(x)) return '—'
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0,
+  }).format(x)
+}
+
 function addCatalogLine(item) {
   const label = item.label || item.name
   const cid = item.catalog_id != null && item.catalog_id !== '' ? Number(item.catalog_id) : null
-  const base = String(item.basePrice ?? item.base_price ?? '')
+  const baseRaw = item.basePrice ?? item.base_price ?? ''
+  const hintPrice =
+    baseRaw !== '' && baseRaw != null && !Number.isNaN(Number(baseRaw)) ? Number(baseRaw) : null
+  const hintDesc = descFromCatalog(item)
   let row
   if (cid != null && !Number.isNaN(cid)) {
     row = {
@@ -128,10 +141,13 @@ function addCatalogLine(item) {
       catalog_id: cid,
       label,
       custom_name: '',
-      line_description: descFromCatalog(item),
-      amount: base,
+      line_description: '',
+      amount: '',
       propose_catalog: false,
       isOtherLine: false,
+      catalog_hint_desc: hintDesc,
+      catalog_hint_price: hintPrice,
+      catalog_hint_dismissed: false,
     }
   } else {
     row = {
@@ -139,11 +155,13 @@ function addCatalogLine(item) {
       catalog_id: null,
       label,
       custom_name: label,
-      line_description: descFromCatalog(item),
-      amount: base,
-      /** Sin fila en servidor (lista orientativa): mismo criterio que «Otro» para propuesta al admin. */
-      propose_catalog: true,
+      line_description: '',
+      amount: '',
+      propose_catalog: false,
       isOtherLine: false,
+      catalog_hint_desc: hintDesc || `Referencia orientativa: ${String(label).trim()}`,
+      catalog_hint_price: hintPrice,
+      catalog_hint_dismissed: false,
     }
   }
   patch(syncTypeAndAmount([...lines.value, row]))
@@ -158,8 +176,11 @@ function addOtherLine() {
     custom_name: '',
     line_description: '',
     amount: '',
-    propose_catalog: true,
+    propose_catalog: false,
     isOtherLine: true,
+    catalog_hint_desc: '',
+    catalog_hint_price: null,
+    catalog_hint_dismissed: true,
   }
   patch(syncTypeAndAmount([...lines.value, row]))
   afterLineAdded()
@@ -176,6 +197,13 @@ function updateLine(index, partial) {
     next[index].label = String(partial.custom_name || '').trim()
   }
   patch(syncTypeAndAmount(next))
+}
+
+function dismissCatalogHint(index) {
+  const row = lines.value[index]
+  if (!row || row.catalog_hint_dismissed) return
+  if (!row.catalog_hint_desc && row.catalog_hint_price == null) return
+  updateLine(index, { catalog_hint_dismissed: true })
 }
 
 const effectiveTypeCatalog = computed(() => {
@@ -330,8 +358,9 @@ const totalDisplay = computed(() => {
         <span class="step-badge" aria-hidden="true">2</span>
         Conceptos cobrados
       </h2>
-      <p class="step-lede">
-        Añade cada trabajo desde el catálogo de la empresa o «Otro…». Cada línea debe reflejar un concepto que se factura.
+        <p class="step-lede">
+        Añade cada trabajo desde el catálogo de la empresa o «Otro…». En ítems del catálogo verás texto y precio solo como
+        referencia: debes describir el trabajo y el importe queda según las reglas de facturación del sistema.
       </p>
 
     <!-- Catálogo: panel inline (no desplegable flotante) -->
@@ -404,9 +433,7 @@ const totalDisplay = computed(() => {
       <p v-if="!inner.company_id" class="mt-2 text-[0.75rem] text-amber-500/90">Primero elige empresa; luego abre «Ver catálogo» y toca cada ítem que quieras sumar.</p>
       <p v-else-if="inner.company_id" class="mt-2 text-[0.75rem] text-slate-500">
         <template v-if="catalogItems.length">{{ catalogItems.length }} ítem(s) en catálogo de la empresa (servidor).</template>
-        <template v-else
-          >No hay catálogo cargado para esta empresa: ves una lista orientativa; al guardar, lo nuevo puede enviarse como propuesta al administrador.</template
-        >
+        <template v-else>Lista orientativa local: crea la línea y completa nombre, descripción e importe.</template>
         Puedes tocar varios ítems seguidos sin cerrar el panel.
       </p>
       <p v-if="fieldErrors.items" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.items[0] }}</p>
@@ -430,11 +457,6 @@ const totalDisplay = computed(() => {
                     : 'Orientativo (sin fila en catálogo servidor)'
               }}
             </p>
-            <p v-if="row.catalog_id == null" class="mt-1 text-[0.7rem] text-slate-500">
-              <template v-if="row.propose_catalog">
-                Al guardar se envía al administrador como propuesta para el catálogo global (si no está ya cubierta por un ítem activo).
-              </template>
-            </p>
           </div>
           <button
             v-if="!disabled"
@@ -451,6 +473,7 @@ const totalDisplay = computed(() => {
           placeholder="Nombre del servicio"
           :disabled="disabled"
           class="mb-2 w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white outline-none focus:border-sky-500"
+          @focus="dismissCatalogHint(idx)"
           @input="updateLine(idx, { custom_name: $event.target.value })"
         />
         <label class="mb-1 block text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500"
@@ -459,14 +482,43 @@ const totalDisplay = computed(() => {
         <p class="mb-1.5 text-[0.7rem] leading-snug text-slate-500">
           No basta el nombre del ítem: indica trabajo real (falla, repuesto, zona, duración…).
         </p>
+        <div
+          v-if="
+            !row.isOtherLine &&
+            !row.catalog_hint_dismissed &&
+            (row.catalog_hint_desc || row.catalog_hint_price != null)
+          "
+          class="catalog-hint mb-2 rounded-lg border border-slate-600/60 bg-slate-800/40 px-3 py-2"
+          role="note"
+        >
+          <p class="mb-1 text-[0.65rem] font-semibold uppercase tracking-wide text-sky-400/90">
+            {{ row.catalog_id != null ? 'Referencia del catálogo (solo guía)' : 'Lista orientativa (solo guía)' }}
+          </p>
+          <p v-if="row.catalog_hint_desc" class="text-[0.8rem] leading-snug text-slate-300">
+            {{ row.catalog_hint_desc }}
+          </p>
+          <p
+            v-if="row.catalog_hint_price != null"
+            class="mt-1 text-[0.85rem] tabular-nums text-slate-400 line-through decoration-slate-500"
+          >
+            {{ formatHintMoneyCop(row.catalog_hint_price) }}
+          </p>
+          <p class="mt-1.5 text-[0.65rem] text-slate-500">
+            Al tocar descripción o importe abajo, esta guía se oculta. Escribe tu propio detalle e importe de referencia.
+          </p>
+        </div>
         <textarea
           :value="row.line_description"
           rows="2"
           :disabled="disabled"
+          :placeholder="
+            row.catalog_id != null ? 'Describe aquí el trabajo que hiciste en obra para este concepto…' : ''
+          "
           :class="[
             'w-full resize-y rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2 text-sm text-white outline-none focus:border-sky-500',
             lineHasTemplateOnly(idx) ? 'mb-1' : 'mb-3',
           ]"
+          @focus="dismissCatalogHint(idx)"
           @input="updateLine(idx, { line_description: $event.target.value })"
         />
         <p
@@ -486,7 +538,9 @@ const totalDisplay = computed(() => {
             min="0"
             step="1"
             :disabled="disabled"
+            :placeholder="row.catalog_id != null ? 'Importe de referencia (obligatorio para validar)' : ''"
             class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] py-2.5 pl-8 pr-3 text-sm text-white tabular-nums outline-none focus:border-sky-400"
+            @focus="dismissCatalogHint(idx)"
             @input="updateLine(idx, { amount: $event.target.value })"
           />
         </div>
@@ -496,25 +550,14 @@ const totalDisplay = computed(() => {
     <p v-if="lines.length" class="rounded-2xl border border-sky-500/25 bg-sky-500/10 px-4 py-3 text-center text-sm font-semibold text-sky-100">
       Total del servicio: {{ totalDisplay }}
     </p>
-    </section>
 
-    <!-- Paso 3 -->
-    <section class="step-section" aria-labelledby="reg-svc-step3">
-      <h2 id="reg-svc-step3" class="step-title">
-        <span class="step-badge" aria-hidden="true">3</span>
-        Relato de la visita
-      </h2>
-      <p class="step-lede">
-        Aquí va la explicación global: qué pasó en obra, cómo quedó y cualquier dato que ayude a facturar y auditar.
-      </p>
-
-    <!-- Tipo de servicio (resumen editable) -->
-    <div>
+    <!-- Resumen tipo servicio (se sincroniza con los ítems; editable) -->
+    <div v-if="lines.length">
       <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
         Resumen en una línea <span class="text-red-400">*</span>
       </label>
       <p class="mb-2 text-[0.75rem] leading-relaxed text-slate-500">
-        Se arma solo con los nombres de los ítems; puedes acortarlo o ajustarlo para que se entienda de un vistazo.
+        Se arma con los nombres de los conceptos; puedes acortarlo para que se entienda de un vistazo.
       </p>
       <input
         :value="inner.service_type"
@@ -525,60 +568,15 @@ const totalDisplay = computed(() => {
       />
       <p v-if="fieldErrors.service_type" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.service_type[0] }}</p>
     </div>
-
-    <!-- Descripción general -->
-    <div>
-      <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Qué se hizo en obra <span class="text-red-400">*</span>
-      </label>
-      <p class="mb-2 text-[0.75rem] leading-relaxed text-slate-500">
-        Ej.: falla reportada, diagnóstico, repuestos usados, pruebas, tiempo en sitio, persona de contacto, pendientes.
-      </p>
-      <textarea
-        :value="inner.description"
-        rows="4"
-        placeholder="Ej.: Cliente reportó fuga en línea fría. Se reemplazó empaque de servicio, se purgó circuito y se dejó en operación. Contacto: nombre y teléfono."
-        :disabled="disabled"
-        class="w-full resize-y rounded-2xl border border-slate-700/90 bg-[#141a22] px-4 py-3.5 text-[0.9375rem] text-white placeholder:text-slate-600 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
-        @input="patch({ description: $event.target.value })"
-      />
-      <p v-if="fieldErrors.description" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.description[0] }}</p>
-    </div>
     </section>
 
-    <!-- Paso 4 -->
-    <section class="step-section" aria-labelledby="reg-svc-step4">
-      <h2 id="reg-svc-step4" class="step-title">
-        <span class="step-badge" aria-hidden="true">4</span>
-        Fecha y evidencias
+    <!-- Paso 3 -->
+    <section class="step-section" aria-labelledby="reg-svc-step3">
+      <h2 id="reg-svc-step3" class="step-title">
+        <span class="step-badge" aria-hidden="true">3</span>
+        Evidencias
       </h2>
-      <p class="step-lede">La fecha es la del día de registro. Las fotos ayudan a respaldar el trabajo (opcional).</p>
-
-    <!-- Fecha del servicio (solo lectura) -->
-    <div>
-      <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Fecha del servicio
-      </label>
-      <div class="relative">
-        <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true">
-          <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-            <path
-              d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </span>
-        <input
-          :value="inner.service_date"
-          type="date"
-          disabled
-          class="w-full cursor-not-allowed rounded-2xl border border-slate-700/60 bg-slate-900/80 py-3.5 pl-12 pr-4 text-[0.9375rem] text-slate-400 outline-none"
-        />
-      </div>
-      <p class="mt-1 text-[0.7rem] text-slate-600">La fecha se toma del día de registro y no es editable.</p>
-      <p v-if="fieldErrors.service_date" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.service_date[0] }}</p>
-    </div>
+      <p class="step-lede">Las fotos ayudan a respaldar el trabajo (opcional).</p>
 
     <!-- Fotos (máx. 4) -->
     <div>

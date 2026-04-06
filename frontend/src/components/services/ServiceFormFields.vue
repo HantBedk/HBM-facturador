@@ -13,6 +13,8 @@ const props = defineProps({
   clientSuggestions: { type: Array, default: () => [] },
   fieldErrors: { type: Object, default: () => ({}) },
   disabled: { type: Boolean, default: false },
+  /** Si es true, no se envía fecha desde el formulario: el API usa la fecha del servidor. */
+  serviceDateFromServer: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -140,7 +142,13 @@ function onCatalogChange(ev) {
       <small v-if="fieldErrors.amount" class="err">{{ fieldErrors.amount[0] }}</small>
     </label>
 
-    <label class="field">
+    <div v-if="serviceDateFromServer" class="field wide">
+      <p class="server-date-notice">
+        Al guardar, la fecha de servicio y el código los asigna el <strong>servidor</strong> (zona horaria de la aplicación).
+        La hora exacta del registro queda grabada internamente en el servidor.
+      </p>
+    </div>
+    <label v-else class="field">
       <span>Fecha del servicio <abbr title="obligatorio">*</abbr></span>
       <input
         :value="inner.service_date"
@@ -163,6 +171,17 @@ function onCatalogChange(ev) {
 
 .field.wide {
   grid-column: 1 / -1;
+}
+
+.server-date-notice {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  background: rgba(56, 189, 248, 0.08);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #bae6fd;
 }
 
 .field span {

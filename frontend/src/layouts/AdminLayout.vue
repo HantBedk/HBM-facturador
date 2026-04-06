@@ -227,9 +227,24 @@ async function salir() {
 
         <!-- Derecha: búsqueda (icono a la derecha) + notificaciones + salir -->
         <div class="flex items-center gap-3 sm:gap-4 w-full sm:w-auto flex-1 sm:flex-none justify-end min-w-0">
-          <div class="relative w-full max-w-[340px] hidden sm:block">
+          <form
+            role="search"
+            class="relative w-full max-w-[340px] hidden sm:block"
+            autocomplete="off"
+            @submit.prevent
+          >
             <input
               type="search"
+              name="q"
+              enterkeyhint="search"
+              autocomplete="search"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-bwignore="true"
+              aria-label="Buscar en servicios y facturas"
               placeholder="Buscar servicios, facturas..."
               class="w-full bg-[#1c212c] border border-slate-700/50 rounded-xl py-2.5 pl-4 pr-11 text-sm text-slate-300 placeholder:text-slate-500 outline-none focus:border-slate-500 transition-colors shadow-inner"
             />
@@ -247,7 +262,7 @@ async function salir() {
                 d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
               />
             </svg>
-          </div>
+          </form>
 
           <div class="flex items-center gap-3 sm:gap-5 text-slate-400 shrink-0 sm:border-r sm:border-slate-700/50 sm:pr-5">
             <AdminNotificationBell />

@@ -36,7 +36,6 @@ class ServiceCatalogResource extends JsonResource
         return [
             'id' => $this->id,
             'code' => 'CAT-'.$this->id,
-            'company_id' => $this->company_id,
             'name' => $this->name,
             'description' => $this->description,
             'base_price' => $displayPrice,
@@ -50,10 +49,6 @@ class ServiceCatalogResource extends JsonResource
             'status' => $this->status,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
-            'company' => $this->whenLoaded('company', fn () => $this->company ? [
-                'id' => $this->company->id,
-                'nombre' => $this->company->nombre,
-            ] : null),
         ];
     }
 }

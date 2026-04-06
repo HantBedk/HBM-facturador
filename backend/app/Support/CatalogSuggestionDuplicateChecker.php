@@ -11,7 +11,7 @@ use Illuminate\Support\Collection;
  */
 final class CatalogSuggestionDuplicateChecker
 {
-    public static function isRedundantWithActiveCatalog(string $suggestedName, int $companyId): bool
+    public static function isRedundantWithActiveCatalog(string $suggestedName): bool
     {
         $norm = self::normalize($suggestedName);
         if (mb_strlen($norm) < 2) {
@@ -20,7 +20,6 @@ final class CatalogSuggestionDuplicateChecker
 
         $catalogNorms = ServiceCatalog::query()
             ->activos()
-            ->forCompany($companyId)
             ->pluck('name')
             ->map(fn ($n) => self::normalize((string) $n))
             ->all();
@@ -29,7 +28,7 @@ final class CatalogSuggestionDuplicateChecker
     }
 
     /**
-     * @param  Collection<int, object{id: int, company_id: int, name: string}>  $rows
+     * @param  Collection<int, object{id: int, name: string}>  $rows
      * @return list<int>
      */
     public static function idsWithoutCatalogOverlap(Collection $rows): array
@@ -38,25 +37,20 @@ final class CatalogSuggestionDuplicateChecker
             return [];
         }
 
-        $catalogNormByCompany = [];
-        foreach ($rows->groupBy(fn ($r) => (int) $r->company_id)->keys() as $cid) {
-            $catalogNormByCompany[(int) $cid] = ServiceCatalog::query()
-                ->activos()
-                ->forCompany((int) $cid)
-                ->pluck('name')
-                ->map(fn ($n) => self::normalize((string) $n))
-                ->all();
-        }
+        $catalogNorms = ServiceCatalog::query()
+            ->activos()
+            ->pluck('name')
+            ->map(fn ($n) => self::normalize((string) $n))
+            ->all();
 
         return $rows
-            ->filter(function ($r) use ($catalogNormByCompany) {
+            ->filter(function ($r) use ($catalogNorms) {
                 $norm = self::normalize((string) $r->name);
                 if (mb_strlen($norm) < 2) {
                     return true;
                 }
-                $list = $catalogNormByCompany[(int) $r->company_id] ?? [];
 
-                return ! self::normOverlapsAny($norm, $list);
+                return ! self::normOverlapsAny($norm, $catalogNorms);
             })
             ->pluck('id')
             ->map(fn ($id) => (int) $id)

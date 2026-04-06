@@ -11,13 +11,12 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
 
 class AdminServiceCatalogController extends Controller
 {
     public function index(Request $request): AnonymousResourceCollection
     {
-        $q = ServiceCatalog::query()->with('company');
+        $q = ServiceCatalog::query();
 
         $sortField = $request->query('sort', 'name');
         $sortField = is_string($sortField) ? $sortField : 'name';
@@ -36,10 +35,6 @@ class AdminServiceCatalogController extends Controller
             $q->where('status', $request->string('status')->toString());
         }
 
-        if ($request->filled('company_id')) {
-            $q->where('company_id', $request->integer('company_id'));
-        }
-
         return ServiceCatalogResource::collection(
             $q->paginate(Pagination::perPage($request, 50, 100))->withQueryString()
         );
@@ -47,27 +42,21 @@ class AdminServiceCatalogController extends Controller
 
     public function show(ServiceCatalog $service_catalog): ServiceCatalogResource
     {
-        $service_catalog->load('company');
-
         return new ServiceCatalogResource($service_catalog);
     }
 
     public function store(Request $request): JsonResponse
     {
-        $companyScope = $this->resolveCatalogCompanyScope($request->input('company_id'));
         $data = $request->validate([
-            'company_id' => ['nullable', 'integer', 'exists:companies,id'],
             'name' => [
                 'required',
                 'string',
                 'max:255',
-                Rule::unique('service_catalog', 'name')->where(function ($q) use ($companyScope) {
-                    if ($companyScope === null) {
-                        return $q->whereNull('company_id');
+                function (string $attribute, mixed $value, \Closure $fail) {
+                    if ($this->catalogNameExistsGlobally(trim((string) $value))) {
+                        $fail('Ya existe un ítem con este nombre en el catálogo.');
                     }
-
-                    return $q->where('company_id', $companyScope);
-                }),
+                },
             ],
             'description' => ['nullable', 'string', 'max:5000'],
             'base_price' => ['required', 'numeric', 'min:0.01'],
@@ -76,39 +65,28 @@ class AdminServiceCatalogController extends Controller
         ]);
 
         $row = ServiceCatalog::query()->create([
-            'company_id' => $companyScope,
             'name' => trim($data['name']),
             'description' => isset($data['description']) ? trim((string) $data['description']) : null,
             'base_price' => $data['base_price'],
             'technician_discount_percent' => $data['technician_discount_percent'] ?? null,
             'status' => $data['status'] ?? ServiceCatalog::STATUS_ACTIVO,
         ]);
-        $row->load('company');
 
         return (new ServiceCatalogResource($row))->response()->setStatusCode(201);
     }
 
     public function update(Request $request, ServiceCatalog $service_catalog): ServiceCatalogResource|JsonResponse
     {
-        $companyScope = $request->has('company_id')
-            ? $this->resolveCatalogCompanyScope($request->input('company_id'))
-            : $service_catalog->company_id;
-
         $data = $request->validate([
-            'company_id' => ['sometimes', 'nullable', 'integer', 'exists:companies,id'],
             'name' => [
                 'required',
                 'string',
                 'max:255',
-                Rule::unique('service_catalog', 'name')
-                    ->ignore($service_catalog->id)
-                    ->where(function ($q) use ($companyScope) {
-                        if ($companyScope === null) {
-                            return $q->whereNull('company_id');
-                        }
-
-                        return $q->where('company_id', $companyScope);
-                    }),
+                function (string $attribute, mixed $value, \Closure $fail) use ($service_catalog) {
+                    if ($this->catalogNameExistsGlobally(trim((string) $value), $service_catalog->id)) {
+                        $fail('Ya existe un ítem con este nombre en el catálogo.');
+                    }
+                },
             ],
             'description' => ['nullable', 'string', 'max:5000'],
             'base_price' => ['required', 'numeric', 'min:0.01'],
@@ -116,9 +94,6 @@ class AdminServiceCatalogController extends Controller
             'status' => ['required', 'in:'.ServiceCatalog::STATUS_ACTIVO.','.ServiceCatalog::STATUS_INACTIVO],
         ]);
 
-        if (array_key_exists('company_id', $data)) {
-            $service_catalog->company_id = $companyScope;
-        }
         $service_catalog->name = trim($data['name']);
         $service_catalog->description = isset($data['description']) ? trim((string) $data['description']) : null;
         $service_catalog->base_price = $data['base_price'];
@@ -127,7 +102,6 @@ class AdminServiceCatalogController extends Controller
         }
         $service_catalog->status = $data['status'];
         $service_catalog->save();
-        $service_catalog->load('company');
 
         return new ServiceCatalogResource($service_catalog);
     }
@@ -178,12 +152,10 @@ class AdminServiceCatalogController extends Controller
      */
     public function import(Request $request, ServiceCatalogSpreadsheetImporter $importer): JsonResponse
     {
-        $data = $request->validate([
+        $request->validate([
             'file' => ['required', 'file', 'max:5120', 'mimes:xlsx,xls,csv,txt'],
-            'company_id' => ['nullable', 'integer', 'exists:companies,id'],
         ]);
 
-        $companyScope = $this->resolveCatalogCompanyScope($data['company_id'] ?? null);
         $parsed = $importer->parse($request->file('file'));
 
         $imported = 0;
@@ -194,12 +166,12 @@ class AdminServiceCatalogController extends Controller
             $line = $row['line'];
             $name = $row['name'];
 
-            if ($this->catalogNameExistsInScope($name, $companyScope)) {
+            if ($this->catalogNameExistsGlobally($name)) {
                 $skippedDuplicates++;
                 $issues[] = [
                     'row' => $line,
                     'code' => 'duplicate',
-                    'message' => 'Ya existe un ítem con el mismo nombre en este ámbito (global o empresa).',
+                    'message' => 'Ya existe un ítem con el mismo nombre en el catálogo.',
                 ];
 
                 continue;
@@ -207,7 +179,6 @@ class AdminServiceCatalogController extends Controller
 
             try {
                 ServiceCatalog::query()->create([
-                    'company_id' => $companyScope,
                     'name' => $name,
                     'description' => $row['description'],
                     'base_price' => $row['base_price'],
@@ -249,28 +220,14 @@ class AdminServiceCatalogController extends Controller
         ]);
     }
 
-    private function catalogNameExistsInScope(string $name, ?int $companyScope): bool
+    private function catalogNameExistsGlobally(string $name, ?int $exceptId = null): bool
     {
         $lower = mb_strtolower(trim($name));
-
-        return ServiceCatalog::query()
-            ->whereRaw('LOWER(TRIM(name)) = ?', [$lower])
-            ->where(function ($q) use ($companyScope) {
-                if ($companyScope === null) {
-                    $q->whereNull('company_id');
-                } else {
-                    $q->where('company_id', $companyScope);
-                }
-            })
-            ->exists();
-    }
-
-    private function resolveCatalogCompanyScope(mixed $raw): ?int
-    {
-        if ($raw === null || $raw === '') {
-            return null;
+        $q = ServiceCatalog::query()->whereRaw('LOWER(TRIM(name)) = ?', [$lower]);
+        if ($exceptId !== null) {
+            $q->where('id', '!=', $exceptId);
         }
 
-        return (int) $raw;
+        return $q->exists();
     }
 }

@@ -77,7 +77,7 @@ watch([scope, limit], load, { immediate: true })
 
     <div class="toolbar">
       <label class="field">
-        <span class="lbl">Ámbito</span>
+        <span class="lbl">Tipo de registro</span>
         <select v-model="scope" class="sel">
           <option value="all">Todo (servicios y facturas)</option>
           <option value="facturas">Solo facturas y pagos</option>
@@ -99,7 +99,7 @@ watch([scope, limit], load, { immediate: true })
     <p v-if="loading" class="muted pad">Cargando…</p>
 
     <template v-else>
-      <p v-if="!groups.length" class="muted pad">No hay movimientos para mostrar en este ámbito.</p>
+      <p v-if="!groups.length" class="muted pad">No hay movimientos para mostrar con este filtro.</p>
 
       <div v-for="(g, idx) in groups" :key="idx" class="group">
         <div class="group-head">
