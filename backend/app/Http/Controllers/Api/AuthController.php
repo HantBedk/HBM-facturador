@@ -7,26 +7,36 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
     public function login(Request $request): JsonResponse
     {
+        if ($request->has('correo') && is_string($request->input('correo'))) {
+            $request->merge(['correo' => trim($request->input('correo'))]);
+        }
+
         $data = $request->validate([
-            // email:filter (PHP) acepta dominios de desarrollo tipo @*.local; la regla `email` sola usa RFC estricto.
-            'correo' => ['required', 'string', 'email:filter', 'max:255'],
+            /**
+             * Sin `email:filter`/`email` estricto RFC: en varios PHP/Docker rechazan @*.local u otros usados en desarrollo.
+             * Formato mínimo: local@dominio (Unicode permitido con /u).
+             */
+            'correo' => ['required', 'string', 'max:255', 'regex:/^[^\s@]+@[^\s@]+$/u'],
             'password' => ['required', 'string'],
-            'device_name' => ['sometimes', 'string', 'max:255'],
+            'device_name' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $correoNorm = mb_strtolower(trim($data['correo']));
+        $correoNorm = mb_strtolower($data['correo']);
         $user = User::query()->whereRaw('LOWER(TRIM(correo)) = ?', [$correoNorm])->first();
 
         if (! $user || ! Hash::check($data['password'], $user->password)) {
-            throw ValidationException::withMessages([
-                'correo' => ['Correo o contraseña incorrectos.'],
-            ]);
+            // 401 (no 422) para no confundir con errores de validación y permitir que el cliente ignore el clear de sesión en /auth/login.
+            return response()->json([
+                'message' => 'Correo o contraseña incorrectos.',
+                'errors' => [
+                    'correo' => ['Correo o contraseña incorrectos.'],
+                ],
+            ], 401);
         }
 
         if ($user->estado !== User::ESTADO_ACTIVO) {
@@ -35,7 +45,9 @@ class AuthController extends Controller
             ], 403);
         }
 
-        $device = $data['device_name'] ?? 'web';
+        $device = isset($data['device_name']) && trim((string) $data['device_name']) !== ''
+            ? trim((string) $data['device_name'])
+            : 'web';
         $expiresAt = now()->addDays(7);
         $token = $user->createToken($device, ['*'], $expiresAt)->plainTextToken;
 

@@ -1,7 +1,9 @@
 <?php
 
 use App\Http\Controllers\Api\AdminActivityLogController;
+use App\Http\Controllers\Api\AdminBillingAutomationController;
 use App\Http\Controllers\Api\AdminCompanyController;
+use App\Http\Controllers\Api\AdminCompanyRecurringServiceController;
 use App\Http\Controllers\Api\AdminDashboardController;
 use App\Http\Controllers\Api\AdminExportController;
 use App\Http\Controllers\Api\AdminInvoiceController;
@@ -55,6 +57,10 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::patch('/admin/companies/{company}/estado', [AdminCompanyController::class, 'updateEstado']);
         Route::delete('/admin/companies/{company}', [AdminCompanyController::class, 'destroy']);
         Route::get('/admin/companies/{company}/monthly-dashboard', [AdminCompanyController::class, 'monthlyDashboard']);
+        Route::get('/admin/companies/{company}/recurring-services', [AdminCompanyRecurringServiceController::class, 'index']);
+        Route::post('/admin/companies/{company}/recurring-services', [AdminCompanyRecurringServiceController::class, 'store']);
+        Route::put('/admin/companies/{company}/recurring-services/{recurring_service}', [AdminCompanyRecurringServiceController::class, 'update']);
+        Route::delete('/admin/companies/{company}/recurring-services/{recurring_service}', [AdminCompanyRecurringServiceController::class, 'destroy']);
 
         Route::get('/admin/users', [AdminUserController::class, 'index']);
         Route::post('/admin/users', [AdminUserController::class, 'store']);
@@ -66,6 +72,8 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::post('/admin/users/{user}/empleado-perfil/borrar-datos-pago', [AdminEmpleadoPerfilController::class, 'clearDatosPago']);
         Route::get('/admin/settings/empleado-notificaciones', [AdminEmpleadoNotificacionSettingsController::class, 'show']);
         Route::put('/admin/settings/empleado-notificaciones', [AdminEmpleadoNotificacionSettingsController::class, 'update']);
+        Route::get('/admin/settings/billing-automation', [AdminBillingAutomationController::class, 'show']);
+        Route::put('/admin/settings/billing-automation', [AdminBillingAutomationController::class, 'update']);
 
         Route::get('/admin/service-catalog', [AdminServiceCatalogController::class, 'index']);
         Route::post('/admin/service-catalog', [AdminServiceCatalogController::class, 'store']);
@@ -101,6 +109,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::post('/admin/invoices/{invoice}/public-access-token', [AdminInvoiceController::class, 'regeneratePublicAccess']);
         Route::get('/admin/invoices/{invoice}', [AdminInvoiceController::class, 'show']);
         Route::put('/admin/invoices/{invoice}', [AdminInvoiceController::class, 'update']);
+        Route::delete('/admin/invoices/{invoice}', [AdminInvoiceController::class, 'destroy']);
     });
 
     Route::get('/empleados', [UserController::class, 'empleadosActivos'])->middleware('role:admin,super_admin');
@@ -127,4 +136,5 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::get('/services/{service}', [ServiceController::class, 'show']);
     Route::put('/services/{service}', [ServiceController::class, 'update']);
     Route::patch('/services/{service}/archive', [ServiceController::class, 'archive']);
+    Route::patch('/services/{service}/technician-paid', [ServiceController::class, 'patchTechnicianPaid']);
 });

@@ -10,6 +10,7 @@ use App\Models\ServiceCatalogSuggestion;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -17,9 +18,21 @@ class ServiceCatalogTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Carbon::setTestNow(Carbon::parse('2026-04-15 14:30:00', config('app.timezone')));
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
+
     public function test_active_catalog_requires_auth(): void
     {
-        $this->getJson('/api/service-catalog/active?company_id=1')->assertUnauthorized();
+        $this->getJson('/api/service-catalog/active')->assertUnauthorized();
     }
 
     public function test_empleado_can_list_active_catalog(): void
@@ -41,8 +54,9 @@ class ServiceCatalogTest extends TestCase
         $emp = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
         Sanctum::actingAs($emp);
 
-        $this->getJson('/api/service-catalog/active?company_id='.$company->id)
+        $this->getJson('/api/service-catalog/active')
             ->assertOk()
+            ->assertHeader('Cache-Control', 'private, no-store, must-revalidate')
             ->assertJsonCount(1, 'data');
     }
 
@@ -74,14 +88,14 @@ class ServiceCatalogTest extends TestCase
         ]);
         $emp = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
 
+        // Importe enviado = referencia técnico; con margen global 10% (por defecto) la factura es técnico ÷ 0,9.
         $r = $this->postJson('/api/services', [
             'company_id' => $company->id,
             'catalog_id' => $id,
             'client_name' => 'Cliente X',
             'service_type' => 'Instalación red',
             'description' => 'Cableado y configuración básica de red local.',
-            'amount' => 260000,
-            'service_date' => '2026-04-15',
+            'amount' => 234000,
         ])->assertCreated();
         $this->assertMatchesRegularExpression('/^SERV-260415\d{2}$/', (string) $r->json('data.code'));
 
@@ -89,6 +103,7 @@ class ServiceCatalogTest extends TestCase
         $this->assertSame($id, $svc->catalog_id);
         $this->assertSame('260000.00', (string) $svc->amount);
         $this->assertSame(1, $svc->items()->count());
+        $this->assertSame('234000.00', (string) $svc->items()->first()->technician_line_amount);
 
         $this->putJson('/api/admin/service-catalog/'.$id, [
             'name' => 'Instalación red',
@@ -160,16 +175,7 @@ class ServiceCatalogTest extends TestCase
             'service_type' => 'Off',
             'description' => 'Descripción larga del ítem inactivo.',
             'amount' => 1000,
-            'service_date' => '2026-04-15',
         ])->assertStatus(422);
-    }
-
-    public function test_active_catalog_requires_company_id(): void
-    {
-        $emp = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
-        Sanctum::actingAs($emp);
-
-        $this->getJson('/api/service-catalog/active')->assertStatus(422);
     }
 
     public function test_service_with_items_payload_sums_amounts(): void
@@ -202,10 +208,9 @@ class ServiceCatalogTest extends TestCase
             'client_name' => 'Cliente Y',
             'service_type' => 'Línea A · Línea B',
             'description' => 'Descripción general del servicio con varias líneas.',
-            'service_date' => '2026-04-15',
             'items' => [
-                ['catalog_id' => $a->id, 'amount' => 100],
-                ['catalog_id' => $b->id, 'amount' => 200],
+                ['catalog_id' => $a->id, 'amount' => 90, 'line_description' => 'Trabajo realizado en línea A según visita.'],
+                ['catalog_id' => $b->id, 'amount' => 180, 'line_description' => 'Trabajo realizado en línea B según visita.'],
             ],
         ])->assertCreated();
 
@@ -219,7 +224,7 @@ class ServiceCatalogTest extends TestCase
         $this->assertSame('200.00', (string) $items[1]->amount);
     }
 
-    public function test_custom_line_creates_pending_suggestion(): void
+    public function test_custom_line_never_creates_catalog_suggestion(): void
     {
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
         Sanctum::actingAs($admin);
@@ -236,18 +241,18 @@ class ServiceCatalogTest extends TestCase
             'client_name' => 'Cliente Z',
             'service_type' => 'Otro especial',
             'description' => 'Descripción general del trabajo realizado en sitio.',
-            'service_date' => '2026-04-16',
             'items' => [
                 [
                     'custom_name' => 'Reparación especial',
                     'custom_description' => 'Detalle de la reparación especial realizada.',
                     'amount' => 50000,
+                    'line_description' => 'Detalle de la reparación especial realizada.',
                     'propose_catalog' => true,
                 ],
             ],
         ])->assertCreated();
 
-        $this->assertSame(1, ServiceCatalogSuggestion::query()->where('status', ServiceCatalogSuggestion::STATUS_PENDING)->count());
+        $this->assertSame(0, ServiceCatalogSuggestion::query()->count());
     }
 
     public function test_custom_line_without_propose_catalog_does_not_create_suggestion(): void
@@ -266,11 +271,11 @@ class ServiceCatalogTest extends TestCase
             'client_name' => 'Cliente',
             'service_type' => 'Algo',
             'description' => 'Descripción larga del servicio realizado en sitio.',
-            'service_date' => '2026-04-18',
             'items' => [
                 [
                     'custom_name' => 'Sin propuesta catálogo',
                     'amount' => 10000,
+                    'line_description' => 'Detalle del trabajo sin propuesta de catálogo.',
                 ],
             ],
         ])->assertCreated();
@@ -290,7 +295,6 @@ class ServiceCatalogTest extends TestCase
         ]);
 
         ServiceCatalog::query()->create([
-            'company_id' => null,
             'name' => 'Instalación de software',
             'description' => 'Descripción larga suficiente para el catálogo global.',
             'base_price' => 85000,
@@ -302,11 +306,11 @@ class ServiceCatalogTest extends TestCase
             'client_name' => 'Cliente',
             'service_type' => 'Instalación',
             'description' => 'Trabajo en sitio.',
-            'service_date' => '2026-04-17',
             'items' => [
                 [
                     'custom_name' => 'Instalación',
                     'amount' => 350000,
+                    'line_description' => 'Instalación personalizada distinta al ítem de catálogo homónimo.',
                     'propose_catalog' => true,
                 ],
             ],
@@ -315,7 +319,7 @@ class ServiceCatalogTest extends TestCase
         $this->assertSame(0, ServiceCatalogSuggestion::query()->where('status', ServiceCatalogSuggestion::STATUS_PENDING)->count());
     }
 
-    public function test_admin_pendientes_hides_suggestions_redundant_with_catalog(): void
+    public function test_admin_pendientes_lists_all_pending_even_if_name_overlaps_catalog(): void
     {
         $admin = User::factory()->create(['rol' => User::ROL_SUPER_ADMIN]);
         Sanctum::actingAs($admin);
@@ -328,18 +332,17 @@ class ServiceCatalogTest extends TestCase
         ]);
 
         ServiceCatalog::query()->create([
-            'company_id' => null,
             'name' => 'Mantenimiento preventivo',
             'description' => 'Descripción larga del mantenimiento preventivo en catálogo.',
             'base_price' => 95000,
             'status' => ServiceCatalog::STATUS_ACTIVO,
         ]);
 
-        ServiceCatalogSuggestion::query()->create([
+        $overlap = ServiceCatalogSuggestion::query()->create([
             'company_id' => $company->id,
             'user_id' => $admin->id,
             'name' => 'Mantenimiento',
-            'description' => 'Propuesta antigua duplicada.',
+            'description' => 'Propuesta que se solapa semánticamente con catálogo; el admin debe poder verla y rechazarla.',
             'suggested_price' => 95000,
             'status' => ServiceCatalogSuggestion::STATUS_PENDING,
         ]);
@@ -357,10 +360,11 @@ class ServiceCatalogTest extends TestCase
         $r->assertOk();
         $ids = collect($r->json('data'))->pluck('id')->all();
         $this->assertContains($unique->id, $ids);
-        $this->assertCount(1, $ids);
+        $this->assertContains($overlap->id, $ids);
+        $this->assertCount(2, $ids);
     }
 
-    public function test_service_catalog_line_stores_list_price_even_if_client_sends_discounted_amount(): void
+    public function test_service_catalog_line_bills_from_technician_amount_with_global_margin(): void
     {
         AppSetting::setValue(AppSetting::KEY_TECHNICIAN_CATALOG_DISCOUNT_PERCENT, '10');
 
@@ -386,9 +390,12 @@ class ServiceCatalogTest extends TestCase
             'client_name' => 'Cliente',
             'service_type' => 'Ítem precio lista',
             'description' => 'Descripción larga del servicio registrado con monto enviado rebajado (simula UI).',
-            'service_date' => '2026-04-20',
             'items' => [
-                ['catalog_id' => $cat->id, 'amount' => 90000],
+                [
+                    'catalog_id' => $cat->id,
+                    'amount' => 90000,
+                    'line_description' => 'Trabajo registrado con monto enviado rebajado (simula UI).',
+                ],
             ],
         ])->assertCreated();
 
@@ -418,7 +425,6 @@ class ServiceCatalogTest extends TestCase
             'client_name' => 'Cliente',
             'service_type' => 'Otro trabajo',
             'description' => 'Descripción larga del trabajo personalizado para validar margen en factura.',
-            'service_date' => '2026-04-21',
             'items' => [
                 [
                     'custom_name' => 'Trabajo especial',
@@ -457,10 +463,10 @@ class ServiceCatalogTest extends TestCase
         $emp = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
         Sanctum::actingAs($emp);
 
-        $res = $this->getJson('/api/service-catalog/active?company_id='.$company->id)->assertOk();
+        $res = $this->getJson('/api/service-catalog/active')->assertOk();
         $row = collect($res->json('data'))->firstWhere('name', 'Ítem 20 pct');
         $this->assertNotNull($row);
-        $this->assertSame('80000.00', (string) $row['base_price']);
+        $this->assertSame('100000.00', (string) $row['base_price']);
         $this->assertArrayNotHasKey('technician_discount_percent', $row);
     }
 
@@ -489,7 +495,6 @@ class ServiceCatalogTest extends TestCase
 
         $cat = ServiceCatalog::query()->where('name', 'Servicio único aprobación global')->first();
         $this->assertNotNull($cat);
-        $this->assertNull($cat->company_id);
 
         $suggestion->refresh();
         $this->assertSame(ServiceCatalogSuggestion::STATUS_APPROVED, $suggestion->status);
@@ -520,6 +525,5 @@ class ServiceCatalogTest extends TestCase
         $this->assertNotNull($row);
         $this->assertSame('1500.75', (string) $row->base_price);
         $this->assertSame('Texto auxiliar', $row->description);
-        $this->assertNull($row->company_id);
     }
 }

@@ -16,6 +16,7 @@ class AdminActivityLogController extends Controller
         'factura_editada',
         'factura_aprobada',
         'factura_enviada',
+        'factura_eliminada',
         'factura_token_publico_regenerado',
         'pago_registrado',
         'pago_eliminado',

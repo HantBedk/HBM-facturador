@@ -91,7 +91,7 @@ class PublicInvoiceController extends Controller
             $filename = 'factura-'.preg_replace('/[^a-zA-Z0-9_-]/', '_', $invoice->code).'.pdf';
 
             return Pdf::loadView('pdf.public_invoice', ['data' => $data])
-                ->download($filename);
+                ->stream($filename);
         } catch (\Throwable $e) {
             report($e);
 

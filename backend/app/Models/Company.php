@@ -45,4 +45,9 @@ class Company extends Model
     {
         return $this->hasMany(Invoice::class);
     }
+
+    public function recurringServices(): HasMany
+    {
+        return $this->hasMany(CompanyRecurringService::class)->orderBy('sort_order')->orderBy('id');
+    }
 }

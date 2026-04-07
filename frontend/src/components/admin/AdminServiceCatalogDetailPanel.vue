@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { fetchAdminServiceCatalogItem } from '@/services/servicesApi.js'
 
 const props = defineProps({
@@ -55,12 +55,6 @@ watch(
   }
 )
 
-const ambitoLabel = computed(() => {
-  if (!item.value) return '—'
-  if (item.value.company_id == null) return 'Global (todas las empresas)'
-  return item.value.company?.nombre || `Empresa #${item.value.company_id}`
-})
-
 defineExpose({ reload })
 </script>
 
@@ -113,17 +107,16 @@ defineExpose({ reload })
               <p class="strong">{{ item.name }}</p>
               <p v-if="item.description" class="desc">{{ item.description }}</p>
               <p v-else class="muted">Sin descripción.</p>
-              <p class="mt"><span class="label">Precio base</span> {{ money(item.base_price) }}</p>
+              <p class="mt"><span class="label">Precio orientativo</span> {{ money(item.base_price) }}</p>
               <p>
-                <span class="label">Vista técnico</span>
+                <span class="label">Margen al facturar</span>
                 <template
                   v-if="item.technician_discount_percent != null && String(item.technician_discount_percent).trim() !== ''"
                 >
-                  {{ item.technician_discount_percent }}% de descuento sobre el precio base (override por ítem).
+                  {{ item.technician_discount_percent }}% de margen técnico → empresa (override por ítem; si no, aplica el global).
                 </template>
                 <template v-else> Usa el porcentaje global de la pestaña «Importar y precios» del catálogo. </template>
               </p>
-              <p><span class="label">Ámbito</span> {{ ambitoLabel }}</p>
               <p class="muted small">
                 Creado: {{ formatDateShort(item.created_at) }} · Actualizado: {{ formatDateShort(item.updated_at) }}
               </p>

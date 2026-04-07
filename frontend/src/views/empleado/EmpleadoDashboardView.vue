@@ -13,7 +13,6 @@ const loadError = ref('')
 const data = ref(null)
 
 const companyFilter = ref('')
-const datePreset = ref('all')
 const selectedRowId = ref(null)
 
 const period = computed(() => data.value?.period)
@@ -34,16 +33,6 @@ const filteredRecentBase = computed(() => {
   if (companyFilter.value) {
     rows = rows.filter((r) => r.company_name === companyFilter.value)
   }
-  if (datePreset.value === '7d') {
-    const cutoff = new Date()
-    cutoff.setDate(cutoff.getDate() - 7)
-    cutoff.setHours(0, 0, 0, 0)
-    rows = rows.filter((r) => {
-      if (!r.service_date) return false
-      const d = new Date(r.service_date + 'T12:00:00')
-      return !Number.isNaN(d.getTime()) && d >= cutoff
-    })
-  }
   return rows
 })
 
@@ -56,12 +45,11 @@ const {
   filteredRecentBase,
   {
     code: (r) => r.code || '',
-    service_date: (r) => r.service_date || '',
     company_name: (r) => r.company_name || '',
     description: (r) => r.description || '',
     amount: (r) => Number(r.amount) || 0,
   },
-  { initialKey: 'service_date', initialDir: 'asc' }
+  { initialKey: 'code', initialDir: 'desc' }
 )
 
 /** Ej. "Javier García" → "Javier G." */
@@ -119,7 +107,7 @@ const chartSvg = computed(() => {
 
   const labels = series.map((p, i) => ({
     x: pad.l + (n <= 1 ? innerW / 2 : i * step),
-    text: formatChartLabel(p.date),
+    text: p.code ? String(p.code).slice(-10) : String(i + 1),
     yText: h - 10,
   }))
 
@@ -206,28 +194,6 @@ function formatCode(code) {
   if (code == null || code === '') return '—'
   const s = String(code).trim()
   return s.startsWith('#') ? s : `#${s}`
-}
-
-function formatDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso.length === 10 ? `${iso}T12:00:00` : iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('es-CO', { dateStyle: 'medium' })
-}
-
-/** Fecha compacta tipo mock (ej. 12 oct) */
-function formatDateShort(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso.length === 10 ? `${iso}T12:00:00` : iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
-}
-
-function formatChartLabel(iso) {
-  if (!iso) return ''
-  const d = new Date(iso + 'T12:00:00')
-  if (Number.isNaN(d.getTime())) return iso.slice(5)
-  return d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
 }
 
 function toggleRow(id) {
@@ -376,16 +342,6 @@ function toggleRow(id) {
                 <option v-for="c in uniqueCompanies" :key="c" :value="c">{{ c }}</option>
               </select>
             </div>
-            <div class="flex min-w-[160px] flex-1 flex-col gap-1.5 sm:min-w-[200px]">
-              <label class="text-xs font-medium text-slate-500">Rango de Fechas</label>
-              <select
-                v-model="datePreset"
-                class="rounded-xl border border-slate-600/90 bg-[#0d1219] px-3 py-2.5 text-sm text-slate-200 focus:border-sky-500/50 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
-              >
-                <option value="all">Todo el historial (lista reciente)</option>
-                <option value="7d">Últimos 7 días</option>
-              </select>
-            </div>
           </div>
         </div>
 
@@ -395,7 +351,7 @@ function toggleRow(id) {
               <h2 class="text-sm font-semibold text-slate-200 sm:text-base">
                 Evolución de Rendimiento - {{ nombreCorto }} (Historial)
               </h2>
-              <p class="mt-1 text-xs text-slate-500">Acumulado según filtros sobre los servicios listados</p>
+              <p class="mt-1 text-xs text-slate-500">Acumulado según filtros; eje inferior por código de servicio.</p>
             </div>
             <div
               v-if="chartSvg.hasData"
@@ -499,11 +455,6 @@ function toggleRow(id) {
                     Código<span class="sort-ind" aria-hidden="true">{{ dashRecentSortInd('code') }}</span>
                   </button>
                 </th>
-                <th class="px-4 py-3.5" scope="col" :aria-sort="dashRecentAriaSort('service_date')">
-                  <button type="button" class="th-sort" @click="toggleDashRecentSort('service_date')">
-                    Fecha<span class="sort-ind" aria-hidden="true">{{ dashRecentSortInd('service_date') }}</span>
-                  </button>
-                </th>
                 <th class="px-4 py-3.5" scope="col" :aria-sort="dashRecentAriaSort('company_name')">
                   <button type="button" class="th-sort" @click="toggleDashRecentSort('company_name')">
                     Empresa<span class="sort-ind" aria-hidden="true">{{ dashRecentSortInd('company_name') }}</span>
@@ -537,7 +488,6 @@ function toggleRow(id) {
                 <td class="px-4 py-3.5 font-mono text-xs font-medium text-slate-400">
                   {{ formatCode(row.code) }}
                 </td>
-                <td class="px-4 py-3.5 capitalize text-slate-300">{{ formatDateShort(row.service_date) }}</td>
                 <td class="px-4 py-3.5 font-medium text-slate-200">{{ row.company_name || '—' }}</td>
                 <td class="max-w-[220px] truncate px-4 py-3.5 text-slate-400" :title="row.description">
                   {{ row.description }}

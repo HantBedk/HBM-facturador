@@ -74,3 +74,43 @@ export function fetchCompanyMonthlyDashboard(companyId, params = {}) {
   const s = qs.toString()
   return api(`/admin/companies/${companyId}/monthly-dashboard${s ? `?${s}` : ''}`).then((r) => r.data)
 }
+
+/** Plantillas de cargos fijos mensuales (automatización de facturación). */
+export function fetchCompanyRecurringServices(companyId) {
+  return api(`/admin/companies/${companyId}/recurring-services`).then((r) => r.data ?? [])
+}
+
+/**
+ * @param {number|string} companyId
+ * @param {{
+ *   catalog_id: number,
+ *   amount: number|string,
+ *   description?: string | null,
+ *   service_type?: string | null,
+ *   is_active?: boolean,
+ *   sort_order?: number
+ * }} payload
+ */
+export function createCompanyRecurringService(companyId, payload) {
+  return api(`/admin/companies/${companyId}/recurring-services`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }).then((r) => r.data)
+}
+
+/**
+ * @param {number|string} companyId
+ * @param {number|string} recurringId
+ * @param {Record<string, unknown>} payload
+ */
+export function updateCompanyRecurringService(companyId, recurringId, payload) {
+  return api(`/admin/companies/${companyId}/recurring-services/${recurringId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }).then((r) => r.data)
+}
+
+/** @param {number|string} companyId @param {number|string} recurringId */
+export function deleteCompanyRecurringService(companyId, recurringId) {
+  return api(`/admin/companies/${companyId}/recurring-services/${recurringId}`, { method: 'DELETE' })
+}

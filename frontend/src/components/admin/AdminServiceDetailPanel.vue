@@ -1,19 +1,25 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { fetchService } from '@/services/servicesApi.js'
+import { fetchService, patchServiceTechnicianPaid } from '@/services/servicesApi.js'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
   serviceId: { type: [Number, String], default: null },
+  /** z-index cuando el drawer se abre sobre otro overlay (p. ej. panel del dashboard). */
+  overlayZIndex: { type: Number, default: 90 },
+  /** Admin: permite registrar en sistema la fecha de pago al técnico (no edita factura). */
+  allowTechnicianPaidToggle: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'changed'])
 
 const svc = ref(null)
 const loading = ref(false)
 const error = ref('')
+const technicianPaidSaving = ref(false)
+const technicianPaidError = ref('')
 
 const svcItemsSource = computed(() => svc.value?.items || [])
 const {
@@ -69,6 +75,7 @@ watch(
     if (!op) {
       svc.value = null
       error.value = ''
+      technicianPaidError.value = ''
       return
     }
     if (id == null || id === '') return
@@ -78,12 +85,57 @@ watch(
 
 const canEdit = computed(() => svc.value?.status !== 'eliminado' && !svc.value?.invoiced)
 
+const technicianRefNum = computed(() => {
+  const n = Number(svc.value?.technician_line_total)
+  return Number.isNaN(n) ? 0 : n
+})
+
+function todayYmd() {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+async function markTechnicianPaidToday() {
+  const id = svc.value?.id
+  if (id == null || technicianPaidSaving.value) return
+  technicianPaidError.value = ''
+  technicianPaidSaving.value = true
+  try {
+    await patchServiceTechnicianPaid(id, { technician_paid_at: todayYmd() })
+    await reload()
+    emit('changed')
+  } catch (e) {
+    technicianPaidError.value = e.data?.message || e.message || 'No se pudo registrar.'
+  } finally {
+    technicianPaidSaving.value = false
+  }
+}
+
+async function clearTechnicianPaid() {
+  const id = svc.value?.id
+  if (id == null || technicianPaidSaving.value) return
+  technicianPaidError.value = ''
+  technicianPaidSaving.value = true
+  try {
+    await patchServiceTechnicianPaid(id, { technician_paid_at: null })
+    await reload()
+    emit('changed')
+  } catch (e) {
+    technicianPaidError.value = e.data?.message || e.message || 'No se pudo actualizar.'
+  } finally {
+    technicianPaidSaving.value = false
+  }
+}
+
 defineExpose({ reload })
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="drawer-root" aria-hidden="false">
+    <div v-if="open" class="drawer-root" :style="{ zIndex: overlayZIndex }" aria-hidden="false">
       <div class="drawer-backdrop" @click.self="emit('close')" />
       <aside
         class="drawer-panel"
@@ -184,6 +236,41 @@ defineExpose({ reload })
               </div>
             </div>
 
+            <div
+              v-if="allowTechnicianPaidToggle && technicianRefNum > 0 && svc.status !== 'eliminado'"
+              class="card"
+            >
+              <h2>Pago al técnico (registro interno)</h2>
+              <p>
+                <span class="lbl">Importe de referencia</span>
+                {{ money(svc.technician_line_total) }}
+              </p>
+              <p v-if="svc.technician_paid_at" class="muted small">
+                Registrado como pagado: {{ formatDate(svc.technician_paid_at) }}
+              </p>
+              <p v-if="technicianPaidError" class="banner err">{{ technicianPaidError }}</p>
+              <div class="paid-actions">
+                <button
+                  v-if="!svc.technician_paid_at"
+                  type="button"
+                  class="btn primary btn-compact"
+                  :disabled="technicianPaidSaving"
+                  @click="markTechnicianPaidToday"
+                >
+                  {{ technicianPaidSaving ? 'Guardando…' : 'Registrar pago (hoy)' }}
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="btn secondary btn-compact"
+                  :disabled="technicianPaidSaving"
+                  @click="clearTechnicianPaid"
+                >
+                  {{ technicianPaidSaving ? 'Guardando…' : 'Quitar marca de pago' }}
+                </button>
+              </div>
+            </div>
+
             <div v-if="(svc.invoices || []).length" class="card">
               <h2>Facturas</h2>
               <ul class="inv-list">
@@ -221,7 +308,6 @@ defineExpose({ reload })
 .drawer-root {
   position: fixed;
   inset: 0;
-  z-index: 90;
   pointer-events: none;
 }
 
@@ -329,6 +415,13 @@ defineExpose({ reload })
   padding: 0.65rem 1rem;
   border-bottom: 1px solid rgba(148, 163, 184, 0.15);
   flex-shrink: 0;
+}
+
+.paid-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
 }
 
 .drawer-body {

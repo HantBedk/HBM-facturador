@@ -16,6 +16,7 @@ import {
   saveServiceDraft,
 } from '@/services/servicesApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
+import { isLineDescriptionStillTemplate } from '@/utils/serviceLineDescriptionTemplate.js'
 
 const auth = useAuthStore()
 const uiDialog = useUiDialogStore()
@@ -34,8 +35,6 @@ const formResetKey = ref(0)
 /** Archivos locales (solo registro empleado); máx. 4 en UI */
 const photoFiles = ref([])
 
-const today = new Date().toISOString().slice(0, 10)
-
 const form = ref({
   company_id: '',
   catalog_id: '',
@@ -43,7 +42,6 @@ const form = ref({
   service_type: '',
   description: '',
   amount: '',
-  service_date: today,
   /** Solo registro empleado: líneas de catálogo / Otro */
   lines: [],
 })
@@ -75,7 +73,6 @@ function showToast(message) {
 }
 
 function resetFormToDefaults() {
-  const d = new Date().toISOString().slice(0, 10)
   form.value = {
     company_id: '',
     catalog_id: '',
@@ -83,11 +80,25 @@ function resetFormToDefaults() {
     service_type: '',
     description: '',
     amount: '',
-    service_date: d,
     lines: [],
   }
   photoFiles.value = []
   formResetKey.value += 1
+}
+
+/** Texto guardado en `services.description`: detalle por concepto (sin campo extra en UI empleado). */
+function buildServiceDescriptionFromLines(rawLines) {
+  const parts = []
+  for (const row of rawLines) {
+    const ld = String(row.line_description || '').trim()
+    if (!ld) continue
+    const head =
+      row.catalog_id != null && row.catalog_id !== ''
+        ? String(row.label || 'Ítem').trim()
+        : String(row.custom_name || '').trim() || 'Concepto'
+    parts.push(`${head}: ${ld}`)
+  }
+  return parts.join('\n\n')
 }
 
 function buildPayloadItemsFromLines(rawLines) {
@@ -101,9 +112,6 @@ function buildPayloadItemsFromLines(rawLines) {
     const o = {
       custom_name: String(row.custom_name || '').trim(),
       amount: Number(row.amount),
-    }
-    if (row.propose_catalog === true) {
-      o.propose_catalog = true
     }
     const d = String(row.line_description || '').trim()
     if (d) {
@@ -124,13 +132,12 @@ function validateBeforeSubmit() {
   if (!String(form.value.service_type || '').trim()) {
     e.service_type = ['Indica el tipo de servicio (catálogo o texto libre).']
   }
-  const desc = String(form.value.description || '').trim()
-  if (!desc) e.description = ['La descripción es obligatoria.']
-  else if (desc.length < 8) {
-    e.description = ['Describe el trabajo con más detalle (mínimo 8 caracteres).']
-  }
-  if (!form.value.service_date) {
-    e.service_date = ['Indica la fecha del servicio.']
+    if (!isEmpleadoRegistro.value) {
+    const desc = String(form.value.description || '').trim()
+    if (!desc) e.description = ['La descripción es obligatoria.']
+    else if (desc.length < 8) {
+      e.description = ['Describe el trabajo con más detalle (mínimo 8 caracteres).']
+    }
   }
 
   if (isEmpleadoRegistro.value) {
@@ -145,13 +152,28 @@ function validateBeforeSubmit() {
         e.items = [`Revisa el importe de la línea ${i + 1}.`]
         break
       }
-      if (row.catalog_id == null || row.catalog_id === '') {
+      if (row.catalog_id != null && row.catalog_id !== '') {
+        const ld = String(row.line_description || '').trim()
+        if (ld.length < 8) {
+          e.items = [`Describe el trabajo en la línea ${i + 1} (mín. 8 caracteres).`]
+          break
+        }
+      } else {
         const name = String(row.custom_name || '').trim()
         if (name.length < 2) {
-          e.items = [`Indica el nombre del servicio en la línea ${i + 1} («Otro»).`]
+          e.items = [`Indica el nombre del servicio en la línea ${i + 1} («Otro» o lista orientativa).`]
+          break
+        }
+        const ld = String(row.line_description || '').trim()
+        if (ld.length < 8) {
+          e.items = [`Describe el trabajo en la línea ${i + 1} (mín. 8 caracteres).`]
           break
         }
       }
+    }
+    const built = buildServiceDescriptionFromLines(ls)
+    if (built.length < 8) {
+      e.items = e.items || ['Falta detalle en las líneas para armar la descripción del servicio (mín. 8 caracteres en conjunto).']
     }
   } else {
     const amt = Number(form.value.amount)
@@ -164,14 +186,9 @@ function validateBeforeSubmit() {
   return Object.keys(e).length === 0
 }
 
-async function refreshCatalogForCompany(cid) {
-  const id = Number(cid)
-  if (!id) {
-    catalogItems.value = []
-    return
-  }
+async function refreshCatalog() {
   try {
-    catalogItems.value = await fetchServiceCatalogActive(id)
+    catalogItems.value = await fetchServiceCatalogActive()
   } catch {
     catalogItems.value = []
   }
@@ -189,7 +206,6 @@ onMounted(async () => {
         service_type: draft.service_type ?? '',
         description: draft.description ?? '',
         amount: draft.amount ?? '',
-        service_date: draft.service_date || today,
         lines: [],
       }
     }
@@ -199,13 +215,12 @@ onMounted(async () => {
   } catch (e) {
     globalError.value = e.data?.message || 'No se pudieron cargar las empresas.'
   }
-  await refreshCatalogForCompany(form.value.company_id)
+  await refreshCatalog()
 })
 
 watch(
   () => form.value.company_id,
-  async (cid, prev) => {
-    await refreshCatalogForCompany(cid)
+  (cid, prev) => {
     if (isEmpleadoRegistro.value && prev !== undefined && String(cid) !== String(prev)) {
       form.value.lines = []
       form.value.amount = ''
@@ -226,6 +241,21 @@ async function onSubmit() {
   globalError.value = ''
   if (!validateBeforeSubmit()) return
 
+  if (isEmpleadoRegistro.value) {
+    const ls = Array.isArray(form.value.lines) ? form.value.lines : []
+    const anyTemplate = ls.some((row) => isLineDescriptionStillTemplate(row, catalogItems.value))
+    if (anyTemplate) {
+      const proceed = await uiDialog.confirm({
+        title: 'Descripciones sin personalizar',
+        message:
+          'Una o más líneas siguen con el texto automático del catálogo (no lo editaste). Es mejor aclarar qué trabajo hiciste en cada concepto. ¿Deseas enviar igualmente?',
+        confirmLabel: 'Enviar igual',
+        cancelLabel: 'Revisar líneas',
+      })
+      if (!proceed) return
+    }
+  }
+
   loading.value = true
   try {
     const payload = {
@@ -234,11 +264,11 @@ async function onSubmit() {
       service_type: form.value.service_type.trim(),
       description: form.value.description.trim(),
       amount: Number(form.value.amount),
-      service_date: form.value.service_date,
     }
     if (isEmpleadoRegistro.value) {
       const ls = Array.isArray(form.value.lines) ? form.value.lines : []
       payload.items = buildPayloadItemsFromLines(ls)
+      payload.description = buildServiceDescriptionFromLines(ls)
       let t = 0
       for (const row of ls) {
         const n = Number(row.amount)
@@ -278,13 +308,6 @@ async function onSubmit() {
 <template>
   <section :class="isEmpleadoRegistro ? 'mx-auto max-w-md pb-8' : 'page'">
     <header :class="isEmpleadoRegistro ? 'mb-6 text-center' : 'head'">
-      <RouterLink
-        v-if="isEmpleadoRegistro"
-        to="/empleado"
-        class="mb-4 inline-block text-sm font-semibold text-sky-400/90 hover:text-sky-300"
-      >
-        ← Volver al panel
-      </RouterLink>
       <h1
         :class="
           isEmpleadoRegistro
@@ -294,8 +317,11 @@ async function onSubmit() {
       >
         Registrar servicio
       </h1>
+      <p v-if="isEmpleadoRegistro" class="mx-auto mt-2 max-w-md text-center text-sm leading-relaxed text-slate-400">
+        Tres pasos: empresa y cliente, conceptos cobrados (detalle por ítem) y fotos si aplica.
+      </p>
       <p v-if="!isEmpleadoRegistro" class="muted">
-        Completa los datos del trabajo realizado. El código se genera al guardar (formato SERV-YYMMDDNN según la fecha del servicio).
+        Completa los datos del trabajo realizado. La fecha del servicio y el código (SERV-…) los asigna el servidor al guardar.
       </p>
     </header>
 
@@ -338,6 +364,7 @@ async function onSubmit() {
           :client-suggestions="clientSuggestions"
           :field-errors="fieldErrors"
           :disabled="loading"
+          service-date-from-server
         />
         <div class="actions">
           <RouterLink class="btn secondary" :to="cancelTo">Cancelar</RouterLink>

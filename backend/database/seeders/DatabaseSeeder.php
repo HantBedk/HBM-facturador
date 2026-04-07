@@ -39,10 +39,6 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
-        /*
-         * Contraseña en texto plano: el modelo User usa cast 'hashed' y aplica Hash::make al guardar.
-         * Usar Hash::make() aquí provocaba doble hash y el login fallaba siempre.
-         */
         User::query()->updateOrCreate(
             ['correo' => 'admin@hbm.local'],
             [

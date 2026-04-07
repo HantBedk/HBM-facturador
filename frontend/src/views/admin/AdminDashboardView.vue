@@ -1,8 +1,10 @@
 <script setup>
 import { onMounted, ref, computed, defineAsyncComponent } from 'vue'
-import { RouterLink } from 'vue-router'
 import { api } from '@/services/api.js'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
+import AdminDashboardPendingInvoicesPanel from '@/components/admin/AdminDashboardPendingInvoicesPanel.vue'
+import AdminDashboardServicesPanel from '@/components/admin/AdminDashboardServicesPanel.vue'
+import AdminDashboardTechnicianPendingPanel from '@/components/admin/AdminDashboardTechnicianPendingPanel.vue'
 
 const VueApexCharts = defineAsyncComponent(() => import('vue3-apexcharts'))
 
@@ -57,21 +59,6 @@ const chartOptions = ref({
   }
 })
 
-// MOCK DATA si la API no trae el formato exacto requerido por el mockup para las tablas
-const mockServices = [
-  { id: 1, code: '15 Oct', company_name: 'Tech Solutions', user_name: 'C. Ruíz', valor: 2500, created_at: '2023-10-15T12:00:00Z' },
-  { id: 2, code: '14 Oct', company_name: 'Innova Corp', user_name: 'M. Gómez', valor: 850, created_at: '2023-10-14T12:00:00Z' },
-  { id: 3, code: '13 Oct', company_name: 'Green Energy', user_name: 'L. Flores', valor: 4100, created_at: '2023-10-13T12:00:00Z' },
-  { id: 4, code: '12 Oct', company_name: 'Global L.', user_name: 'A. García', valor: 1800, created_at: '2023-10-12T12:00:00Z' }
-]
-
-const mockInvoices = [
-  { id: 1, code: 'FAC-231015-INV', company_name: 'Innova Corp', total: 1200, status_label: 'Pendiente' },
-  { id: 2, code: 'FAC-231014-GRE', company_name: 'Green Energy', total: 4120, status_label: 'Pagado' },
-  { id: 3, code: 'FAC-231013-TEC', company_name: 'Tech Solutions', total: 2500, status_label: 'Pagado' },
-  { id: 4, code: 'FAC-231012-GLO', company_name: 'Global L.', total: 850, status_label: 'Vencida' }
-]
-
 async function loadDashboard() {
   loading.value = true
   loadError.value = ''
@@ -85,16 +72,57 @@ async function loadDashboard() {
   }
 }
 
+const pendingInvoicesPanelOpen = ref(false)
+const servicesPanelOpen = ref(false)
+const technicianPendingPanelOpen = ref(false)
+
 onMounted(() => {
   loadDashboard()
+})
+
+function openPendingInvoicesPanel() {
+  pendingInvoicesPanelOpen.value = true
+}
+
+function closePendingInvoicesPanel() {
+  pendingInvoicesPanelOpen.value = false
+}
+
+function openServicesPanel() {
+  servicesPanelOpen.value = true
+}
+
+function closeServicesPanel() {
+  servicesPanelOpen.value = false
+}
+
+function openTechnicianPendingPanel() {
+  technicianPendingPanelOpen.value = true
+}
+
+function closeTechnicianPendingPanel() {
+  technicianPendingPanelOpen.value = false
+}
+
+/** Facturas con posible acción (alineado con el panel lateral). */
+const pendingAttentionCount = computed(() => {
+  const c = data.value?.invoice_status_counts
+  if (!c) return null
+  return (
+    (c.borrador ?? 0) +
+    (c.aprobada ?? 0) +
+    (c.enviada ?? 0) +
+    (c.parcialmente_pagada ?? 0)
+  )
 })
 
 const metrics = computed(() => data.value?.metrics)
 const recent = computed(() => data.value?.recent || { services: [], invoices: [] })
 
-const dashSvcTableSource = computed(() =>
-  recent.value.services?.length ? recent.value.services : mockServices
-)
+const dashSvcTableSource = computed(() => {
+  if (!data.value) return []
+  return recent.value.services?.length ? recent.value.services : []
+})
 const {
   sortedRows: dashSortedServices,
   toggleSort: toggleDashSvcSort,
@@ -106,14 +134,15 @@ const {
     fecha: (s) => s.created_at || s.code || '',
     company_name: (s) => s.company_name || '',
     user_name: (s) => s.user_name || '',
-    valor: (s) => Number(s.price ?? s.valor) || 0,
+    valor: (s) => Number(s.amount) || 0,
   },
   { initialKey: 'fecha', initialDir: 'desc' }
 )
 
-const dashInvTableSource = computed(() =>
-  recent.value.invoices?.length ? recent.value.invoices : mockInvoices
-)
+const dashInvTableSource = computed(() => {
+  if (!data.value) return []
+  return recent.value.invoices?.length ? recent.value.invoices : []
+})
 const {
   sortedRows: dashSortedInvoices,
   toggleSort: toggleDashInvSort,
@@ -142,14 +171,6 @@ function formatMoney(value) {
   }).format(n)
 }
 
-function formatValor(value) {
-  if (value === undefined || value === null) return '—'
-  const n = Number(value)
-  if (Number.isNaN(n)) return String(value)
-  if (n >= 1000) return '$ ' + (n / 1000).toFixed(1) + 'k'
-  return '$ ' + n
-}
-
 function formatDateOnly(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -164,6 +185,20 @@ function getStatusClasses(status) {
   if (s.includes('vencida') || s.includes('anulada')) return 'bg-[#3b1c20] text-[#ef4444] border border-[#ef4444]/20'
   return 'bg-slate-700/30 text-slate-400 border border-slate-600/30'
 }
+
+const netAfterTechnicians = computed(() => {
+  const raw = metrics.value?.net_collected_after_technician_payouts
+  if (raw === undefined || raw === null || raw === '') return null
+  const n = Number(raw)
+  return Number.isNaN(n) ? null : n
+})
+
+const netAfterTechniciansClass = computed(() => {
+  const n = netAfterTechnicians.value
+  if (n == null) return 'text-slate-400'
+  if (n < 0) return 'text-rose-400'
+  return 'text-emerald-400'
+})
 </script>
 
 <template>
@@ -178,6 +213,9 @@ function getStatusClasses(status) {
         <div v-for="i in 4" :key="i" class="h-[120px] bg-[#1e2532] rounded-2xl"></div>
       </div>
       <div class="h-[400px] bg-[#1e2532] rounded-2xl"></div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div v-for="j in 4" :key="'b'+j" class="h-[120px] bg-[#1e2532] rounded-2xl"></div>
+      </div>
     </div>
 
     <template v-else>
@@ -191,19 +229,28 @@ function getStatusClasses(status) {
                <!-- Coin Icon -->
                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 4.46 2 7.5S6.48 13 12 13s10-2.46 10-5.5S17.52 2 12 2zm0 9c-4.42 0-8-1.79-8-4s3.58-4 8-4 8 1.79 8 4-3.58 4-8 4zm0 4c-4.42 0-8-1.79-8-4v3.5c0 3.04 4.48 5.5 10 5.5s10-2.46 10-5.5V11c0 2.21-3.58 4-8 4z"/></svg>
              </div>
-             <h3 class="text-[0.85rem] font-medium text-slate-300">Total Facturado (Este Mes)</h3>
+             <h3 class="text-[0.85rem] font-medium text-slate-300">Total facturado (todas)</h3>
           </div>
           <div>
-            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ metrics?.invoiced_month ? formatMoney(metrics.invoiced_month) : '$ 45.680.000' }}</p>
-            <p class="text-[0.75rem] font-bold text-emerald-400 flex items-center gap-1">
-              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
-              +12.5%
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">
+              {{ metrics != null ? formatMoney(metrics.invoiced_total_all ?? 0) : '—' }}
+            </p>
+            <p class="text-[0.75rem] font-medium text-slate-400">
+              Mes {{ data?.period?.label ?? '—' }} (contable):
+              {{ metrics != null ? formatMoney(metrics.invoiced_month ?? 0) : '—' }}
+            </p>
+            <p class="text-[0.7rem] font-medium text-slate-500 mt-1">
+              {{ metrics?.invoices_count_all ?? 0 }} factura(s) emitidas (no borrador)
             </p>
           </div>
         </article>
 
-        <!-- Tarjeta 2: Servicios Realizados -->
-        <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between">
+        <!-- Tarjeta 2: Servicios Realizados (clic → panel centrado) -->
+        <button
+          type="button"
+          class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between text-left w-full min-h-[120px] transition hover:ring-2 hover:ring-blue-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50"
+          @click="openServicesPanel"
+        >
           <div class="flex items-center gap-3 mb-2">
              <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
                <!-- Gear Icon -->
@@ -212,16 +259,21 @@ function getStatusClasses(status) {
              <h3 class="text-[0.85rem] font-medium text-slate-300">Servicios Realizados (Mes)</h3>
           </div>
           <div>
-            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ recent.services?.length || 187 }}</p>
-            <p class="text-[0.75rem] font-bold text-emerald-400 flex items-center gap-1">
-              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
-              +8%
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">
+              {{ metrics?.services_count_month != null ? metrics.services_count_month : (recent.services?.length ?? '—') }}
+            </p>
+            <p class="text-[0.75rem] font-medium text-slate-400">
+              {{ data?.period?.label ? `${data.period.label} · ` : '' }}Clic para ver listado
             </p>
           </div>
-        </article>
+        </button>
 
-        <!-- Tarjeta 3: Facturas Pendientes -->
-        <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between">
+        <!-- Tarjeta 3: Facturas Pendientes (clic → panel con acciones) -->
+        <button
+          type="button"
+          class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between text-left w-full min-h-[120px] transition hover:ring-2 hover:ring-red-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
+          @click="openPendingInvoicesPanel"
+        >
           <div class="flex items-center gap-3 mb-2">
              <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-red-500/10 text-red-500">
                <!-- Clock Icon -->
@@ -230,10 +282,17 @@ function getStatusClasses(status) {
              <h3 class="text-[0.85rem] font-medium text-slate-300">Facturas Pendientes</h3>
           </div>
           <div>
-            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ metrics?.pending_collect ? formatMoney(metrics.pending_collect) : '$ 12.450.000' }}</p>
-            <p class="text-[0.75rem] font-medium text-slate-400">{{ data?.invoice_status_counts?.borrador || 25 }} facturas</p>
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">
+              {{ metrics != null ? formatMoney(metrics.pending_collect ?? 0) : '—' }}
+            </p>
+            <p class="text-[0.75rem] font-medium text-slate-400">
+              <template v-if="pendingAttentionCount != null">
+                {{ pendingAttentionCount }} factura{{ pendingAttentionCount === 1 ? '' : 's' }} con gestión · Clic para ver
+              </template>
+              <template v-else>Clic para ver listado y acciones</template>
+            </p>
           </div>
-        </article>
+        </button>
 
         <!-- Tarjeta 4: Facturas Pagadas -->
         <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between">
@@ -245,8 +304,12 @@ function getStatusClasses(status) {
              <h3 class="text-[0.85rem] font-medium text-slate-300">Facturas Pagadas</h3>
           </div>
           <div>
-            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ metrics?.received_month ? formatMoney(metrics.received_month) : '$ 33.230.000' }}</p>
-            <p class="text-[0.75rem] font-medium text-slate-400">{{ data?.invoice_status_counts?.pagada || 162 }} facturas</p>
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">
+              {{ metrics != null ? formatMoney(metrics.received_month ?? 0) : '—' }}
+            </p>
+            <p class="text-[0.75rem] font-medium text-slate-400">
+              {{ data?.invoice_status_counts?.pagada ?? 0 }} factura(s) pagadas
+            </p>
           </div>
         </article>
       </div>
@@ -257,7 +320,9 @@ function getStatusClasses(status) {
         <!-- MITAD IZQUIERDA: GRÁFICO APEXCHARTS ("Ingresos Mensuales - Octubre 2023") -->
         <section class="bg-[#1e2532] rounded-2xl shadow-lg border border-transparent overflow-hidden flex flex-col h-[500px]">
           <div class="px-7 py-6 flex items-center justify-between">
-            <h2 class="text-xl font-bold text-white tracking-wide m-0">Ingresos Mensuales - Octubre 2023</h2>
+            <h2 class="text-xl font-bold text-white tracking-wide m-0">
+              Ingresos mensuales (referencia) — {{ data?.period?.label || '—' }}
+            </h2>
             <div class="flex items-center gap-5 text-sm font-semibold">
                <div class="flex items-center gap-2 text-slate-300">
                  <span class="h-2 w-2 rounded-full bg-[#22c55e]"></span> Este Mes
@@ -308,11 +373,18 @@ function getStatusClasses(status) {
                   </tr>
                 </thead>
                 <tbody class="text-[0.85rem] text-slate-300 font-medium border-t border-transparent">
-                   <tr v-for="(s, idx) in dashSortedServices.slice(0, 4)" :key="idx" class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors">
+                   <tr
+                     v-for="(s, idx) in dashSortedServices.slice(0, 4)"
+                     :key="s.id ?? idx"
+                     class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors"
+                   >
                      <td class="py-3 pr-4 whitespace-nowrap">{{ s.code?.length < 8 ? s.code : formatDateOnly(s.created_at) }}</td>
                      <td class="py-3 pr-4 text-white truncate max-w-[140px]">{{ s.company_name }}</td>
                      <td class="py-3 pr-4 hidden sm:table-cell truncate max-w-[100px]">{{ s.user_name }}</td>
-                     <td class="py-3 text-right text-slate-200 whitespace-nowrap">{{ formatValor(s.price || s.valor) }}</td>
+                     <td class="py-3 text-right text-slate-200 whitespace-nowrap">{{ formatMoney(s.amount) }}</td>
+                   </tr>
+                   <tr v-if="!dashSortedServices.length">
+                     <td colspan="4" class="py-6 text-center text-slate-500 text-sm">Sin servicios recientes.</td>
                    </tr>
                 </tbody>
               </table>
@@ -351,7 +423,11 @@ function getStatusClasses(status) {
                   </tr>
                 </thead>
                 <tbody class="text-[0.85rem] text-slate-300 font-medium border-t border-transparent">
-                   <tr v-for="(inv, idx) in dashSortedInvoices.slice(0, 4)" :key="idx" class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors">
+                   <tr
+                     v-for="(inv, idx) in dashSortedInvoices.slice(0, 4)"
+                     :key="inv.id ?? idx"
+                     class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors"
+                   >
                      <td class="py-3 pr-4 whitespace-nowrap">{{ inv.code }}</td>
                      <td class="py-3 pr-4 text-white truncate max-w-[140px]">{{ inv.company_name }}</td>
                      <td class="py-3 text-right text-slate-200 whitespace-nowrap">{{ formatMoney(inv.total) }}</td>
@@ -361,6 +437,9 @@ function getStatusClasses(status) {
                         </span>
                      </td>
                    </tr>
+                   <tr v-if="!dashSortedInvoices.length">
+                     <td colspan="4" class="py-6 text-center text-slate-500 text-sm">Sin facturas recientes.</td>
+                   </tr>
                 </tbody>
               </table>
             </div>
@@ -368,7 +447,115 @@ function getStatusClasses(status) {
 
         </div>
       </div>
+
+      <!-- ROW 3: flujo técnico + placeholders -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-7">
+        <button
+          type="button"
+          class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between text-left w-full min-h-[120px] transition hover:ring-2 hover:ring-amber-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
+          @click="openTechnicianPendingPanel"
+        >
+          <div class="flex items-center gap-3 mb-2">
+            <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-amber-500/10 text-amber-400">
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+            </div>
+            <h3 class="text-[0.85rem] font-medium text-slate-300">Pago a técnicos pendiente</h3>
+          </div>
+          <div>
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">
+              {{ metrics?.technician_unpaid_services_count != null ? metrics.technician_unpaid_services_count : '—' }}
+            </p>
+            <p class="text-[0.75rem] font-medium text-slate-400">
+              {{ data?.period?.label ? `${data.period.label} · ` : '' }}
+              ref.
+              {{
+                metrics?.technician_unpaid_services_total != null
+                  ? formatMoney(metrics.technician_unpaid_services_total)
+                  : '—'
+              }}
+              · Clic para ver
+            </p>
+          </div>
+        </button>
+
+        <article class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between min-h-[120px]">
+          <div class="flex items-center gap-3 mb-2">
+            <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-violet-500/10 text-violet-400">
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <h3 class="text-[0.85rem] font-medium text-slate-300">Cobrado − pagos a técnicos (mes)</h3>
+          </div>
+          <div>
+            <p class="text-[1.85rem] font-bold tracking-tight leading-none mb-1.5">
+              <span :class="netAfterTechniciansClass">
+                {{ netAfterTechnicians != null ? formatMoney(netAfterTechnicians) : '—' }}
+              </span>
+            </p>
+            <p class="text-[0.75rem] font-medium text-slate-400">
+              Cobrado {{ metrics?.received_month != null ? formatMoney(metrics.received_month) : '—' }} − abonos técn.
+              {{ metrics?.technician_payouts_month != null ? formatMoney(metrics.technician_payouts_month) : '—' }}
+            </p>
+          </div>
+        </article>
+
+        <article class="bg-[#1e2532]/80 rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between min-h-[120px] border border-dashed border-slate-600/50">
+          <div class="flex items-center gap-3 mb-2">
+            <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-slate-600/20 text-slate-500">
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+            </div>
+            <h3 class="text-[0.85rem] font-medium text-slate-500">En construcción</h3>
+          </div>
+          <div>
+            <p class="text-[1.25rem] font-semibold text-slate-500 leading-snug">Próximamente</p>
+            <p class="text-[0.75rem] text-slate-600 mt-2">Reservado para otra métrica.</p>
+          </div>
+        </article>
+
+        <article class="bg-[#1e2532]/80 rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between min-h-[120px] border border-dashed border-slate-600/50">
+          <div class="flex items-center gap-3 mb-2">
+            <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-slate-600/20 text-slate-500">
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+            </div>
+            <h3 class="text-[0.85rem] font-medium text-slate-500">En construcción</h3>
+          </div>
+          <div>
+            <p class="text-[1.25rem] font-semibold text-slate-500 leading-snug">Próximamente</p>
+            <p class="text-[0.75rem] text-slate-600 mt-2">Reservado para otra métrica.</p>
+          </div>
+        </article>
+      </div>
     </template>
+
+    <AdminDashboardPendingInvoicesPanel
+      :open="pendingInvoicesPanelOpen"
+      @close="closePendingInvoicesPanel"
+      @changed="loadDashboard"
+    />
+
+    <AdminDashboardServicesPanel
+      :open="servicesPanelOpen"
+      :year="data?.period?.year"
+      :month="data?.period?.month"
+      :period-label="data?.period?.label || ''"
+      @close="closeServicesPanel"
+    />
+
+    <AdminDashboardTechnicianPendingPanel
+      :open="technicianPendingPanelOpen"
+      :year="data?.period?.year"
+      :month="data?.period?.month"
+      :period-label="data?.period?.label || ''"
+      @close="closeTechnicianPendingPanel"
+      @changed="loadDashboard"
+    />
   </div>
 </template>
 

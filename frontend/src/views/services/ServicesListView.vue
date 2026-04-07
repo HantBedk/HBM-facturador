@@ -63,7 +63,8 @@ const isAdmin = computed(() => isAdminPanelRole(auth.user?.rol))
 const showServiceActions = computed(
   () => isAdmin.value || auth.user?.rol === 'empleado'
 )
-const tableColspan = computed(() => (isAdmin.value ? 9 : showServiceActions.value ? 8 : 7))
+/** Empleado: sin columna Fecha (sigue existiendo en servidor para facturación). */
+const tableColspan = computed(() => (isAdmin.value ? 9 : showServiceActions.value ? 7 : 6))
 
 /** Columnas ordenables (coinciden con `sort` en la API). */
 const SORT_DEFAULT_DIR = {
@@ -214,6 +215,10 @@ onMounted(async () => {
     }
   } catch {
     /* filtros opcionales */
+  }
+  if (!isAdmin.value) {
+    sortKey.value = 'code'
+    sortDir.value = 'desc'
   }
   await load()
 })
@@ -373,14 +378,16 @@ async function exportServicesCsv() {
           <option v-for="u in empleados" :key="u.id" :value="String(u.id)">{{ u.nombre }}</option>
         </select>
       </label>
-      <label>
-        <span>Fecha desde</span>
-        <input v-model="filters.service_date_from" type="date" />
-      </label>
-      <label>
-        <span>Fecha hasta</span>
-        <input v-model="filters.service_date_to" type="date" />
-      </label>
+      <template v-if="isAdmin">
+        <label>
+          <span>Fecha desde</span>
+          <input v-model="filters.service_date_from" type="date" />
+        </label>
+        <label>
+          <span>Fecha hasta</span>
+          <input v-model="filters.service_date_to" type="date" />
+        </label>
+      </template>
       <label class="grow">
         <span>Búsqueda (código, cliente, descripción, tipo)</span>
         <input v-model="filters.q" type="search" placeholder="Ej. 20260329, SYF, instalación…" />
@@ -392,8 +399,7 @@ async function exportServicesCsv() {
         eliminados; se distinguen por el estado «Eliminado». Pulsa un encabezado de columna para ordenar (▲/▼).
       </template>
       <template v-else>
-        Los filtros y la búsqueda se aplican automáticamente al cambiar valores. Pulsa un encabezado de columna para
-        ordenar (▲/▼).
+        Los filtros y la búsqueda se aplican automáticamente al cambiar valores. Pulsa un encabezado para ordenar (▲/▼).
       </template>
     </p>
 
@@ -409,7 +415,7 @@ async function exportServicesCsv() {
                   Código<span class="sort-ind" aria-hidden="true">{{ sortIndicator('code') }}</span>
                 </button>
               </th>
-              <th scope="col" :aria-sort="thAriaSort('service_date')">
+              <th v-if="isAdmin" scope="col" :aria-sort="thAriaSort('service_date')">
                 <button type="button" class="th-sort" @click="toggleSort('service_date')">
                   Fecha<span class="sort-ind" aria-hidden="true">{{ sortIndicator('service_date') }}</span>
                 </button>
@@ -484,7 +490,7 @@ async function exportServicesCsv() {
                   </template>
                 </div>
               </td>
-              <td>{{ formatDate(s.service_date) }}</td>
+              <td v-if="isAdmin">{{ formatDate(s.service_date) }}</td>
               <td>{{ s.company?.nombre || '—' }}</td>
               <td>{{ s.client_name || '—' }}</td>
               <td class="desc">{{ clip(s.description) }}</td>
@@ -530,7 +536,7 @@ async function exportServicesCsv() {
             </tr>
             <tr v-if="!rows.length">
               <td :colspan="tableColspan" class="muted center empty-msg">
-                No hay servicios con los filtros actuales. Prueba ampliar fechas o limpiar la búsqueda.
+                No hay servicios con los filtros actuales. Prueba limpiar la búsqueda o cambiar empresa.
               </td>
             </tr>
           </tbody>

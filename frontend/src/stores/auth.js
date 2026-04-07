@@ -6,6 +6,8 @@ const USER_KEY = 'auth_user'
 
 function loadStoredUser() {
   try {
+    /** Sin token no debe mostrarse usuario: evita bloqueo de /login y redirecciones erróneas. */
+    if (!getToken()) return null
     const s = sessionStorage.getItem(USER_KEY)
     if (s) return JSON.parse(s)
     const l = localStorage.getItem(USER_KEY)
@@ -33,6 +35,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function bootstrap() {
     if (!getToken()) {
+      persistUser(null)
       bootstrapped.value = true
       return
     }

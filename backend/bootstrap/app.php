@@ -20,6 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withSchedule(function (Schedule $schedule) {
+        $schedule->command('billing:generate-draft-invoices')->dailyAt('05:00');
         $schedule->command('billing:process-cutoff')->dailyAt('06:00');
         $schedule->command('billing:daily-reminders')->dailyAt('07:00');
         $schedule->command('db:backup')

@@ -386,7 +386,7 @@ class AdminInvoiceController extends Controller
             $suffix = $isDraft ? '-vista-previa' : '';
             $filename = 'factura-'.preg_replace('/[^a-zA-Z0-9_-]/', '_', $invoice->code).$suffix.'.pdf';
 
-            return Pdf::loadView('pdf.public_invoice', ['data' => $data])->download($filename);
+            return Pdf::loadView('pdf.public_invoice', ['data' => $data])->stream($filename);
         } catch (\Throwable $e) {
             report($e);
 
@@ -633,6 +633,49 @@ class AdminInvoiceController extends Controller
         );
 
         return new AdminInvoiceResource($invoice);
+    }
+
+    /**
+     * Elimina factura errónea: solo borrador, o aprobada sin pagos (aún no enviada con cobros).
+     * Los servicios se desvinculan y pueden facturarse de nuevo. Queda registro en historial.
+     */
+    public function destroy(Request $request, Invoice $invoice): JsonResponse
+    {
+        if (! in_array($invoice->status, [Invoice::STATUS_BORRADOR, Invoice::STATUS_APROBADA], true)) {
+            return response()->json([
+                'message' => 'Solo se pueden eliminar borradores o facturas aprobadas sin pagos. Las enviadas o cobradas no se borran desde aquí.',
+            ], 422);
+        }
+
+        if ($invoice->status === Invoice::STATUS_APROBADA) {
+            $paid = (float) Payment::query()->where('invoice_id', $invoice->id)->sum('amount');
+            if ($paid > 0.001) {
+                return response()->json([
+                    'message' => 'No se puede eliminar una factura con pagos registrados.',
+                ], 422);
+            }
+        }
+
+        $invoice->loadMissing('company:id,nombre');
+        $code = $invoice->code;
+        $invId = $invoice->id;
+        $prevStatus = $invoice->status;
+        $companyNombre = $invoice->company?->nombre ?? '—';
+        $periodLabel = (int) $invoice->period_month.'/'.(int) $invoice->period_year;
+
+        DB::transaction(function () use ($invoice) {
+            $invoice->payments()->delete();
+            $invoice->services()->detach();
+            $invoice->delete();
+        });
+
+        ActivityLogger::log(
+            $request->user(),
+            'factura_eliminada',
+            'Eliminó factura '.$code.' (ID '.$invId.'). Estado previo: '.$prevStatus.'. Empresa: '.$companyNombre.'. Periodo facturación: '.$periodLabel.'. Servicios desvinculados para nueva factura.'
+        );
+
+        return response()->json(['message' => 'Factura eliminada.']);
     }
 
     private function syncInvoiceStatusFromPayments(Invoice $invoice): void

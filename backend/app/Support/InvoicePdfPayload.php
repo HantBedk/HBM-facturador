@@ -80,9 +80,6 @@ class InvoicePdfPayload
             ];
         })->values()->all();
 
-        $clientNames = $invoice->services->pluck('client_name')->filter()->unique()->values()->all();
-        $clientContact = $clientNames !== [] ? implode(', ', $clientNames) : null;
-
         $issuedAt = $invoice->created_at;
         $issuedTz = $issuedAt?->timezone(config('app.timezone'));
         $issuedLabel = $issuedTz ? $issuedTz->format('d/m/y') : '';
@@ -114,7 +111,8 @@ class InvoicePdfPayload
                 'nit' => $invoice->company?->nit,
                 'telefono' => $invoice->company?->telefono,
                 'correo' => $invoice->company?->correo,
-                'contact' => $clientContact,
+                /** Reservado; el PDF ya no muestra nombres agregados aquí (técnico por línea en `services`). */
+                'contact' => null,
                 'direccion' => data_get($invoice->company, 'direccion'),
             ],
             'services' => $services,

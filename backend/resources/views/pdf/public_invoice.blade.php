@@ -34,20 +34,26 @@
         .head-main td { vertical-align: top; padding: 0 6px 0 0; }
         .head-main td:last-child { padding-right: 0; }
 
-        .issuer-row { width: 100%; border-collapse: collapse; }
-        .issuer-row td { vertical-align: top; padding: 0; }
-
+        .head-center { text-align: center; vertical-align: top; }
         .logo-ph {
-            width: 52px;
-            height: 52px;
+            width: 88px;
+            height: 88px;
             background: #cbd5e1;
             border-radius: 4px;
-            display: inline-block;
+            display: block;
+            margin: 0 auto 8px;
         }
-        .logo-img { max-height: 52px; max-width: 52px; border-radius: 4px; display: block; }
+        .logo-img {
+            max-height: 100px;
+            max-width: 220px;
+            width: auto;
+            height: auto;
+            border-radius: 4px;
+            display: block;
+            margin: 0 auto 8px;
+        }
 
-        .issuer-name { font-size: 14px; font-weight: bold; color: #0f172a; margin: 0 0 3px; }
-        .issuer-line { margin: 0; font-size: 8.5px; color: #334155; }
+        .issuer-line { margin: 0 0 2px; font-size: 8.5px; color: #334155; text-align: center; }
 
         .billto-box {
             background: #e0f2fe;
@@ -112,53 +118,36 @@
         .lines-table td.num { text-align: right; white-space: nowrap; }
         .lines-table td.cen { text-align: center; }
         .lines-table tbody tr.row-alt { background: #f0f9ff; }
+        .line-tech { font-size: 8px; font-weight: bold; color: #075985; display: block; margin-bottom: 3px; }
         .line-title { font-weight: bold; color: #0f172a; display: block; margin-bottom: 2px; }
         .line-detail { color: #475569; font-size: 8px; }
 
         .totals-wrap { width: 100%; margin-top: 12px; }
         .totals-wrap td { vertical-align: top; }
-        .totals-left { width: 52%; padding-right: 12px; }
-        .totals-right { width: 48%; }
+        .totals-left { width: 52%; padding-right: 10px; }
+        .totals-right { width: 48%; text-align: right; }
+        .totals-right .sum-table { margin-left: auto; width: auto; max-width: 200px; }
 
-        .pay-box {
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            padding: 8px 10px;
-            background: #f8fafc;
-        }
-        .pay-title { font-size: 9px; font-weight: bold; color: #0f172a; margin: 0 0 6px; }
-        .pay-line { margin: 0 0 3px; font-size: 8px; color: #334155; padding-left: 2px; }
-
-        .sum-table { width: 100%; border-collapse: collapse; }
-        .sum-table td { padding: 4px 0; font-size: 9px; }
-        .sum-table .lbl { text-align: right; color: #475569; padding-right: 10px; }
-        .sum-table .val { text-align: right; font-weight: bold; color: #0c4a6e; }
+        .sum-table { border-collapse: collapse; }
+        .sum-table td { padding: 2px 0; font-size: 8.5px; }
+        .sum-table .lbl { text-align: right; color: #475569; padding-right: 6px; white-space: nowrap; }
+        .sum-table .val { text-align: right; font-weight: bold; color: #0c4a6e; padding-left: 4px; }
         .sum-table .grand td { padding: 0; border: none; }
         .grand-bar {
             background: #0c4a6e;
             color: #fff;
             font-weight: bold;
-            font-size: 10px;
-            padding: 8px 10px;
+            font-size: 9px;
+            padding: 6px 8px;
             text-align: right;
             border-radius: 4px;
-            margin-top: 6px;
+            margin-top: 4px;
         }
 
-        .payhist { margin-top: 10px; }
-        .payhist h3 { font-size: 9px; margin: 0 0 4px; color: #0f172a; }
-        .payhist-table { width: 100%; border-collapse: collapse; font-size: 8px; }
-        .payhist-table th, .payhist-table td { border: 1px solid #e2e8f0; padding: 4px 5px; }
-        .payhist-table th { background: #f1f5f9; text-align: left; }
-
-        .foot-note {
-            margin-top: 12px;
-            padding-top: 8px;
-            border-top: 1px solid #e2e8f0;
-            font-size: 7.5px;
-            color: #64748b;
-        }
-        .foot-note .thanks { font-weight: bold; color: #334155; margin-bottom: 3px; }
+        .footer-side { font-size: 7.5px; color: #64748b; line-height: 1.45; }
+        .footer-side .thanks { font-weight: bold; color: #334155; margin: 0; font-size: 8px; line-height: 1.35; }
+        .footer-side .footer-terms { margin: 0; line-height: 1.55; }
+        .footer-side .thanks + .footer-terms { margin-top: 12px; }
     </style>
 </head>
 <body>
@@ -175,48 +164,38 @@
         <table class="head-main">
             <tr>
                 <td style="width: 36%;">
-                    <table class="issuer-row">
-                        <tr>
-                            <td style="width: 58px; padding-right: 8px;">
-                                @if(!empty($data['issuer']['logo_data_uri']))
-                                    <img class="logo-img" src="{{ $data['issuer']['logo_data_uri'] }}" alt="" />
-                                @else
-                                    <span class="logo-ph"></span>
-                                @endif
-                            </td>
-                            <td>
-                                <p class="issuer-name">{{ $data['issuer']['nombre'] ?? '' }}</p>
-                                @if(!empty($data['issuer']['nit']))
-                                    <p class="issuer-line">NIT: {{ $data['issuer']['nit'] }}</p>
-                                @endif
-                                @if(!empty($data['issuer']['regimen']))
-                                    <p class="issuer-line">{{ $data['issuer']['regimen'] }}</p>
-                                @endif
-                                @if(!empty($data['issuer']['direccion']))
-                                    <p class="issuer-line">{{ $data['issuer']['direccion'] }}</p>
-                                @endif
-                                @if(!empty($data['issuer']['telefono']))
-                                    <p class="issuer-line">{{ $data['issuer']['telefono'] }}</p>
-                                @endif
-                                @if(!empty($data['issuer']['correo']))
-                                    <p class="issuer-line">{{ $data['issuer']['correo'] }}</p>
-                                @endif
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-                <td style="width: 34%;">
                     <div class="billto-box">
                         <p class="billto-title">FACTURAR A:</p>
                         <p class="billto-line"><strong>Razón social:</strong> {{ $data['company']['nombre'] ?? '—' }}</p>
                         @if(!empty($data['company']['nit']))
                             <p class="billto-line"><strong>NIT:</strong> {{ $data['company']['nit'] }}</p>
                         @endif
-                        <p class="billto-line"><strong>Obra / contacto:</strong> {{ $data['company']['contact'] ?? '—' }}</p>
                         <p class="billto-line"><strong>Dirección:</strong> {{ $data['company']['direccion'] ?? '—' }}</p>
                         <p class="billto-line"><strong>Periodo facturado:</strong> {{ $data['invoice']['period_label_upper'] ?? '' }}</p>
                         <p class="billto-line"><strong>E-mail:</strong> {{ $data['company']['correo'] ?? '—' }}</p>
                     </div>
+                </td>
+                <td style="width: 34%;" class="head-center">
+                    @if(!empty($data['issuer']['logo_data_uri']))
+                        <img class="logo-img" src="{{ $data['issuer']['logo_data_uri'] }}" alt="" />
+                    @else
+                        <span class="logo-ph"></span>
+                    @endif
+                    @if(!empty($data['issuer']['nit']))
+                        <p class="issuer-line">NIT: {{ $data['issuer']['nit'] }}</p>
+                    @endif
+                    @if(!empty($data['issuer']['regimen']))
+                        <p class="issuer-line">{{ $data['issuer']['regimen'] }}</p>
+                    @endif
+                    @if(!empty($data['issuer']['direccion']))
+                        <p class="issuer-line">{{ $data['issuer']['direccion'] }}</p>
+                    @endif
+                    @if(!empty($data['issuer']['telefono']))
+                        <p class="issuer-line">{{ $data['issuer']['telefono'] }}</p>
+                    @endif
+                    @if(!empty($data['issuer']['correo']))
+                        <p class="issuer-line">{{ $data['issuer']['correo'] }}</p>
+                    @endif
                 </td>
                 <td style="width: 30%;" class="inv-side">
                     <p class="inv-doc-title">FACTURA</p>
@@ -256,7 +235,14 @@
                 <tr class="{{ $loop->iteration % 2 === 0 ? 'row-alt' : '' }}">
                     <td>{{ $row['pdf_date_label'] ?? ($row['service_date'] ?? '—') }}</td>
                     <td>
-                        <span class="line-title">{{ $row['pdf_title'] ?? ($row['service_type'] ?? 'Servicio') }}</span>
+                        @php
+                            $svcCategory = $row['pdf_title'] ?? ($row['service_type'] ?? 'Servicio');
+                        @endphp
+                        @if(!empty($row['technician_name']))
+                            <span class="line-tech">{{ $row['technician_name'] }}: {{ $svcCategory }}</span>
+                        @else
+                            <span class="line-title">{{ $svcCategory }}</span>
+                        @endif
                         @if(!empty($row['pdf_detail']))
                             <span class="line-detail">{{ $row['pdf_detail'] }}</span>
                         @elseif(!empty($row['description']) || !empty($row['code']))
@@ -298,12 +284,14 @@
         <table class="totals-wrap">
             <tr>
                 <td class="totals-left">
-                    @if(!empty($data['footer']['payment_methods']) && count($data['footer']['payment_methods']) > 0)
-                        <div class="pay-box">
-                            <p class="pay-title">Medios de pago</p>
-                            @foreach($data['footer']['payment_methods'] as $pm)
-                                <p class="pay-line">• {{ $pm }}</p>
-                            @endforeach
+                    @if(!empty($data['footer']['message']) || !empty($data['footer']['payment_terms']))
+                        <div class="footer-side">
+                            @if(!empty($data['footer']['message']))
+                                <p class="thanks">{{ $data['footer']['message'] }}</p>
+                            @endif
+                            @if(!empty($data['footer']['payment_terms']))
+                                <p class="footer-terms"><strong>Condiciones:</strong> {{ $data['footer']['payment_terms'] }}</p>
+                            @endif
                         </div>
                     @endif
                 </td>
@@ -325,61 +313,9 @@
                             </td>
                         </tr>
                     </table>
-                    @php
-                        $paid = (float) ($data['financial']['total_paid'] ?? 0);
-                        $bal = (float) ($data['financial']['balance'] ?? 0);
-                    @endphp
-                    @if($paid > 0 || $bal > 0)
-                        <table class="sum-table" style="margin-top:8px;">
-                            <tr>
-                                <td class="lbl">Total pagado</td>
-                                <td class="val" style="color:#334155;">{{ $fmtCop($paid) }}</td>
-                            </tr>
-                            <tr>
-                                <td class="lbl">Saldo pendiente</td>
-                                <td class="val" style="color:#b45309;">{{ $fmtCop($bal) }}</td>
-                            </tr>
-                        </table>
-                    @endif
                 </td>
             </tr>
         </table>
-
-        <div class="payhist">
-            <h3>Pagos registrados</h3>
-            <table class="payhist-table">
-                <thead>
-                <tr>
-                    <th>Fecha</th>
-                    <th style="text-align:right;width:22%;">Monto</th>
-                    <th>Método</th>
-                    <th>Notas</th>
-                </tr>
-                </thead>
-                <tbody>
-                @forelse($data['payments'] ?? [] as $p)
-                    <tr>
-                        <td>{{ $p['payment_date'] ?? '' }}</td>
-                        <td style="text-align:right;">{{ $fmtCop($p['amount'] ?? 0) }}</td>
-                        <td>{{ $p['method'] ?? '' }}</td>
-                        <td>{{ $p['notes'] ?? '—' }}</td>
-                    </tr>
-                @empty
-                    <tr><td colspan="4" style="color:#64748b;">Sin pagos registrados.</td></tr>
-                @endforelse
-                </tbody>
-            </table>
-        </div>
-
-        <div class="foot-note">
-            @if(!empty($data['footer']['message']))
-                <p class="thanks">{{ $data['footer']['message'] }}</p>
-            @endif
-            @if(!empty($data['footer']['payment_terms']))
-                <p><strong>Condiciones:</strong> {{ $data['footer']['payment_terms'] }}</p>
-            @endif
-            <p>Documento generado electrónicamente. Valores en COP.</p>
-        </div>
     </div>
 </div>
 </body>

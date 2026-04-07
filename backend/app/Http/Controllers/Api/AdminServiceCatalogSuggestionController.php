@@ -7,7 +7,6 @@ use App\Http\Resources\ServiceCatalogSuggestionResource;
 use App\Models\ServiceCatalog;
 use App\Models\ServiceCatalogSuggestion;
 use App\Models\ServiceItem;
-use App\Support\CatalogSuggestionDuplicateChecker;
 use App\Support\Pagination;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -31,19 +30,6 @@ class AdminServiceCatalogSuggestionController extends Controller
 
         if ($request->filled('company_id')) {
             $q->where('company_id', $request->integer('company_id'));
-        }
-
-        $pendingOnly = $request->boolean('pendientes')
-            || ($request->filled('status') && $request->string('status')->toString() === ServiceCatalogSuggestion::STATUS_PENDING);
-
-        if ($pendingOnly) {
-            $candidateRows = (clone $q)->select([
-                'service_catalog_suggestions.id',
-                'service_catalog_suggestions.company_id',
-                'service_catalog_suggestions.name',
-            ])->get();
-            $keepIds = CatalogSuggestionDuplicateChecker::idsWithoutCatalogOverlap($candidateRows);
-            $q->whereIn('service_catalog_suggestions.id', $keepIds);
         }
 
         return ServiceCatalogSuggestionResource::collection(
@@ -80,7 +66,6 @@ class AdminServiceCatalogSuggestionController extends Controller
 
         $dup = ServiceCatalog::query()
             ->where('name', $name)
-            ->whereNull('company_id')
             ->exists();
         if ($dup) {
             throw ValidationException::withMessages([
@@ -90,7 +75,6 @@ class AdminServiceCatalogSuggestionController extends Controller
 
         DB::transaction(function () use ($service_catalog_suggestion, $name, $description, $basePrice) {
             $cat = ServiceCatalog::query()->create([
-                'company_id' => null,
                 'name' => $name,
                 'description' => $description,
                 'base_price' => $basePrice,

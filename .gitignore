@@ -9,3 +9,6 @@
 *.log
 .DS_Store
 Thumbs.db
+
+# Volcados locales de MySQL (pueden contener datos sensibles)
+/backups/

@@ -19,7 +19,7 @@ class AdminDashboardController extends Controller
         $year = (int) $now->year;
         $month = (int) $now->month;
 
-        $metrics = $this->buildMetrics($year, $month);
+        $metrics = array_merge($this->buildMetrics($year, $month), $this->technicianCashflowMetrics($year, $month));
         $invoiceStatusCounts = $this->invoiceStatusCounts();
         $recent = [
             'services' => $this->recentServices(),
@@ -41,7 +41,77 @@ class AdminDashboardController extends Controller
     }
 
     /**
-     * @return array{invoiced_month: string, received_month: string, pending_collect: string, invoices_count_month: int}
+     * Servicios del mes con importe técnico &gt; 0 y sin fecha de pago registrada; abonos a técnicos registrados en el mes; margen simple cobrado − abonos.
+     *
+     * @return array{
+     *   technician_unpaid_services_count: int,
+     *   technician_unpaid_services_total: string,
+     *   technician_payouts_month: string,
+     *   net_collected_after_technician_payouts: string
+     * }
+     */
+    private function technicianCashflowMetrics(int $year, int $month): array
+    {
+        $tz = config('app.timezone');
+        $start = Carbon::create($year, $month, 1, 0, 0, 0, $tz)->startOfDay();
+        $end = $start->copy()->endOfMonth()->endOfDay();
+
+        $unpaidRows = Service::query()
+            ->visibles()
+            ->whereNull('technician_paid_at')
+            ->whereBetween('service_date', [$start->toDateString(), $end->copy()->toDateString()])
+            ->withSum('items', 'technician_line_amount')
+            ->withCount('items')
+            ->get();
+
+        $unpaidCount = 0;
+        $unpaidTotal = 0.0;
+        foreach ($unpaidRows as $s) {
+            $v = $s->technicianReferenceTotalValue();
+            if ($v > 0.00001) {
+                $unpaidCount++;
+                $unpaidTotal += $v;
+            }
+        }
+
+        $payoutRows = Service::query()
+            ->visibles()
+            ->whereNotNull('technician_paid_at')
+            ->whereBetween('technician_paid_at', [$start, $end])
+            ->withSum('items', 'technician_line_amount')
+            ->withCount('items')
+            ->get();
+
+        $payoutSum = 0.0;
+        foreach ($payoutRows as $s) {
+            $payoutSum += $s->technicianReferenceTotalValue();
+        }
+
+        $received = (float) Payment::query()
+            ->whereYear('payment_date', $year)
+            ->whereMonth('payment_date', $month)
+            ->sum('amount');
+
+        $net = $received - $payoutSum;
+
+        return [
+            'technician_unpaid_services_count' => $unpaidCount,
+            'technician_unpaid_services_total' => number_format($unpaidTotal, 2, '.', ''),
+            'technician_payouts_month' => number_format($payoutSum, 2, '.', ''),
+            'net_collected_after_technician_payouts' => number_format($net, 2, '.', ''),
+        ];
+    }
+
+    /**
+     * @return array{
+     *   invoiced_month: string,
+     *   invoiced_total_all: string,
+     *   received_month: string,
+     *   pending_collect: string,
+     *   invoices_count_month: int,
+     *   invoices_count_all: int,
+     *   services_count_month: int
+     * }
      */
     private function buildMetrics(int $year, int $month): array
     {
@@ -70,11 +140,30 @@ class AdminDashboardController extends Controller
             ->where('status', '!=', Invoice::STATUS_BORRADOR)
             ->count();
 
+        $invoicedTotalAll = (string) Invoice::query()
+            ->where('status', '!=', Invoice::STATUS_BORRADOR)
+            ->sum('total');
+
+        $invoicesCountAll = Invoice::query()
+            ->where('status', '!=', Invoice::STATUS_BORRADOR)
+            ->count();
+
+        $servicesCountMonth = Service::query()
+            ->visibles()
+            ->whereYear('service_date', $year)
+            ->whereMonth('service_date', $month)
+            ->count();
+
         return [
             'invoiced_month' => $invoicedMonth,
+            /** Suma de importes de factura (no borrador), todos los períodos contables. */
+            'invoiced_total_all' => $invoicedTotalAll,
             'received_month' => $receivedMonth,
             'pending_collect' => number_format($pendingCollect, 2, '.', ''),
             'invoices_count_month' => $invoicesCountMonth,
+            /** Cantidad de facturas no borrador en base (cualquier período). */
+            'invoices_count_all' => $invoicesCountAll,
+            'services_count_month' => $servicesCountMonth,
         ];
     }
 

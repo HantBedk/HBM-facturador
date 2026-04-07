@@ -2,44 +2,25 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import AdminServiceCatalogDetailPanel from '@/components/admin/AdminServiceCatalogDetailPanel.vue'
 import {
-  approveServiceCatalogSuggestion,
   bulkDestroyServiceCatalogItems,
   createServiceCatalogItem,
   deleteServiceCatalogItem,
   fetchAdminServiceCatalog,
-  fetchCompanies,
-  fetchServiceCatalogSuggestions,
   fetchTechnicianCatalogDiscount,
   importServiceCatalogFromSpreadsheet,
   patchServiceCatalogEstado,
-  rejectServiceCatalogSuggestion,
   updateServiceCatalogItem,
   updateTechnicianCatalogDiscount,
 } from '@/services/servicesApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
-import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 
 const uiDialog = useUiDialogStore()
 
 const rows = ref([])
-const companies = ref([])
 const loading = ref(false)
 const error = ref('')
 const saving = ref(false)
 const fieldErrors = ref({})
-
-const pendingRows = ref([])
-const pendingLoading = ref(false)
-
-const {
-  sortedRows: sortedPendingRows,
-  toggleSort: togglePendingSort,
-  sortIndicator: pendingSortInd,
-  ariaSort: pendingAriaSort,
-} = useClientSortedRows(pendingRows, {
-  name: (r) => r.name || '',
-  suggested_price: (r) => Number(r.suggested_price) || 0,
-}, { initialKey: 'name', initialDir: 'asc' })
 
 /** % global de diferencia: precio lista (factura) vs importe de referencia que ve el técnico en /service-catalog/active */
 const technicianDiscountPercent = ref(10)
@@ -50,12 +31,9 @@ const techDiscountOk = ref('')
 const showModal = ref(false)
 const editingId = ref(null)
 const form = ref({
-  company_id: '',
   name: '',
   description: '',
   base_price: '',
-  /** Vacío = usar % global (pestaña Importar y precios). */
-  technician_discount_percent: '',
   status: 'activo',
 })
 
@@ -63,22 +41,11 @@ const form = ref({
 const selectedCatalogIds = ref([])
 const bulkDeleting = ref(false)
 
-const importCompanyId = ref('')
 const importBusy = ref(false)
 const importFileRef = ref(null)
 
-/** listado: propuestas + tabla; herramientas: importar Excel + descuento técnicos */
+/** listado: tabla; herramientas: importar Excel + descuento técnicos */
 const catalogTab = ref('listado')
-
-const showSuggestionModal = ref(false)
-const suggestionSaving = ref(false)
-const suggestionFieldErrors = ref({})
-const suggestionForm = ref({
-  id: null,
-  name: '',
-  description: '',
-  base_price: '',
-})
 
 const allPageCatalogSelected = computed(
   () =>
@@ -104,14 +71,6 @@ async function setCatalogSort(field) {
     catalogSortDir.value = field === 'base_price' ? 'desc' : 'asc'
   }
   await load()
-}
-
-async function loadCompanies() {
-  try {
-    companies.value = await fetchCompanies()
-  } catch {
-    companies.value = []
-  }
 }
 
 async function load() {
@@ -161,19 +120,6 @@ async function saveTechnicianDiscount() {
   }
 }
 
-async function loadPending() {
-  pendingLoading.value = true
-  try {
-    const res = await fetchServiceCatalogSuggestions({ pendientes: 1, per_page: 50 })
-    pendingRows.value = res.data || []
-  } catch (e) {
-    error.value = e.data?.message || e.message || 'No se pudieron cargar las propuestas.'
-    pendingRows.value = []
-  } finally {
-    pendingLoading.value = false
-  }
-}
-
 const detailPanelOpen = ref(false)
 const detailCatalogId = ref(null)
 const detailPanelRef = ref(null)
@@ -197,10 +143,8 @@ function onGlobalEscape(ev) {
 
 onMounted(async () => {
   document.addEventListener('keydown', onGlobalEscape)
-  await loadCompanies()
   await loadTechnicianDiscount()
   await load()
-  await loadPending()
 })
 
 onUnmounted(() => {
@@ -211,11 +155,9 @@ watch(showModal, (open) => {
   if (!open) {
     editingId.value = null
     form.value = {
-      company_id: '',
       name: '',
       description: '',
       base_price: '',
-      technician_discount_percent: '',
       status: 'activo',
     }
   }
@@ -292,55 +234,12 @@ async function onBulkDeleteCatalog() {
   }
 }
 
-function openSuggestionApprove(s) {
-  suggestionFieldErrors.value = {}
-  suggestionForm.value = {
-    id: s.id,
-    name: s.name || '',
-    description: s.description || '',
-    base_price: String(s.suggested_price ?? ''),
-  }
-  showSuggestionModal.value = true
-}
-
-watch(showSuggestionModal, (open) => {
-  if (!open) {
-    suggestionForm.value = { id: null, name: '', description: '', base_price: '' }
-    suggestionFieldErrors.value = {}
-  }
-})
-
-async function onSubmitSuggestionApprove() {
-  const id = suggestionForm.value.id
-  if (id == null) return
-  suggestionSaving.value = true
-  error.value = ''
-  suggestionFieldErrors.value = {}
-  try {
-    await approveServiceCatalogSuggestion(id, {
-      name: suggestionForm.value.name.trim(),
-      description: suggestionForm.value.description.trim() || null,
-      base_price: Number(suggestionForm.value.base_price),
-    })
-    showSuggestionModal.value = false
-    await loadPending()
-    await load()
-  } catch (e) {
-    if (e.data?.errors) suggestionFieldErrors.value = e.data.errors
-    error.value = e.data?.message || e.message || 'No se pudo aprobar.'
-  } finally {
-    suggestionSaving.value = false
-  }
-}
-
 function openCreate() {
   editingId.value = null
   form.value = {
-    company_id: '',
     name: '',
     description: '',
     base_price: '',
-    technician_discount_percent: '',
     status: 'activo',
   }
   showModal.value = true
@@ -348,14 +247,10 @@ function openCreate() {
 
 function openEdit(row) {
   editingId.value = row.id
-  const ov = row.technician_discount_percent
   form.value = {
-    company_id: row.company_id != null ? String(row.company_id) : '',
     name: row.name,
     description: row.description || '',
     base_price: String(row.base_price),
-    technician_discount_percent:
-      ov != null && ov !== '' ? String(ov) : '',
     status: row.status,
   }
   showModal.value = true
@@ -390,22 +285,15 @@ async function onSave() {
       description: form.value.description.trim() || null,
       base_price: Number(form.value.base_price),
     }
-    const scopedCompany =
-      form.value.company_id !== '' && form.value.company_id != null ? Number(form.value.company_id) : null
-    const rawPct = form.value.technician_discount_percent
-    const technicianPct =
-      rawPct === '' || rawPct === null || rawPct === undefined ? null : Number(rawPct)
     if (editingId.value) {
+      // No enviar % técnico por ítem: se conserva el valor en servidor.
       await updateServiceCatalogItem(editingId.value, {
         ...base,
-        company_id: scopedCompany,
         status: form.value.status,
-        technician_discount_percent: technicianPct,
       })
     } else {
-      const body = { ...base, technician_discount_percent: technicianPct }
-      if (scopedCompany != null) body.company_id = scopedCompany
-      await createServiceCatalogItem(body)
+      // Siempre global; % técnico solo desde «Importar y precios» (global o futuro import).
+      await createServiceCatalogItem(base)
     }
     showModal.value = false
     await load()
@@ -455,10 +343,15 @@ async function onImportFile(ev) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
+  if (file.size < 1) {
+    error.value =
+      'El archivo está vacío (0 bytes). Elija otro archivo o vuelva a exportar el CSV/Excel.'
+    return
+  }
   importBusy.value = true
   error.value = ''
   try {
-    const data = await importServiceCatalogFromSpreadsheet(file, importCompanyId.value)
+    const data = await importServiceCatalogFromSpreadsheet(file)
     await load()
     await uiDialog.alert({
       title: 'Importación de catálogo',
@@ -477,22 +370,6 @@ async function onImportFile(ev) {
 
 function triggerImportPick() {
   importFileRef.value?.click()
-}
-
-async function onRejectSuggestion(s) {
-  const ok = await uiDialog.confirm({
-    title: 'Descartar propuesta',
-    message: `¿Descartar la propuesta «${s.name}»?`,
-    danger: true,
-    confirmLabel: 'Descartar',
-  })
-  if (!ok) return
-  try {
-    await rejectServiceCatalogSuggestion(s.id)
-    await loadPending()
-  } catch (e) {
-    error.value = e.data?.message || e.message || 'No se pudo descartar.'
-  }
 }
 
 function onDetailEdit(catalogItem) {
@@ -514,8 +391,8 @@ function onDetailDelete(catalogItem) {
       <div>
         <h1>Catálogo de servicios</h1>
         <p class="lede">
-          Precios base del catálogo (globales o por empresa en cada ítem). Clic en el <strong>código</strong> (CAT-…) abre el panel lateral con el detalle;
-          en la pestaña <strong>Catálogo</strong> gestionas ítems y propuestas pendientes; en <strong>Importar y precios</strong> cargas Excel/CSV y el <strong>% global</strong> de diferencia factura / referencia técnico.
+          <strong>Precios orientativos</strong> por ítem (el importe facturable lo arma el técnico al cargar el servicio). Clic en el <strong>código</strong> (CAT-…) abre el panel lateral con el detalle;
+          en <strong>Importar y precios</strong> cargas Excel/CSV y el <strong>% global</strong> de margen técnico → factura a la empresa.
         </p>
       </div>
       <div class="head-actions">
@@ -556,45 +433,6 @@ function onDetailDelete(catalogItem) {
     <p v-if="error" class="banner err">{{ error }}</p>
 
     <div v-show="catalogTab === 'listado'" class="tab-panel" role="tabpanel">
-    <div class="card pending-block">
-      <h2 class="pending-title">Propuestas de catálogo pendientes</h2>
-      <p class="pending-sub muted">
-        Ítems nuevos que proponen los empleados al registrar un servicio con línea «Otro». Revísalos aquí antes de darlos de alta.
-      </p>
-      <p v-if="pendingLoading" class="muted pad">Cargando…</p>
-      <table v-else-if="pendingRows.length" class="table">
-        <thead>
-          <tr>
-            <th scope="col" :aria-sort="pendingAriaSort('name')">
-              <button type="button" class="th-sort" @click="togglePendingSort('name')">
-                Nombre propuesto<span class="sort-ind" aria-hidden="true">{{ pendingSortInd('name') }}</span>
-              </button>
-            </th>
-            <th class="num" scope="col" :aria-sort="pendingAriaSort('suggested_price')">
-              <button type="button" class="th-sort th-sort--end" @click="togglePendingSort('suggested_price', 'desc')">
-                Precio sugerido<span class="sort-ind" aria-hidden="true">{{ pendingSortInd('suggested_price') }}</span>
-              </button>
-            </th>
-            <th class="actions-col">Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="s in sortedPendingRows" :key="s.id">
-            <td>
-              <strong>{{ s.name }}</strong>
-              <p v-if="s.description" class="muted tiny">{{ s.description }}</p>
-            </td>
-            <td class="num">{{ money(s.suggested_price) }}</td>
-            <td class="actions-col">
-              <button type="button" class="link ok" @click="openSuggestionApprove(s)">Revisar y aprobar</button>
-              <button type="button" class="link danger" @click="onRejectSuggestion(s)">Descartar</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else class="muted pad">No hay propuestas pendientes.</p>
-    </div>
-
     <div class="card table-wrap">
       <div v-if="loading" class="muted pad">Cargando…</div>
       <table v-else class="table">
@@ -629,7 +467,7 @@ function onDetailDelete(catalogItem) {
               :aria-sort="catalogSortBy === 'base_price' ? (catalogSortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
             >
               <button type="button" class="th-sort th-sort--end" @click="setCatalogSort('base_price')">
-                Precio base<span class="sort-ind" aria-hidden="true">{{ catalogSortIndicator('base_price') }}</span>
+                Orientativo<span class="sort-ind" aria-hidden="true">{{ catalogSortIndicator('base_price') }}</span>
               </button>
             </th>
             <th scope="col" class="nowrap">Margen técnico</th>
@@ -691,16 +529,9 @@ function onDetailDelete(catalogItem) {
         <p class="lede import-lede">
           Use la <strong>primera hoja</strong> del libro (.xlsx, .xls) o un archivo <strong>CSV UTF-8</strong>. Puede incluir una fila de encabezados con textos como
           <em>Nombre</em>, <em>Descripción</em> (opcional) y <em>Precio</em> / <em>Valor</em>. Sin encabezados: columna A = nombre, B = descripción si hay tres o más columnas, última columna numérica = precio; con solo dos columnas: A = nombre, B = precio. Máximo
-          2000 filas; archivo hasta 5&nbsp;MB. Los nombres duplicados en el mismo ámbito (global o empresa) se omiten.
+          2000 filas; archivo hasta 5&nbsp;MB. Los nombres duplicados respecto al catálogo actual se omiten.
         </p>
         <div class="import-row">
-          <label class="import-field">
-            <span>Ámbito</span>
-            <select v-model="importCompanyId" class="input" :disabled="importBusy">
-              <option value="">Global (todas las empresas)</option>
-              <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
-            </select>
-          </label>
           <input
             ref="importFileRef"
             type="file"
@@ -716,11 +547,10 @@ function onDetailDelete(catalogItem) {
       </div>
 
       <div class="card pricing-card">
-        <h2 class="pricing-title">Vista de precios para técnicos</h2>
+        <h2 class="pricing-title">Margen técnico → factura</h2>
         <p class="pricing-lede">
-          <strong>Aquí defines el porcentaje de diferencia</strong> entre el importe que <strong>factura</strong> cada ítem del catálogo y el que el <strong>técnico ve como referencia</strong> al registrar el servicio (por defecto 10&nbsp;%).
-          Ese criterio se aplica <strong>por cada línea de catálogo</strong> que el empleado agregue: a la empresa cliente solo le corresponde el precio de lista acordado, de modo que no se perciba un <strong>doble cobro</strong>.
-          El valor que guardes abajo es el <strong>% global</strong>; puedes fijar un <strong>% distinto por ítem</strong> en crear/editar catálogo. En líneas <strong>Otro</strong>, lo que escribe el técnico sigue esa misma lógica con el % global.
+          El <strong>precio base</strong> del catálogo es <strong>solo orientativo</strong>. Al cargar el servicio, el técnico escribe el <strong>importe de referencia</strong> por línea; con el <strong>% global</strong> (por defecto 10&nbsp;%) se calcula lo <strong>facturable a la empresa</strong>, igual que en las líneas «Otro».
+          Puede definir un <strong>% distinto por ítem</strong> en el panel lateral del ítem (sustituye al global solo para esa línea al facturar).
         </p>
         <div class="pricing-row">
           <label class="pricing-label">
@@ -754,79 +584,22 @@ function onDetailDelete(catalogItem) {
     />
 
     <Teleport to="body">
-      <div v-if="showSuggestionModal" class="modal-backdrop" @click.self="showSuggestionModal = false">
-        <div class="modal card" role="dialog" aria-labelledby="sugg-modal-title">
-          <h2 id="sugg-modal-title">Revisar propuesta y dar de alta</h2>
-          <p class="modal-lede">
-            Ajusta nombre, descripción o precio si hace falta. Al confirmar, el ítem queda en el catálogo global (disponible para cualquier empresa).
-          </p>
-          <form class="modal-form" @submit.prevent="onSubmitSuggestionApprove">
-            <label>
-              <span>Nombre del ítem</span>
-              <input v-model="suggestionForm.name" required class="input" maxlength="255" />
-            </label>
-            <p v-if="suggestionFieldErrors.name?.[0]" class="field-err">{{ suggestionFieldErrors.name[0] }}</p>
-            <label>
-              <span>Descripción (opcional)</span>
-              <textarea v-model="suggestionForm.description" class="input" rows="3" />
-            </label>
-            <label>
-              <span>Precio base (COP)</span>
-              <input v-model="suggestionForm.base_price" type="number" min="0.01" step="0.01" required class="input" />
-            </label>
-            <p v-if="suggestionFieldErrors.base_price?.[0]" class="field-err">{{ suggestionFieldErrors.base_price[0] }}</p>
-            <div class="modal-actions">
-              <button type="button" class="btn secondary" @click="showSuggestionModal = false">Cancelar</button>
-              <button type="submit" class="btn primary" :disabled="suggestionSaving">
-                {{ suggestionSaving ? 'Guardando…' : 'Dar de alta en catálogo' }}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </Teleport>
-
-    <Teleport to="body">
       <div v-if="showModal" class="modal-backdrop" @click.self="showModal = false">
         <div class="modal card">
           <h2>{{ editingId ? 'Editar ítem' : 'Nuevo ítem' }}</h2>
           <form class="modal-form" @submit.prevent="onSave">
             <label>
-              <span>Empresa</span>
-              <select v-model="form.company_id" class="input">
-                <option value="">Global (todas las empresas)</option>
-                <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
-              </select>
-              <small class="hint">Vacío = ítem global; si no, solo aplica a esa empresa.</small>
-            </label>
-            <label>
               <span>Nombre</span>
               <input v-model="form.name" required class="input" maxlength="255" />
             </label>
             <label>
-              <span>Descripción (opcional)</span>
+              <span>Descripción</span>
               <textarea v-model="form.description" class="input" rows="3" />
             </label>
             <label>
-              <span>Precio base (COP)</span>
+              <span>Precio orientativo (COP)</span>
               <input v-model="form.base_price" type="number" min="0.01" step="0.01" required class="input" />
-              <small class="hint">Es el importe que va a la factura (precio de lista).</small>
-            </label>
-            <label>
-              <span>% descuento vista técnico (opcional)</span>
-              <input
-                v-model="form.technician_discount_percent"
-                type="number"
-                min="0"
-                max="99.99"
-                step="0.5"
-                class="input"
-                placeholder="Vacío = usar global"
-              />
-              <small class="hint">
-                El técnico ve precio ≈ factura × (100&nbsp;−&nbsp;%) / 100. Vacío: mismo % que en «Importar y precios» (ahora
-                {{ Number(technicianDiscountPercent) || '—' }}%).
-              </small>
+              <small class="hint">Importe de lista (factura). Los ítems nuevos son globales para todas las empresas.</small>
             </label>
             <label v-if="editingId">
               <span>Estado</span>
@@ -1020,20 +793,6 @@ h1 {
 }
 .banner.inline {
   margin-bottom: 0;
-}
-.pending-block {
-  margin-bottom: 1rem;
-}
-.pending-title {
-  margin: 0 0 0.35rem;
-  font-size: 1.05rem;
-  color: #e2e8f0;
-}
-.pending-sub {
-  margin: 0 0 0.85rem;
-  font-size: 0.82rem;
-  line-height: 1.45;
-  max-width: 44rem;
 }
 .table {
   width: 100%;

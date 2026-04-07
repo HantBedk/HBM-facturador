@@ -8,7 +8,6 @@ use App\Models\Company;
 use App\Models\PanelNotification;
 use App\Models\Service;
 use App\Models\ServiceCatalog;
-use App\Models\ServiceCatalogSuggestion;
 use App\Models\ServiceItem;
 use App\Models\ServicePhoto;
 use App\Models\User;
@@ -16,7 +15,6 @@ use App\Services\ActivityLogger;
 use App\Services\PanelNotificationDispatcher;
 use App\Services\ServiceCodeGenerator;
 use App\Support\CatalogPricing;
-use App\Support\CatalogSuggestionDuplicateChecker;
 use App\Support\DecimalMath;
 use App\Support\Pagination;
 use Carbon\Carbon;
@@ -79,6 +77,26 @@ class ServiceController extends Controller
             });
         }
 
+        if ($user->isAdminEquipo() && filter_var($request->query('technician_unpaid'), FILTER_VALIDATE_BOOLEAN)) {
+            $sub = Service::query()->visibles()->whereNull('technician_paid_at');
+            if ($request->filled('service_date_from')) {
+                $sub->whereDate('service_date', '>=', $request->date('service_date_from')->format('Y-m-d'));
+            }
+            if ($request->filled('service_date_to')) {
+                $sub->whereDate('service_date', '<=', $request->date('service_date_to')->format('Y-m-d'));
+            }
+            $ids = $sub->withSum('items', 'technician_line_amount')
+                ->withCount('items')
+                ->get()
+                ->filter(fn (Service $s) => $s->technicianReferenceTotalValue() > 0.00001)
+                ->pluck('id');
+            if ($ids->isEmpty()) {
+                $q->whereRaw('0 = 1');
+            } else {
+                $q->whereIn('services.id', $ids->all());
+            }
+        }
+
         $sort = $request->query('sort');
         $sortDir = strtolower((string) $request->query('sort_dir', 'asc')) === 'desc' ? 'desc' : 'asc';
         $allowedSorts = [
@@ -135,7 +153,6 @@ class ServiceController extends Controller
             'client_name' => ['required', 'string', 'max:255'],
             'service_type' => ['required', 'string', 'max:255'],
             'description' => ['required', 'string', 'min:8'],
-            'service_date' => ['required', 'date'],
             'photos' => ['sometimes', 'array', 'max:4'],
             'photos.*' => ['file', 'image', 'mimes:jpeg,jpg,png,gif,webp', 'max:8192'],
             'catalog_id' => ['nullable', 'integer', 'exists:service_catalog,id'],
@@ -151,12 +168,33 @@ class ServiceController extends Controller
                     'items' => ['Añade líneas del servicio (catálogo o «Otro») o indica un valor único.'],
                 ]);
             }
-            $itemsPayload = [[
-                'catalog_id' => isset($data['catalog_id']) ? (int) $data['catalog_id'] : null,
-                'custom_name' => null,
-                'custom_description' => null,
-                'amount' => $data['amount'],
-            ]];
+            if (isset($data['catalog_id'])) {
+                $itemsPayload = [[
+                    'catalog_id' => (int) $data['catalog_id'],
+                    'custom_name' => null,
+                    'custom_description' => null,
+                    'amount' => $data['amount'],
+                    'line_description' => $data['description'],
+                ]];
+            } else {
+                // Compatibilidad: registro único sin `items` ni catálogo → una línea «Otro».
+                // El `amount` histórico es el total facturable; normalizeServiceItems interpreta `amount` como técnico.
+                $billed = (float) $data['amount'];
+                $p = CatalogPricing::globalTechnicianDiscountPercent();
+                if ($p <= 0 || $p >= 100) {
+                    $techAmount = $billed;
+                } else {
+                    $f = (100 - $p) / 100;
+                    $techAmount = round($billed * $f, 2);
+                }
+                $itemsPayload = [[
+                    'catalog_id' => null,
+                    'custom_name' => $data['service_type'],
+                    'custom_description' => null,
+                    'amount' => $techAmount,
+                    'line_description' => $data['description'],
+                ]];
+            }
         }
 
         $companyId = (int) $data['company_id'];
@@ -169,7 +207,8 @@ class ServiceController extends Controller
             ]);
         }
 
-        $serviceDate = Carbon::parse($data['service_date'], config('app.timezone'))->startOfDay();
+        // Fecha de servicio (día contable): siempre la del servidor; no aceptar valor del cliente.
+        $serviceDate = Carbon::now(config('app.timezone'))->startOfDay();
 
         $totalAmount = '0.00';
         foreach ($normalized as $row) {
@@ -200,8 +239,6 @@ class ServiceController extends Controller
             }
         }
 
-        $pendingSuggestions = 0;
-
         $service = DB::transaction(function () use (
             $code,
             $companyId,
@@ -211,7 +248,6 @@ class ServiceController extends Controller
             $serviceDate,
             $normalized,
             $firstCatalogId,
-            &$pendingSuggestions
         ) {
             $service = Service::create([
                 'code' => $code,
@@ -227,26 +263,10 @@ class ServiceController extends Controller
             ]);
 
             foreach ($normalized as $sort => $row) {
-                $suggestionId = null;
-                if ($row['is_custom'] && ($row['propose_catalog'] ?? false)) {
-                    if (! CatalogSuggestionDuplicateChecker::isRedundantWithActiveCatalog($row['custom_name'], $companyId)) {
-                        $s = ServiceCatalogSuggestion::query()->create([
-                            'company_id' => $companyId,
-                            'user_id' => $user->id,
-                            'name' => $row['custom_name'],
-                            'description' => $row['custom_description'],
-                            'suggested_price' => $row['amount'],
-                            'status' => ServiceCatalogSuggestion::STATUS_PENDING,
-                        ]);
-                        $suggestionId = $s->id;
-                        $pendingSuggestions++;
-                    }
-                }
-
                 ServiceItem::query()->create([
                     'service_id' => $service->id,
                     'catalog_id' => $row['catalog_id'],
-                    'catalog_suggestion_id' => $suggestionId,
+                    'catalog_suggestion_id' => null,
                     'label' => $row['label'],
                     'line_description' => $row['line_description'],
                     'amount' => $row['amount'],
@@ -285,17 +305,6 @@ class ServiceController extends Controller
                 'link' => '/admin/servicios/'.$service->id,
             ]
         );
-
-        if ($pendingSuggestions > 0) {
-            app(PanelNotificationDispatcher::class)->notifyAdmins(
-                PanelNotification::TYPE_CATALOG_SUGGESTION_PENDING,
-                'El servicio '.$service->code.' incluye '.$pendingSuggestions.' propuesta(s) de ítem nuevo (catálogo global) pendiente(s) de revisión.',
-                [
-                    'service_id' => $service->id,
-                    'link' => '/admin/catalogo-servicios',
-                ]
-            );
-        }
 
         ActivityLogger::log(
             $request->user(),
@@ -347,7 +356,7 @@ class ServiceController extends Controller
         ]);
 
         if (isset($data['catalog_id'])) {
-            $this->assertCatalogAllowedForCompany((int) $data['catalog_id'], (int) $service->company_id);
+            $this->assertActiveCatalogItem((int) $data['catalog_id']);
         }
 
         $service->catalog_id = isset($data['catalog_id']) ? (int) $data['catalog_id'] : null;
@@ -378,6 +387,43 @@ class ServiceController extends Controller
             $request->user(),
             'servicio_editado',
             'Editó servicio '.$service->code.' (ID '.$service->id.').'
+        );
+
+        return new ServiceResource($service);
+    }
+
+    /**
+     * Marca o limpia el registro interno de pago al técnico (no modifica líneas ni facturas).
+     */
+    public function patchTechnicianPaid(Request $request, Service $service): ServiceResource|JsonResponse
+    {
+        $this->authorize('view', $service);
+        if (! $request->user()->isAdminEquipo()) {
+            return response()->json(['message' => 'Solo el equipo administrador puede registrar este estado.'], 403);
+        }
+
+        if ($service->status === Service::STATUS_ELIMINADO) {
+            return response()->json(['message' => 'No aplica a servicios eliminados.'], 422);
+        }
+
+        $data = $request->validate([
+            'technician_paid_at' => ['nullable', 'date'],
+        ]);
+
+        $service->technician_paid_at = isset($data['technician_paid_at']) && $data['technician_paid_at'] !== null
+            ? Carbon::parse($data['technician_paid_at'], config('app.timezone'))->startOfDay()
+            : null;
+        $service->save();
+
+        $service->loadCount('invoices');
+        $service->load(['company', 'user', 'photos', 'catalog:id,name', 'items.catalogSuggestion']);
+
+        ActivityLogger::log(
+            $request->user(),
+            'servicio_pago_tecnico',
+            ($service->technician_paid_at
+                ? 'Marcó pago al técnico para servicio '.$service->code.' (ID '.$service->id.').'
+                : 'Quitó marca de pago al técnico en servicio '.$service->code.' (ID '.$service->id.').')
         );
 
         return new ServiceResource($service);
@@ -494,12 +540,6 @@ class ServiceController extends Controller
             $lineDescRaw = isset($row['line_description']) ? trim((string) $row['line_description']) : '';
             $lineDescOverride = $lineDescRaw !== '' ? $lineDescRaw : null;
 
-            $proposeCatalog = false;
-            if (array_key_exists('propose_catalog', $row)) {
-                $pc = $row['propose_catalog'];
-                $proposeCatalog = $pc === true || $pc === 1 || $pc === '1' || $pc === 'true';
-            }
-
             $amt = $row['amount'] ?? null;
             if ($amt === null || ! is_numeric($amt) || (float) $amt < 0.01) {
                 throw ValidationException::withMessages([
@@ -519,31 +559,33 @@ class ServiceController extends Controller
                     'items' => ['Línea '.($i + 1).': no combines catálogo y «Otro» en la misma línea.'],
                 ]);
             }
-            if ($cid !== null && $proposeCatalog) {
-                throw ValidationException::withMessages([
-                    'items' => ['Línea '.($i + 1).': propose_catalog solo aplica a líneas «Otro» (sin catálogo).'],
-                ]);
-            }
 
             if ($cid !== null) {
-                $this->assertCatalogAllowedForCompany($cid, $companyId);
+                $this->assertActiveCatalogItem($cid);
                 $cat = ServiceCatalog::query()->find($cid);
                 if ($cat === null) {
                     throw ValidationException::withMessages(['items' => ['Ítem de catálogo no encontrado.']]);
                 }
-                $lineDesc = $lineDescOverride ?? $cat->description;
-                // Precio de lista (factura); el técnico ve menos en catálogo activo según % global o por ítem.
-                $listPrice = number_format((float) $cat->base_price, 2, '.', '');
+                if ($lineDescRaw === '' || mb_strlen($lineDescRaw) < 8) {
+                    throw ValidationException::withMessages([
+                        'items' => ['Línea '.($i + 1).': describe el trabajo realizado en este concepto (mín. 8 caracteres).'],
+                    ]);
+                }
+                $lineDesc = $lineDescRaw;
+                // `base_price` en catálogo es orientativo; el importe enviado es lo que declara el técnico por el trabajo real.
+                // La factura a la empresa = mismo criterio que «Otro»: importe técnico + margen (% global o override por ítem).
+                $techEntry = (float) $amtStr;
                 $pEff = CatalogPricing::effectiveTechnicianDiscountPercent(
                     $cat->technician_discount_percent !== null ? (float) $cat->technician_discount_percent : null
                 );
-                $techLine = CatalogPricing::technicianAmountFromListPrice((float) $listPrice, $pEff);
+                $billedStr = CatalogPricing::billedAmountFromTechnicianEntry($techEntry, $pEff);
+                $techStr = number_format($techEntry, 2, '.', '');
                 $out[] = [
                     'catalog_id' => $cid,
                     'custom_name' => null,
                     'custom_description' => null,
-                    'amount' => $listPrice,
-                    'technician_line_amount' => $techLine,
+                    'amount' => $billedStr,
+                    'technician_line_amount' => $techStr,
                     'label' => $cat->name,
                     'line_description' => $lineDesc,
                     'is_custom' => false,
@@ -556,6 +598,11 @@ class ServiceController extends Controller
                     ]);
                 }
                 $lineDesc = $lineDescOverride ?? $cdesc;
+                if ($lineDesc === null || trim((string) $lineDesc) === '' || mb_strlen(trim((string) $lineDesc)) < 8) {
+                    throw ValidationException::withMessages([
+                        'items' => ['Línea «Otro» '.($i + 1).': describe el trabajo realizado (mín. 8 caracteres).'],
+                    ]);
+                }
                 $pGlobal = CatalogPricing::globalTechnicianDiscountPercent();
                 $billedStr = CatalogPricing::billedAmountFromTechnicianEntry((float) $amtStr, $pGlobal);
                 $out[] = [
@@ -567,7 +614,7 @@ class ServiceController extends Controller
                     'label' => $cname,
                     'line_description' => $lineDesc,
                     'is_custom' => true,
-                    'propose_catalog' => $proposeCatalog,
+                    'propose_catalog' => false,
                 ];
             }
         }
@@ -575,17 +622,12 @@ class ServiceController extends Controller
         return $out;
     }
 
-    private function assertCatalogAllowedForCompany(int $catalogId, int $companyId): void
+    private function assertActiveCatalogItem(int $catalogId): void
     {
         $row = ServiceCatalog::query()->find($catalogId);
         if ($row === null || $row->status !== ServiceCatalog::STATUS_ACTIVO) {
             throw ValidationException::withMessages([
                 'items' => ['Un ítem de catálogo no existe o no está activo.'],
-            ]);
-        }
-        if ($row->company_id !== null && (int) $row->company_id !== $companyId) {
-            throw ValidationException::withMessages([
-                'items' => ['Hay un ítem de catálogo que no corresponde a la empresa del servicio.'],
             ]);
         }
     }

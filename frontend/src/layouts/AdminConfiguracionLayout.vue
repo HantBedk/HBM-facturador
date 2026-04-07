@@ -6,6 +6,7 @@ const route = useRoute()
 
 const isNotif = computed(() => route.name === 'admin-notificaciones-tecnicos')
 const isHistorial = computed(() => route.name === 'admin-config-historial')
+const isBillingAuto = computed(() => route.name === 'admin-config-billing-automation')
 </script>
 
 <template>
@@ -34,6 +35,17 @@ const isHistorial = computed(() => route.name === 'admin-config-historial')
           "
         >
           Historial
+        </RouterLink>
+        <RouterLink
+          to="/admin/configuracion/facturacion-automatica"
+          class="rounded-xl px-3 py-2 text-sm font-medium transition"
+          :class="
+            isBillingAuto
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+              : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
+          "
+        >
+          Facturación automática
         </RouterLink>
       </nav>
     </div>

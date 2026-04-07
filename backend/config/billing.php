@@ -27,10 +27,18 @@ return [
         ))
     ))),
 
-    /** Ruta relativa a `public/` (ej. `img/logo.png`) o ruta absoluta legible por PHP. */
-    'logo_path' => env('BILLING_LOGO_PATH', ''),
+    /** Ruta relativa a `public/` (por defecto `logo-HBM.png` en la raíz de `public/`). */
+    'logo_path' => env('BILLING_LOGO_PATH', 'logo-HBM.png'),
 
     'footer_message' => env('BILLING_FOOTER_MESSAGE', 'Gracias por su confianza.'),
 
     'payment_terms' => env('BILLING_PAYMENT_TERMS', 'Pago según condiciones acordadas con el cliente.'),
+
+    /**
+     * Usuario propietario de los {@see Service} generados desde plantillas mensuales (servicios fijos).
+     * Si es null, se usa el primer super_admin o admin activo.
+     */
+    'recurring_services_user_id' => env('BILLING_RECURRING_SERVICES_USER_ID') !== null && env('BILLING_RECURRING_SERVICES_USER_ID') !== ''
+        ? (int) env('BILLING_RECURRING_SERVICES_USER_ID')
+        : null,
 ];
