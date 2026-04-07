@@ -545,7 +545,10 @@ const totalDisplay = computed(() => {
     </ul>
 
     <p v-if="lines.length" class="rounded-2xl border border-sky-500/25 bg-sky-500/10 px-4 py-3 text-center text-sm font-semibold text-sky-100">
-      Total del servicio: {{ totalDisplay }}
+      Total referencia (lo que ingresas por línea): {{ totalDisplay }}
+      <span class="mt-1 block text-[0.7rem] font-normal leading-snug text-sky-200/80">
+        La factura a la empresa suma el margen % que define administración (mismo criterio que «Otro»).
+      </span>
     </p>
 
     <!-- Resumen tipo servicio (se sincroniza con los ítems; editable) -->

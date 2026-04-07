@@ -152,8 +152,23 @@ class AdminServiceCatalogController extends Controller
      */
     public function import(Request $request, ServiceCatalogSpreadsheetImporter $importer): JsonResponse
     {
+        // `mimes:` rechaza CSV típico de Excel en Windows (p. ej. application/vnd.ms-excel).
         $request->validate([
-            'file' => ['required', 'file', 'max:5120', 'mimes:xlsx,xls,csv,txt'],
+            'file' => [
+                'required',
+                'file',
+                'max:5120',
+                'extensions:csv,txt,xlsx,xls,xlsm,xltx,xltm',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (! $value instanceof \Illuminate\Http\UploadedFile) {
+                        return;
+                    }
+                    $size = $value->getSize();
+                    if ($size === false || $size < 1) {
+                        $fail('El archivo está vacío o no se recibió el contenido. “Copiar como cURL” desde Chrome suele omitir el cuerpo del archivo: suba el CSV desde la pantalla de catálogo o use curl -F "file=@/ruta/catalogo.csv" -H "Authorization: Bearer SU_TOKEN" la URL /api/admin/service-catalog/import de su entorno.');
+                    }
+                },
+            ],
         ]);
 
         $parsed = $importer->parse($request->file('file'));

@@ -2,34 +2,22 @@
 
 namespace App\Http\Resources;
 
-use App\Models\ServiceCatalog;
 use App\Models\User;
-use App\Support\CatalogPricing;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
  * @mixin ServiceCatalog
  *
- * - base_price en BD = precio que factura (lista).
- * - Para empleados, base_price en JSON = importe de referencia del técnico (menor), salvo admin.
- * - technician_discount_percent null = usar el % global de ajuste a técnicos.
+ * - `base_price` en BD = referencia orientativa (placeholder); el importe facturable lo define el empleado al cargar el servicio.
+ * - technician_discount_percent null = usar el % global de margen técnico → empresa al facturar líneas.
  */
 class ServiceCatalogResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $listPrice = (string) $this->base_price;
+        $displayPrice = (string) $this->base_price;
         $user = $request->user();
-
-        $pEff = CatalogPricing::effectiveTechnicianDiscountPercent(
-            $this->technician_discount_percent !== null ? (float) $this->technician_discount_percent : null
-        );
-
-        $displayPrice = $listPrice;
-        if ($user !== null && $user->rol === User::ROL_EMPLEADO) {
-            $displayPrice = CatalogPricing::technicianAmountFromListPrice((float) $this->base_price, $pEff);
-        }
 
         $isEmpleado = $user !== null && $user->rol === User::ROL_EMPLEADO;
 

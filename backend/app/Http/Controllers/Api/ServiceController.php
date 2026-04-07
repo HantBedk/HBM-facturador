@@ -572,18 +572,20 @@ class ServiceController extends Controller
                     ]);
                 }
                 $lineDesc = $lineDescRaw;
-                // Precio de lista (factura); el técnico ve menos en catálogo activo según % global o por ítem.
-                $listPrice = number_format((float) $cat->base_price, 2, '.', '');
+                // `base_price` en catálogo es orientativo; el importe enviado es lo que declara el técnico por el trabajo real.
+                // La factura a la empresa = mismo criterio que «Otro»: importe técnico + margen (% global o override por ítem).
+                $techEntry = (float) $amtStr;
                 $pEff = CatalogPricing::effectiveTechnicianDiscountPercent(
                     $cat->technician_discount_percent !== null ? (float) $cat->technician_discount_percent : null
                 );
-                $techLine = CatalogPricing::technicianAmountFromListPrice((float) $listPrice, $pEff);
+                $billedStr = CatalogPricing::billedAmountFromTechnicianEntry($techEntry, $pEff);
+                $techStr = number_format($techEntry, 2, '.', '');
                 $out[] = [
                     'catalog_id' => $cid,
                     'custom_name' => null,
                     'custom_description' => null,
-                    'amount' => $listPrice,
-                    'technician_line_amount' => $techLine,
+                    'amount' => $billedStr,
+                    'technician_line_amount' => $techStr,
                     'label' => $cat->name,
                     'line_description' => $lineDesc,
                     'is_custom' => false,

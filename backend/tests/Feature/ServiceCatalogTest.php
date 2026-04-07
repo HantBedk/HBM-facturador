@@ -88,13 +88,14 @@ class ServiceCatalogTest extends TestCase
         ]);
         $emp = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
 
+        // Importe enviado = referencia técnico; con margen global 10% (por defecto) la factura es técnico ÷ 0,9.
         $r = $this->postJson('/api/services', [
             'company_id' => $company->id,
             'catalog_id' => $id,
             'client_name' => 'Cliente X',
             'service_type' => 'Instalación red',
             'description' => 'Cableado y configuración básica de red local.',
-            'amount' => 260000,
+            'amount' => 234000,
         ])->assertCreated();
         $this->assertMatchesRegularExpression('/^SERV-260415\d{2}$/', (string) $r->json('data.code'));
 
@@ -102,6 +103,7 @@ class ServiceCatalogTest extends TestCase
         $this->assertSame($id, $svc->catalog_id);
         $this->assertSame('260000.00', (string) $svc->amount);
         $this->assertSame(1, $svc->items()->count());
+        $this->assertSame('234000.00', (string) $svc->items()->first()->technician_line_amount);
 
         $this->putJson('/api/admin/service-catalog/'.$id, [
             'name' => 'Instalación red',
@@ -207,8 +209,8 @@ class ServiceCatalogTest extends TestCase
             'service_type' => 'Línea A · Línea B',
             'description' => 'Descripción general del servicio con varias líneas.',
             'items' => [
-                ['catalog_id' => $a->id, 'amount' => 100, 'line_description' => 'Trabajo realizado en línea A según visita.'],
-                ['catalog_id' => $b->id, 'amount' => 200, 'line_description' => 'Trabajo realizado en línea B según visita.'],
+                ['catalog_id' => $a->id, 'amount' => 90, 'line_description' => 'Trabajo realizado en línea A según visita.'],
+                ['catalog_id' => $b->id, 'amount' => 180, 'line_description' => 'Trabajo realizado en línea B según visita.'],
             ],
         ])->assertCreated();
 
@@ -362,7 +364,7 @@ class ServiceCatalogTest extends TestCase
         $this->assertCount(2, $ids);
     }
 
-    public function test_service_catalog_line_stores_list_price_even_if_client_sends_discounted_amount(): void
+    public function test_service_catalog_line_bills_from_technician_amount_with_global_margin(): void
     {
         AppSetting::setValue(AppSetting::KEY_TECHNICIAN_CATALOG_DISCOUNT_PERCENT, '10');
 
@@ -464,7 +466,7 @@ class ServiceCatalogTest extends TestCase
         $res = $this->getJson('/api/service-catalog/active')->assertOk();
         $row = collect($res->json('data'))->firstWhere('name', 'Ítem 20 pct');
         $this->assertNotNull($row);
-        $this->assertSame('80000.00', (string) $row['base_price']);
+        $this->assertSame('100000.00', (string) $row['base_price']);
         $this->assertArrayNotHasKey('technician_discount_percent', $row);
     }
 

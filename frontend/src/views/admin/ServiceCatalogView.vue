@@ -343,6 +343,11 @@ async function onImportFile(ev) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
+  if (file.size < 1) {
+    error.value =
+      'El archivo está vacío (0 bytes). Elija otro archivo o vuelva a exportar el CSV/Excel.'
+    return
+  }
   importBusy.value = true
   error.value = ''
   try {
@@ -386,8 +391,8 @@ function onDetailDelete(catalogItem) {
       <div>
         <h1>Catálogo de servicios</h1>
         <p class="lede">
-          Precios base del catálogo (globales o por empresa en cada ítem). Clic en el <strong>código</strong> (CAT-…) abre el panel lateral con el detalle;
-          en <strong>Importar y precios</strong> cargas Excel/CSV y el <strong>% global</strong> de diferencia factura / referencia técnico.
+          <strong>Precios orientativos</strong> por ítem (el importe facturable lo arma el técnico al cargar el servicio). Clic en el <strong>código</strong> (CAT-…) abre el panel lateral con el detalle;
+          en <strong>Importar y precios</strong> cargas Excel/CSV y el <strong>% global</strong> de margen técnico → factura a la empresa.
         </p>
       </div>
       <div class="head-actions">
@@ -462,7 +467,7 @@ function onDetailDelete(catalogItem) {
               :aria-sort="catalogSortBy === 'base_price' ? (catalogSortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
             >
               <button type="button" class="th-sort th-sort--end" @click="setCatalogSort('base_price')">
-                Precio base<span class="sort-ind" aria-hidden="true">{{ catalogSortIndicator('base_price') }}</span>
+                Orientativo<span class="sort-ind" aria-hidden="true">{{ catalogSortIndicator('base_price') }}</span>
               </button>
             </th>
             <th scope="col" class="nowrap">Margen técnico</th>
@@ -542,11 +547,10 @@ function onDetailDelete(catalogItem) {
       </div>
 
       <div class="card pricing-card">
-        <h2 class="pricing-title">Vista de precios para técnicos</h2>
+        <h2 class="pricing-title">Margen técnico → factura</h2>
         <p class="pricing-lede">
-          <strong>Aquí defines el porcentaje de diferencia</strong> entre el importe que <strong>factura</strong> cada ítem del catálogo y el que el <strong>técnico ve como referencia</strong> al registrar el servicio (por defecto 10&nbsp;%).
-          Ese criterio se aplica <strong>por cada línea de catálogo</strong> que el empleado agregue: a la empresa cliente solo le corresponde el precio de lista acordado, de modo que no se perciba un <strong>doble cobro</strong>.
-          El valor que guardes abajo es el <strong>% global</strong> para todos los ítems (alta manual e importación). En líneas <strong>Otro</strong> u orientativas, el importe que ingresa el técnico se ajusta con el mismo % global hacia el monto facturable.
+          El <strong>precio base</strong> del catálogo es <strong>solo orientativo</strong>. Al cargar el servicio, el técnico escribe el <strong>importe de referencia</strong> por línea; con el <strong>% global</strong> (por defecto 10&nbsp;%) se calcula lo <strong>facturable a la empresa</strong>, igual que en las líneas «Otro».
+          Puede definir un <strong>% distinto por ítem</strong> en el panel lateral del ítem (sustituye al global solo para esa línea al facturar).
         </p>
         <div class="pricing-row">
           <label class="pricing-label">
@@ -593,7 +597,7 @@ function onDetailDelete(catalogItem) {
               <textarea v-model="form.description" class="input" rows="3" />
             </label>
             <label>
-              <span>Precio base (COP)</span>
+              <span>Precio orientativo (COP)</span>
               <input v-model="form.base_price" type="number" min="0.01" step="0.01" required class="input" />
               <small class="hint">Importe de lista (factura). Los ítems nuevos son globales para todas las empresas.</small>
             </label>

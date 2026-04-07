@@ -64,10 +64,11 @@ export function bulkDestroyServiceCatalogItems(ids) {
 export function importServiceCatalogFromSpreadsheet(file) {
   const fd = new FormData()
   fd.append('file', file)
+  // Respuesta plana { message, imported, issues } — no va envuelta en `data` como los API Resources.
   return api('/admin/service-catalog/import', {
     method: 'POST',
     body: fd,
-  }).then((r) => r.data)
+  })
 }
 
 /** % global de diferencia factura vs referencia técnico en catálogo (solo admin). */

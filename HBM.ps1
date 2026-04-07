@@ -1,13 +1,28 @@
-# Arranque: Docker, hbm:sync (migrate + login demo si users vacío; seeder completo solo si no hay empresas), Vite.
-#   .\HBM              → up, hbm:sync, Vite
-#   .\HBM -Build       → rebuild imágenes
-#   .\HBM -SoloMigrar  → up, hbm:sync sin Vite (no ejecuta DatabaseSeeder completo si ya hay empresas)
-#   Resembrar demo completo: docker compose exec laravel php artisan hbm:sync --demo
-#   Borrar TODA la base:   docker compose exec laravel php artisan hbm:sync --fresh
-# En PowerShell, desde la raiz del repo: .\HBM
+# Arranque del proyecto HBM.
+#
+# RECOMENDADO día a día (no toca la BD, no seeders, no migraciones):
+#   .\HBM.ps1 -Levantar     → Docker + Vite solamente
+#
+# Otros:
+#   .\HBM.ps1               → Docker + hbm:sync (migrate + seeds si no hay empresas) + Vite
+#   .\HBM.ps1 -Build        → igual que arriba pero rebuild de imágenes
+#   .\HBM.ps1 -SoloMigrar   → Docker + solo migrate (sin seeders), sin Vite
+#   .\HBM.ps1 -SoloMigra    → alias de -SoloMigrar
+#
+# Tras git pull con migraciones nuevas (solo esquema, sin resembrar):
+#   docker compose exec laravel php artisan hbm:sync --migrate-only
+#   # o: docker compose exec laravel php artisan migrate --force
+#
+#   hbm:sync sin --migrate-only: si NO hay empresas, corre DatabaseSeeder completo (demo).
+#   Resembrar demo:  docker compose exec laravel php artisan hbm:sync --demo
+#   Borrar toda la BD: docker compose exec laravel php artisan hbm:sync --fresh
+#
+# Desde la raíz del repo: .\HBM.ps1 ...
 param(
     [switch]$Build,
-    [switch]$SoloMigrar
+    [Alias('SoloMigra')]
+    [switch]$SoloMigrar,
+    [switch]$Levantar
 )
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -20,13 +35,19 @@ if ($Build) {
     docker compose up -d
 }
 
-Write-Host "Esperando MySQL (hbm:sync: migrate; seed completo solo si la BD no tiene empresas)..." -ForegroundColor Cyan
-Start-Sleep -Seconds 6
-docker compose exec -T laravel php artisan hbm:sync --no-interaction
-
-if ($SoloMigrar) {
-    Write-Host "hbm:sync completado. Fin (-SoloMigrar)." -ForegroundColor Green
+if ($Levantar) {
+    Start-Sleep -Seconds 3
+    Write-Host "Modo -Levantar: sin migraciones ni seeders (BD intacta)." -ForegroundColor Green
+} elseif ($SoloMigrar) {
+    Write-Host "Esperando MySQL (solo migraciones, sin seeders)..." -ForegroundColor Cyan
+    Start-Sleep -Seconds 6
+    docker compose exec -T laravel php artisan hbm:sync --no-interaction --migrate-only
+    Write-Host "Migraciones aplicadas. Fin (-SoloMigrar / -SoloMigra)." -ForegroundColor Green
     exit 0
+} else {
+    Write-Host "Esperando MySQL (hbm:sync: migrate + seeds si aplica)..." -ForegroundColor Cyan
+    Start-Sleep -Seconds 6
+    docker compose exec -T laravel php artisan hbm:sync --no-interaction
 }
 
 Write-Host ""

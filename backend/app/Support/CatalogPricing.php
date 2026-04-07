@@ -5,9 +5,10 @@ namespace App\Support;
 use App\Models\AppSetting;
 
 /**
- * Precio de lista/factura vs importe que maneja el técnico (X% menos que la factura).
+ * Margen entre importe declarado por el técnico y lo facturable a la empresa (configurable, p. ej. 10%).
  *
- * Si el técnico ve (100−p)% del precio de factura, entonces: factura = técnico ÷ ((100−p)/100).
+ * factura (empresa) = técnico ÷ ((100−p)/100). El catálogo puede tener `base_price` solo orientativo;
+ * el importe real por línea es el que envía el empleado al registrar el servicio.
  */
 final class CatalogPricing
 {

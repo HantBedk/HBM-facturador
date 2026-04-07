@@ -59,21 +59,6 @@ const chartOptions = ref({
   }
 })
 
-// MOCK DATA si la API no trae el formato exacto requerido por el mockup para las tablas
-const mockServices = [
-  { id: 1, code: '15 Oct', company_name: 'Tech Solutions', user_name: 'C. Ruíz', valor: 2500, created_at: '2023-10-15T12:00:00Z' },
-  { id: 2, code: '14 Oct', company_name: 'Innova Corp', user_name: 'M. Gómez', valor: 850, created_at: '2023-10-14T12:00:00Z' },
-  { id: 3, code: '13 Oct', company_name: 'Green Energy', user_name: 'L. Flores', valor: 4100, created_at: '2023-10-13T12:00:00Z' },
-  { id: 4, code: '12 Oct', company_name: 'Global L.', user_name: 'A. García', valor: 1800, created_at: '2023-10-12T12:00:00Z' }
-]
-
-const mockInvoices = [
-  { id: 1, code: 'FAC-231015-INV', company_name: 'Innova Corp', total: 1200, status_label: 'Pendiente' },
-  { id: 2, code: 'FAC-231014-GRE', company_name: 'Green Energy', total: 4120, status_label: 'Pagado' },
-  { id: 3, code: 'FAC-231013-TEC', company_name: 'Tech Solutions', total: 2500, status_label: 'Pagado' },
-  { id: 4, code: 'FAC-231012-GLO', company_name: 'Global L.', total: 850, status_label: 'Vencida' }
-]
-
 async function loadDashboard() {
   loading.value = true
   loadError.value = ''
@@ -134,9 +119,10 @@ const pendingAttentionCount = computed(() => {
 const metrics = computed(() => data.value?.metrics)
 const recent = computed(() => data.value?.recent || { services: [], invoices: [] })
 
-const dashSvcTableSource = computed(() =>
-  recent.value.services?.length ? recent.value.services : mockServices
-)
+const dashSvcTableSource = computed(() => {
+  if (!data.value) return []
+  return recent.value.services?.length ? recent.value.services : []
+})
 const {
   sortedRows: dashSortedServices,
   toggleSort: toggleDashSvcSort,
@@ -148,14 +134,15 @@ const {
     fecha: (s) => s.created_at || s.code || '',
     company_name: (s) => s.company_name || '',
     user_name: (s) => s.user_name || '',
-    valor: (s) => Number(s.price ?? s.valor) || 0,
+    valor: (s) => Number(s.amount) || 0,
   },
   { initialKey: 'fecha', initialDir: 'desc' }
 )
 
-const dashInvTableSource = computed(() =>
-  recent.value.invoices?.length ? recent.value.invoices : mockInvoices
-)
+const dashInvTableSource = computed(() => {
+  if (!data.value) return []
+  return recent.value.invoices?.length ? recent.value.invoices : []
+})
 const {
   sortedRows: dashSortedInvoices,
   toggleSort: toggleDashInvSort,
@@ -182,14 +169,6 @@ function formatMoney(value) {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(n)
-}
-
-function formatValor(value) {
-  if (value === undefined || value === null) return '—'
-  const n = Number(value)
-  if (Number.isNaN(n)) return String(value)
-  if (n >= 1000) return '$ ' + (n / 1000).toFixed(1) + 'k'
-  return '$ ' + n
 }
 
 function formatDateOnly(iso) {
@@ -250,13 +229,18 @@ const netAfterTechniciansClass = computed(() => {
                <!-- Coin Icon -->
                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 4.46 2 7.5S6.48 13 12 13s10-2.46 10-5.5S17.52 2 12 2zm0 9c-4.42 0-8-1.79-8-4s3.58-4 8-4 8 1.79 8 4-3.58 4-8 4zm0 4c-4.42 0-8-1.79-8-4v3.5c0 3.04 4.48 5.5 10 5.5s10-2.46 10-5.5V11c0 2.21-3.58 4-8 4z"/></svg>
              </div>
-             <h3 class="text-[0.85rem] font-medium text-slate-300">Total Facturado (Este Mes)</h3>
+             <h3 class="text-[0.85rem] font-medium text-slate-300">Total facturado (todas)</h3>
           </div>
           <div>
-            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ metrics?.invoiced_month ? formatMoney(metrics.invoiced_month) : '$ 45.680.000' }}</p>
-            <p class="text-[0.75rem] font-bold text-emerald-400 flex items-center gap-1">
-              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
-              +12.5%
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">
+              {{ metrics != null ? formatMoney(metrics.invoiced_total_all ?? 0) : '—' }}
+            </p>
+            <p class="text-[0.75rem] font-medium text-slate-400">
+              Mes {{ data?.period?.label ?? '—' }} (contable):
+              {{ metrics != null ? formatMoney(metrics.invoiced_month ?? 0) : '—' }}
+            </p>
+            <p class="text-[0.7rem] font-medium text-slate-500 mt-1">
+              {{ metrics?.invoices_count_all ?? 0 }} factura(s) emitidas (no borrador)
             </p>
           </div>
         </article>
@@ -298,7 +282,9 @@ const netAfterTechniciansClass = computed(() => {
              <h3 class="text-[0.85rem] font-medium text-slate-300">Facturas Pendientes</h3>
           </div>
           <div>
-            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ metrics?.pending_collect ? formatMoney(metrics.pending_collect) : '$ 12.450.000' }}</p>
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">
+              {{ metrics != null ? formatMoney(metrics.pending_collect ?? 0) : '—' }}
+            </p>
             <p class="text-[0.75rem] font-medium text-slate-400">
               <template v-if="pendingAttentionCount != null">
                 {{ pendingAttentionCount }} factura{{ pendingAttentionCount === 1 ? '' : 's' }} con gestión · Clic para ver
@@ -318,8 +304,12 @@ const netAfterTechniciansClass = computed(() => {
              <h3 class="text-[0.85rem] font-medium text-slate-300">Facturas Pagadas</h3>
           </div>
           <div>
-            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">{{ metrics?.received_month ? formatMoney(metrics.received_month) : '$ 33.230.000' }}</p>
-            <p class="text-[0.75rem] font-medium text-slate-400">{{ data?.invoice_status_counts?.pagada || 162 }} facturas</p>
+            <p class="text-[1.85rem] font-bold text-white tracking-tight leading-none mb-1.5">
+              {{ metrics != null ? formatMoney(metrics.received_month ?? 0) : '—' }}
+            </p>
+            <p class="text-[0.75rem] font-medium text-slate-400">
+              {{ data?.invoice_status_counts?.pagada ?? 0 }} factura(s) pagadas
+            </p>
           </div>
         </article>
       </div>
@@ -330,7 +320,9 @@ const netAfterTechniciansClass = computed(() => {
         <!-- MITAD IZQUIERDA: GRÁFICO APEXCHARTS ("Ingresos Mensuales - Octubre 2023") -->
         <section class="bg-[#1e2532] rounded-2xl shadow-lg border border-transparent overflow-hidden flex flex-col h-[500px]">
           <div class="px-7 py-6 flex items-center justify-between">
-            <h2 class="text-xl font-bold text-white tracking-wide m-0">Ingresos Mensuales - Octubre 2023</h2>
+            <h2 class="text-xl font-bold text-white tracking-wide m-0">
+              Ingresos mensuales (referencia) — {{ data?.period?.label || '—' }}
+            </h2>
             <div class="flex items-center gap-5 text-sm font-semibold">
                <div class="flex items-center gap-2 text-slate-300">
                  <span class="h-2 w-2 rounded-full bg-[#22c55e]"></span> Este Mes
@@ -381,11 +373,18 @@ const netAfterTechniciansClass = computed(() => {
                   </tr>
                 </thead>
                 <tbody class="text-[0.85rem] text-slate-300 font-medium border-t border-transparent">
-                   <tr v-for="(s, idx) in dashSortedServices.slice(0, 4)" :key="idx" class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors">
+                   <tr
+                     v-for="(s, idx) in dashSortedServices.slice(0, 4)"
+                     :key="s.id ?? idx"
+                     class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors"
+                   >
                      <td class="py-3 pr-4 whitespace-nowrap">{{ s.code?.length < 8 ? s.code : formatDateOnly(s.created_at) }}</td>
                      <td class="py-3 pr-4 text-white truncate max-w-[140px]">{{ s.company_name }}</td>
                      <td class="py-3 pr-4 hidden sm:table-cell truncate max-w-[100px]">{{ s.user_name }}</td>
-                     <td class="py-3 text-right text-slate-200 whitespace-nowrap">{{ formatValor(s.price || s.valor) }}</td>
+                     <td class="py-3 text-right text-slate-200 whitespace-nowrap">{{ formatMoney(s.amount) }}</td>
+                   </tr>
+                   <tr v-if="!dashSortedServices.length">
+                     <td colspan="4" class="py-6 text-center text-slate-500 text-sm">Sin servicios recientes.</td>
                    </tr>
                 </tbody>
               </table>
@@ -424,7 +423,11 @@ const netAfterTechniciansClass = computed(() => {
                   </tr>
                 </thead>
                 <tbody class="text-[0.85rem] text-slate-300 font-medium border-t border-transparent">
-                   <tr v-for="(inv, idx) in dashSortedInvoices.slice(0, 4)" :key="idx" class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors">
+                   <tr
+                     v-for="(inv, idx) in dashSortedInvoices.slice(0, 4)"
+                     :key="inv.id ?? idx"
+                     class="border-b border-[#2b3548]/50 last:border-none hover:bg-slate-800/30 transition-colors"
+                   >
                      <td class="py-3 pr-4 whitespace-nowrap">{{ inv.code }}</td>
                      <td class="py-3 pr-4 text-white truncate max-w-[140px]">{{ inv.company_name }}</td>
                      <td class="py-3 text-right text-slate-200 whitespace-nowrap">{{ formatMoney(inv.total) }}</td>
@@ -433,6 +436,9 @@ const netAfterTechniciansClass = computed(() => {
                            {{ inv.status_label || inv.status }}
                         </span>
                      </td>
+                   </tr>
+                   <tr v-if="!dashSortedInvoices.length">
+                     <td colspan="4" class="py-6 text-center text-slate-500 text-sm">Sin facturas recientes.</td>
                    </tr>
                 </tbody>
               </table>

@@ -13,7 +13,8 @@ class HbmSyncDatabase extends Command
 {
     protected $signature = 'hbm:sync
                             {--fresh : migrate:fresh --seed (borra TODA la base; solo desarrollo)}
-                            {--demo : Tras migrate, ejecuta DatabaseSeeder completo (empresas, catálogo, demo factura)}';
+                            {--demo : Tras migrate, ejecuta DatabaseSeeder completo (empresas, catálogo, demo factura)}
+                            {--migrate-only : Solo migrate --force; no ejecuta ningún seeder (no toca datos existentes)}';
 
     protected $description = 'Migraciones + usuarios demo solo si hace falta; seeder completo solo con --demo o BD sin empresas.';
 
@@ -26,6 +27,14 @@ class HbmSyncDatabase extends Command
             ]);
             $this->newLine();
             $this->info('Base recreada. Acceso demo: admin@hbm.local (contraseña en DatabaseSeeder).');
+
+            return self::SUCCESS;
+        }
+
+        if ($this->option('migrate-only')) {
+            $this->call('migrate', ['--force' => true]);
+            $this->newLine();
+            $this->info('Solo migraciones aplicadas (sin seeders). Tus datos no se resembran.');
 
             return self::SUCCESS;
         }

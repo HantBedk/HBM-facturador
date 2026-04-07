@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import AdminInvoiceDetailPanel from '@/components/admin/AdminInvoiceDetailPanel.vue'
+import InvoiceEditorForm from '@/components/admin/InvoiceEditorForm.vue'
 import { fetchCompanies } from '@/services/servicesApi.js'
 import {
   addInvoicePayment,
@@ -84,6 +85,21 @@ const detailPanelOpen = ref(false)
 const detailInvoiceId = ref(null)
 const detailReviewMode = ref(false)
 const detailPanelRef = ref(null)
+
+const createInvoicePanelOpen = ref(false)
+
+function openCreateInvoicePanel() {
+  createInvoicePanelOpen.value = true
+}
+
+function closeCreateInvoicePanel() {
+  createInvoicePanelOpen.value = false
+}
+
+async function onInvoiceCreatedFromPanel() {
+  closeCreateInvoicePanel()
+  await load()
+}
 
 function openDetailPanel(inv) {
   detailInvoiceId.value = inv.id
@@ -314,6 +330,11 @@ async function submitPayModal() {
 
 function onGlobalEscape(ev) {
   if (ev.key !== 'Escape') return
+  if (createInvoicePanelOpen.value) {
+    ev.preventDefault()
+    closeCreateInvoicePanel()
+    return
+  }
   if (detailPanelOpen.value) {
     ev.preventDefault()
     closeDetailPanel()
@@ -376,7 +397,7 @@ async function exportInvoicesCsv() {
         <button type="button" class="btn secondary" :disabled="exportBusy" @click="exportInvoicesCsv">
           {{ exportBusy ? 'Exportando…' : 'Exportar CSV (Excel)' }}
         </button>
-        <RouterLink class="btn primary" to="/admin/facturas/nueva">+ Nueva factura</RouterLink>
+        <button type="button" class="btn primary" @click="openCreateInvoicePanel">+ Nueva factura</button>
       </div>
     </header>
 
@@ -609,6 +630,50 @@ async function exportInvoicesCsv() {
             </button>
           </div>
         </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="createInvoicePanelOpen"
+        class="fixed inset-0 z-[95] flex"
+        role="presentation"
+      >
+        <button
+          type="button"
+          class="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
+          aria-label="Cerrar panel de nueva factura"
+          @click="closeCreateInvoicePanel"
+        />
+        <aside
+          class="relative ml-auto flex h-full w-full max-w-3xl flex-col border-l border-slate-700/90 bg-[#0f1419] shadow-2xl"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="inv-create-panel-title"
+          @click.stop
+        >
+          <div class="flex shrink-0 items-center justify-between gap-3 border-b border-slate-700/80 px-4 py-3 sm:px-5">
+            <h2 id="inv-create-panel-title" class="text-lg font-bold text-slate-100">Nueva factura</h2>
+            <button
+              type="button"
+              class="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white"
+              aria-label="Cerrar"
+              @click="closeCreateInvoicePanel"
+            >
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+            <InvoiceEditorForm
+              embedded
+              :invoice-id="null"
+              @cancel="closeCreateInvoicePanel"
+              @saved="onInvoiceCreatedFromPanel"
+            />
+          </div>
+        </aside>
       </div>
     </Teleport>
   </section>

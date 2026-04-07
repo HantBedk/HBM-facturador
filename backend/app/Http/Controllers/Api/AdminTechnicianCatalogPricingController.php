@@ -8,7 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * Porcentaje de descuento aplicado al precio de lista del catálogo cuando el técnico consulta /service-catalog/active.
+ * Porcentaje de margen aplicado al pasar del importe declarado por el técnico al importe facturable a la empresa (líneas de catálogo y «Otro»).
  */
 class AdminTechnicianCatalogPricingController extends Controller
 {

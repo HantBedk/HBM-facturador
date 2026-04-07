@@ -103,7 +103,15 @@ class AdminDashboardController extends Controller
     }
 
     /**
-     * @return array{invoiced_month: string, received_month: string, pending_collect: string, invoices_count_month: int, services_count_month: int}
+     * @return array{
+     *   invoiced_month: string,
+     *   invoiced_total_all: string,
+     *   received_month: string,
+     *   pending_collect: string,
+     *   invoices_count_month: int,
+     *   invoices_count_all: int,
+     *   services_count_month: int
+     * }
      */
     private function buildMetrics(int $year, int $month): array
     {
@@ -132,6 +140,14 @@ class AdminDashboardController extends Controller
             ->where('status', '!=', Invoice::STATUS_BORRADOR)
             ->count();
 
+        $invoicedTotalAll = (string) Invoice::query()
+            ->where('status', '!=', Invoice::STATUS_BORRADOR)
+            ->sum('total');
+
+        $invoicesCountAll = Invoice::query()
+            ->where('status', '!=', Invoice::STATUS_BORRADOR)
+            ->count();
+
         $servicesCountMonth = Service::query()
             ->visibles()
             ->whereYear('service_date', $year)
@@ -140,9 +156,13 @@ class AdminDashboardController extends Controller
 
         return [
             'invoiced_month' => $invoicedMonth,
+            /** Suma de importes de factura (no borrador), todos los períodos contables. */
+            'invoiced_total_all' => $invoicedTotalAll,
             'received_month' => $receivedMonth,
             'pending_collect' => number_format($pendingCollect, 2, '.', ''),
             'invoices_count_month' => $invoicesCountMonth,
+            /** Cantidad de facturas no borrador en base (cualquier período). */
+            'invoices_count_all' => $invoicesCountAll,
             'services_count_month' => $servicesCountMonth,
         ];
     }

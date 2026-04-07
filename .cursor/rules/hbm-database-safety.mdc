@@ -1,0 +1,26 @@
+---
+description: Proteger datos locales MySQL/Laravel; nunca destruir la base sin confirmación explícita del usuario.
+alwaysApply: true
+---
+
+# Base de datos HBM (desarrollo local)
+
+## Prohibido sin confirmación explícita del usuario en el chat
+
+- `php artisan migrate:fresh`, `migrate:refresh`, `db:wipe`
+- `php artisan hbm:sync --fresh`
+- `docker compose down -v` o cualquier comando que **elimine volúmenes** (`-v`), porque borra el volumen `mysql_data` y toda la BD.
+- Borrar o truncar tablas manualmente salvo petición explícita.
+
+## Preferir siempre
+
+- `php artisan migrate --force` o `php artisan hbm:sync --migrate-only` para solo esquema.
+- Si hace falta usuario de login y `users` está vacío: `db:seed --class=Database\Seeders\EnsureDevLoginSeeder` (no el `DatabaseSeeder` completo salvo que el usuario pida demo completo).
+
+## Antes de operaciones “peligrosas” sugeridas al usuario
+
+- Hacer copia con `.\scripts\backup-mysql.ps1` (o equivalente `mysqldump`) y guardar el `.sql` fuera del repo o en `backups/` (ignorado por git si aplica).
+
+## Resumen
+
+Los datos del usuario en Docker **persisten en el volumen**; lo que los borra suele ser **`-v` en down**, **`migrate:fresh`** o seeds/comandos destructivos. No ejecutarlos de forma automática al “arreglar” o “migrar” sin que el usuario lo pida literalmente.
