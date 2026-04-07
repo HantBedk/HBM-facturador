@@ -13,6 +13,7 @@ use App\Models\ServicePhoto;
 use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Services\PanelNotificationDispatcher;
+use App\Services\QuickClientCompanyResolver;
 use App\Services\ServiceCodeGenerator;
 use App\Support\CatalogPricing;
 use App\Support\DecimalMath;
@@ -143,13 +144,18 @@ class ServiceController extends Controller
         );
     }
 
-    public function store(Request $request, ServiceCodeGenerator $codes): JsonResponse
+    public function store(Request $request, ServiceCodeGenerator $codes, QuickClientCompanyResolver $quickClients): JsonResponse
     {
         $this->authorize('create', Service::class);
 
+        $this->mergeQuickClientFromMultipart($request);
+
         $user = $request->user();
         $rules = [
-            'company_id' => ['required', 'exists:companies,id'],
+            'company_id' => ['nullable', 'integer', 'exists:companies,id'],
+            'quick_client' => ['nullable', 'array'],
+            'quick_client.nombre' => ['nullable', 'string', 'max:255'],
+            'quick_client.telefono' => ['nullable', 'string', 'max:32'],
             'client_name' => ['required', 'string', 'max:255'],
             'service_type' => ['required', 'string', 'max:255'],
             'description' => ['required', 'string', 'min:8'],
@@ -160,6 +166,30 @@ class ServiceController extends Controller
         ];
 
         $data = $request->validate($rules);
+
+        $qcNombre = isset($data['quick_client']['nombre']) ? trim((string) $data['quick_client']['nombre']) : '';
+        $qcTel = isset($data['quick_client']['telefono']) ? trim((string) $data['quick_client']['telefono']) : '';
+        $useQuickClient = $qcNombre !== '' && $qcTel !== '';
+        $companyIdRaw = $data['company_id'] ?? null;
+
+        if ($useQuickClient && $companyIdRaw !== null && $companyIdRaw !== '') {
+            throw ValidationException::withMessages([
+                'company_id' => ['No selecciones empresa si indicas cliente puntual (nombre y teléfono).'],
+            ]);
+        }
+        if (! $useQuickClient && ($companyIdRaw === null || $companyIdRaw === '')) {
+            throw ValidationException::withMessages([
+                'company_id' => ['Selecciona una empresa o completa cliente puntual: nombre y teléfono.'],
+            ]);
+        }
+
+        if ($useQuickClient) {
+            $company = $quickClients->resolveOrCreate($qcNombre, $qcTel);
+            $companyId = (int) $company->id;
+            $data['client_name'] = $qcNombre;
+        } else {
+            $companyId = (int) $companyIdRaw;
+        }
 
         $itemsPayload = $this->parseItemsFromRequest($request);
         if ($itemsPayload === []) {
@@ -197,7 +227,6 @@ class ServiceController extends Controller
             }
         }
 
-        $companyId = (int) $data['company_id'];
         $normalized = $this->validateAndNormalizeServiceItems($itemsPayload, $companyId);
 
         $company = Company::query()->findOrFail($companyId);
@@ -216,7 +245,7 @@ class ServiceController extends Controller
             $totalAmount = DecimalMath::add($totalAmount, $a, 2);
         }
 
-        $dupData = array_merge($data, ['amount' => $totalAmount]);
+        $dupData = array_merge($data, ['amount' => $totalAmount, 'company_id' => $companyId]);
         if ($this->isDuplicate($request->user(), $dupData, $serviceDate)) {
             throw ValidationException::withMessages([
                 'description' => ['Ya existe un servicio muy similar para la misma empresa y fecha.'],
@@ -644,5 +673,24 @@ class ServiceController extends Controller
             ->where('amount', $data['amount'])
             ->whereRaw('LOWER(TRIM(description)) = ?', [$desc])
             ->exists();
+    }
+
+    /** FormData envía `quick_client` como JSON string cuando hay fotos. */
+    private function mergeQuickClientFromMultipart(Request $request): void
+    {
+        $raw = $request->input('quick_client');
+        if (! is_string($raw) || $raw === '') {
+            return;
+        }
+        $decoded = json_decode($raw, true);
+        if (! is_array($decoded)) {
+            return;
+        }
+        $request->merge([
+            'quick_client' => [
+                'nombre' => isset($decoded['nombre']) ? (string) $decoded['nombre'] : '',
+                'telefono' => isset($decoded['telefono']) ? (string) $decoded['telefono'] : '',
+            ],
+        ]);
     }
 }

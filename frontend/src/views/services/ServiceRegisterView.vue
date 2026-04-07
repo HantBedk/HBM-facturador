@@ -37,6 +37,9 @@ const photoFiles = ref([])
 
 const form = ref({
   company_id: '',
+  /** Cliente puntual: sin empresa en lista; el API crea/reutiliza empresa por teléfono. */
+  use_quick_client: false,
+  quick_telefono: '',
   catalog_id: '',
   client_name: '',
   service_type: '',
@@ -75,6 +78,8 @@ function showToast(message) {
 function resetFormToDefaults() {
   form.value = {
     company_id: '',
+    use_quick_client: false,
+    quick_telefono: '',
     catalog_id: '',
     client_name: '',
     service_type: '',
@@ -84,6 +89,10 @@ function resetFormToDefaults() {
   }
   photoFiles.value = []
   formResetKey.value += 1
+}
+
+function digitsOnly(s) {
+  return String(s ?? '').replace(/\D/g, '')
 }
 
 /** Texto guardado en `services.description`: detalle por concepto (sin campo extra en UI empleado). */
@@ -125,7 +134,13 @@ function buildPayloadItemsFromLines(rawLines) {
 function validateBeforeSubmit() {
   fieldErrors.value = {}
   const e = {}
-  if (!form.value.company_id) e.company_id = ['Selecciona una empresa.']
+  if (form.value.use_quick_client) {
+    if (digitsOnly(form.value.quick_telefono).length < 7) {
+      e.quick_telefono = ['Indica un teléfono con al menos 7 dígitos (identifica al cliente puntual).']
+    }
+  } else if (!form.value.company_id) {
+    e.company_id = ['Selecciona una empresa o activa «Cliente puntual».']
+  }
   if (!String(form.value.client_name || '').trim()) {
     e.client_name = ['Indica el nombre del cliente atendido.']
   }
@@ -201,6 +216,8 @@ onMounted(async () => {
     if (draft && typeof draft === 'object') {
       form.value = {
         company_id: draft.company_id ?? '',
+        use_quick_client: !!draft.use_quick_client,
+        quick_telefono: draft.quick_telefono ?? '',
         catalog_id: draft.catalog_id ?? '',
         client_name: draft.client_name ?? '',
         service_type: draft.service_type ?? '',
@@ -221,10 +238,30 @@ onMounted(async () => {
 watch(
   () => form.value.company_id,
   (cid, prev) => {
-    if (isEmpleadoRegistro.value && prev !== undefined && String(cid) !== String(prev)) {
+    if (
+      isEmpleadoRegistro.value &&
+      !form.value.use_quick_client &&
+      prev !== undefined &&
+      String(cid) !== String(prev)
+    ) {
       form.value.lines = []
       form.value.amount = ''
       form.value.catalog_id = ''
+    }
+  }
+)
+
+watch(
+  () => form.value.use_quick_client,
+  (quick, prev) => {
+    if (!isEmpleadoRegistro.value || prev === undefined) return
+    form.value.lines = []
+    form.value.amount = ''
+    form.value.catalog_id = ''
+    if (quick) {
+      form.value.company_id = ''
+    } else {
+      form.value.quick_telefono = ''
     }
   }
 )
@@ -258,12 +295,20 @@ async function onSubmit() {
 
   loading.value = true
   try {
+    const baseClient = form.value.client_name.trim()
     const payload = {
-      company_id: Number(form.value.company_id),
-      client_name: form.value.client_name.trim(),
+      client_name: baseClient,
       service_type: form.value.service_type.trim(),
       description: form.value.description.trim(),
       amount: Number(form.value.amount),
+    }
+    if (form.value.use_quick_client) {
+      payload.quick_client = {
+        nombre: baseClient,
+        telefono: String(form.value.quick_telefono || '').trim(),
+      }
+    } else {
+      payload.company_id = Number(form.value.company_id)
     }
     if (isEmpleadoRegistro.value) {
       const ls = Array.isArray(form.value.lines) ? form.value.lines : []
@@ -317,9 +362,6 @@ async function onSubmit() {
       >
         Registrar servicio
       </h1>
-      <p v-if="isEmpleadoRegistro" class="mx-auto mt-2 max-w-md text-center text-sm leading-relaxed text-slate-400">
-        Tres pasos: empresa y cliente, conceptos cobrados (detalle por ítem) y fotos si aplica.
-      </p>
       <p v-if="!isEmpleadoRegistro" class="muted">
         Completa los datos del trabajo realizado. La fecha del servicio y el código (SERV-…) los asigna el servidor al guardar.
       </p>

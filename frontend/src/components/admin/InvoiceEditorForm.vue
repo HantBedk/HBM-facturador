@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
-import { fetchCompanies } from '@/services/servicesApi.js'
+import { fetchAdminCompanies } from '@/services/companiesApi.js'
 import {
   createInvoice,
   fetchAdminInvoice,
@@ -30,6 +30,8 @@ const resolvedId = computed(() => {
 const isEdit = computed(() => !!resolvedId.value)
 
 const companies = ref([])
+/** Pestaña del selector: empresas registradas vs clientes puntuales (no confundir con companyId). */
+const companyPickerTab = ref('registered')
 const loading = ref(true)
 const loadingServices = ref(false)
 const saving = ref(false)
@@ -60,6 +62,23 @@ const {
 )
 
 const invoice = ref(null)
+
+const companiesInPickerTab = computed(() => {
+  const list = companies.value || []
+  if (companyPickerTab.value === 'quick') {
+    return list.filter((c) => c.es_cliente_puntual)
+  }
+  return list.filter((c) => !c.es_cliente_puntual)
+})
+
+function companyOptionLabel(c) {
+  if (!c) return ''
+  if (c.es_cliente_puntual) {
+    const t = (c.telefono || '').trim()
+    return t ? `${c.nombre} · ${t}` : `${c.nombre} (puntual)`
+  }
+  return c.nombre
+}
 
 const skipWatch = ref(true)
 
@@ -135,12 +154,21 @@ watch([companyId, periodYear, periodMonth], () => {
   loadAvailable()
 })
 
+watch(companyPickerTab, () => {
+  const allowed = new Set(companiesInPickerTab.value.map((c) => String(c.id)))
+  if (companyId.value && !allowed.has(String(companyId.value))) {
+    companyId.value = ''
+    available.value = []
+    selectedIds.value = []
+  }
+})
+
 async function bootstrap() {
   loadError.value = ''
   loading.value = true
   skipWatch.value = true
   try {
-    companies.value = await fetchCompanies()
+    companies.value = await fetchAdminCompanies()
   } catch {
     companies.value = []
   }
@@ -155,6 +183,7 @@ async function bootstrap() {
         return
       }
       companyId.value = String(invoice.value.company_id)
+      companyPickerTab.value = invoice.value.company?.es_cliente_puntual ? 'quick' : 'registered'
       periodYear.value = invoice.value.period_year
       periodMonth.value = invoice.value.period_month
       selectedIds.value = (invoice.value.services || []).map((s) => s.id)
@@ -163,6 +192,7 @@ async function bootstrap() {
       loadError.value = e.data?.message || e.message || 'No se pudo cargar la factura.'
     }
   } else {
+    companyPickerTab.value = 'registered'
     companyId.value = ''
     periodYear.value = new Date().getFullYear()
     periodMonth.value = new Date().getMonth() + 1
@@ -236,15 +266,14 @@ async function onSubmit() {
           {{ isEdit ? (invoice?.code ? `Editar factura (${invoice.code})` : 'Editar factura') : 'Nueva factura' }}
         </h1>
         <p class="lede">
-          Elija empresa y periodo (mes de prestación), luego marque los servicios a incluir. El total se calcula de los
-          servicios seleccionados. Al crear el borrador se asigna
-          <strong>FAC-YYMMDD-SIGLA</strong> (fecha de creación; máximo 1 factura por empresa y día).
+          Elija empresa (o cliente puntual en la pestaña correspondiente) y periodo, luego marque los servicios. Al crear
+          el borrador se asigna <strong>FAC-YYMMDD-SIGLA</strong> (máximo 1 factura por empresa y día).
         </p>
       </div>
     </header>
 
     <p v-else class="lede lede--embedded">
-      Elija empresa y periodo, marque los servicios a incluir y cree el borrador
+      Elija empresa o cliente puntual (pestaña), periodo y servicios; cree el borrador
       <strong>FAC-YYMMDD-SIGLA</strong>.
     </p>
 
@@ -254,12 +283,42 @@ async function onSubmit() {
     <p v-if="loading" class="muted">Cargando…</p>
 
     <form v-else class="card form" @submit.prevent="onSubmit">
+      <div class="picker-tabs" role="tablist" aria-label="Tipo de cliente a facturar">
+        <button
+          type="button"
+          role="tab"
+          class="picker-tab"
+          :aria-selected="companyPickerTab === 'registered'"
+          :class="{ 'picker-tab--on': companyPickerTab === 'registered' }"
+          :disabled="saving"
+          @click="companyPickerTab = 'registered'"
+        >
+          Empresas registradas
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="picker-tab"
+          :aria-selected="companyPickerTab === 'quick'"
+          :class="{ 'picker-tab--on': companyPickerTab === 'quick' }"
+          :disabled="saving"
+          @click="companyPickerTab = 'quick'"
+        >
+          Clientes puntuales
+        </button>
+      </div>
+      <p v-if="companyPickerTab === 'quick'" class="tab-hint">
+        Clientes creados al registrar servicios sin empresa en lista (identificados por teléfono).
+      </p>
+
       <div class="grid">
-        <label class="field">
-          <span>Empresa <abbr title="obligatorio">*</abbr></span>
+        <label class="field field--wide">
+          <span>{{ companyPickerTab === 'quick' ? 'Cliente puntual' : 'Empresa' }} <abbr title="obligatorio">*</abbr></span>
           <select v-model="companyId" class="input" required :disabled="saving">
             <option value="" disabled>Seleccione…</option>
-            <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
+            <option v-for="c in companiesInPickerTab" :key="c.id" :value="String(c.id)">
+              {{ companyOptionLabel(c) }}
+            </option>
           </select>
         </label>
         <label class="field">
@@ -405,11 +464,56 @@ h1 {
   background: rgba(15, 23, 42, 0.55);
 }
 
+.picker-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.picker-tab {
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(2, 6, 23, 0.45);
+  color: #cbd5e1;
+  padding: 0.45rem 0.85rem;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.picker-tab:hover:not(:disabled) {
+  border-color: rgba(56, 189, 248, 0.45);
+  color: #e2e8f0;
+}
+
+.picker-tab--on {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.12);
+  color: #e0f2fe;
+}
+
+.picker-tab:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.tab-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
   margin-bottom: 1.25rem;
+}
+
+.field--wide {
+  grid-column: 1 / -1;
 }
 
 .field span {

@@ -53,6 +53,26 @@ function onCatalogChange(ev) {
     amount: String(item.base_price),
   })
 }
+
+const QUICK_CLIENT_OPTION = '__quick_client__'
+
+const companySelectValue = computed(() => {
+  if (props.modelValue.use_quick_client) return QUICK_CLIENT_OPTION
+  const id = props.modelValue.company_id
+  if (id === '' || id == null) return ''
+  return String(id)
+})
+
+function onCompanySelectChange(ev) {
+  const v = ev.target.value
+  if (v === QUICK_CLIENT_OPTION) {
+    patch({ use_quick_client: true, company_id: '' })
+  } else if (v) {
+    patch({ use_quick_client: false, company_id: Number(v) })
+  } else {
+    patch({ use_quick_client: false, company_id: '' })
+  }
+}
 </script>
 
 <template>
@@ -72,21 +92,23 @@ function onCatalogChange(ev) {
       <small class="hint">Al elegir un ítem se rellenan tipo, descripción y valor; puede editarlos antes de guardar.</small>
     </label>
 
-    <label class="field">
-      <span>Empresa <abbr title="obligatorio">*</abbr></span>
+    <label class="field wide">
+      <span>Empresa o cliente a facturar <abbr title="obligatorio">*</abbr></span>
       <select
-        :value="inner.company_id"
+        :value="companySelectValue"
         :disabled="disabled"
-        required
-        @change="patch({ company_id: $event.target.value ? Number($event.target.value) : '' })"
+        :required="true"
+        @change="onCompanySelectChange"
       >
         <option value="" disabled>Seleccione…</option>
-        <option v-for="c in companies" :key="c.id" :value="c.id">{{ c.nombre }}</option>
+        <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
+        <option :value="QUICK_CLIENT_OPTION">— Cliente puntual (no está en la lista) —</option>
       </select>
       <small v-if="fieldErrors.company_id" class="err">{{ fieldErrors.company_id[0] }}</small>
+      <small v-if="inner.use_quick_client" class="hint">Mismo teléfono agrupa servicios para facturar.</small>
     </label>
 
-    <label class="field">
+    <label v-if="!inner.use_quick_client" class="field">
       <span>Nombre del cliente atendido <abbr title="obligatorio">*</abbr></span>
       <input
         :value="inner.client_name"
@@ -102,6 +124,35 @@ function onCatalogChange(ev) {
         <option v-for="s in clientSuggestions" :key="s" :value="s" />
       </datalist>
     </label>
+
+    <template v-else>
+      <label class="field">
+        <span>Nombre del cliente <abbr title="obligatorio">*</abbr></span>
+        <input
+          :value="inner.client_name"
+          :disabled="disabled"
+          required
+          list="client-suggestions"
+          autocomplete="off"
+          placeholder="Nombre del cliente"
+          @input="patch({ client_name: $event.target.value })"
+        />
+        <small v-if="fieldErrors.client_name" class="err">{{ fieldErrors.client_name[0] }}</small>
+      </label>
+      <label class="field">
+        <span>Teléfono <abbr title="obligatorio">*</abbr></span>
+        <input
+          :value="inner.quick_telefono"
+          type="tel"
+          inputmode="tel"
+          autocomplete="tel"
+          placeholder="Ej. 3001234567"
+          :disabled="disabled"
+          @input="patch({ quick_telefono: $event.target.value })"
+        />
+        <small v-if="fieldErrors.quick_telefono" class="err">{{ fieldErrors.quick_telefono[0] }}</small>
+      </label>
+    </template>
 
     <label class="field">
       <span>Tipo de servicio <abbr title="obligatorio">*</abbr></span>
@@ -224,4 +275,5 @@ textarea:focus {
   font-size: 0.78rem;
   line-height: 1.35;
 }
+
 </style>

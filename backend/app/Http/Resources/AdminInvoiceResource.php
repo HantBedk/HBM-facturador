@@ -23,6 +23,7 @@ class AdminInvoiceResource extends JsonResource
                 'nit' => $this->company->nit,
                 'telefono' => $this->company->telefono,
                 'correo' => $this->company->correo,
+                'es_cliente_puntual' => (bool) ($this->company->es_cliente_puntual ?? false),
             ]),
             'period_month' => $this->period_month,
             'period_year' => $this->period_year,

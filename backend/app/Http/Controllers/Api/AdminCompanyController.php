@@ -20,7 +20,7 @@ class AdminCompanyController extends Controller
 {
     public function index(Request $request): AnonymousResourceCollection
     {
-        $q = Company::query()->orderBy('nombre');
+        $q = Company::query()->orderByRaw('es_cliente_puntual asc')->orderBy('nombre');
 
         if ($request->filled('q')) {
             $raw = $request->string('q')->toString();

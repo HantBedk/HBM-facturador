@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import AdminInvoiceDetailPanel from '@/components/admin/AdminInvoiceDetailPanel.vue'
 import InvoiceEditorForm from '@/components/admin/InvoiceEditorForm.vue'
-import { fetchCompanies } from '@/services/servicesApi.js'
+import { fetchAdminCompanies } from '@/services/companiesApi.js'
 import {
   addInvoicePayment,
   downloadAdminExportCsv,
@@ -29,6 +29,9 @@ const filters = ref({
   q: '',
   page: 1,
 })
+
+/** Todas | solo empresas registradas | solo clientes puntuales (servicios sin alta). */
+const listTab = ref('all')
 
 const invSortKey = ref('period')
 const invSortDir = ref('desc')
@@ -61,6 +64,8 @@ async function load() {
   loading.value = true
   try {
     const params = { page: filters.value.page, per_page: 15 }
+    if (listTab.value === 'registered') params.company_kind = 'registered'
+    if (listTab.value === 'quick') params.company_kind = 'quick'
     if (filters.value.company_id) params.company_id = filters.value.company_id
     if (filters.value.status) params.status = filters.value.status
     if (filters.value.period_year) params.period_year = filters.value.period_year
@@ -124,11 +129,16 @@ function closeDetailPanel() {
 onMounted(async () => {
   document.addEventListener('keydown', onGlobalEscape)
   try {
-    companies.value = await fetchCompanies()
+    companies.value = await fetchAdminCompanies()
   } catch {
     companies.value = []
   }
   await load()
+})
+
+watch(listTab, () => {
+  filters.value.page = 1
+  load()
 })
 
 watch(
@@ -401,6 +411,39 @@ async function exportInvoicesCsv() {
       </div>
     </header>
 
+    <div class="list-tabs card" role="tablist" aria-label="Vista de facturas">
+      <button
+        type="button"
+        role="tab"
+        class="list-tab"
+        :aria-selected="listTab === 'all'"
+        :class="{ 'list-tab--on': listTab === 'all' }"
+        @click="listTab = 'all'"
+      >
+        Todas
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="list-tab"
+        :aria-selected="listTab === 'registered'"
+        :class="{ 'list-tab--on': listTab === 'registered' }"
+        @click="listTab = 'registered'"
+      >
+        Empresas registradas
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="list-tab"
+        :aria-selected="listTab === 'quick'"
+        :class="{ 'list-tab--on': listTab === 'quick' }"
+        @click="listTab = 'quick'"
+      >
+        Clientes puntuales
+      </button>
+    </div>
+
     <div class="filters card">
       <label class="grow">
         <span>Búsqueda por código</span>
@@ -500,7 +543,10 @@ async function exportInvoicesCsv() {
               <td class="mono">
                 <button type="button" class="code-link" @click="openDetailPanel(inv)">{{ inv.code }}</button>
               </td>
-              <td>{{ inv.company?.nombre || '—' }}</td>
+              <td>
+                <span class="company-name">{{ inv.company?.nombre || '—' }}</span>
+                <span v-if="inv.company?.es_cliente_puntual" class="pill pill--quick" title="Cliente puntual (sin alta formal)">Puntual</span>
+              </td>
               <td>{{ inv.period_label }}</td>
               <td>
                 <span class="pill" :data-st="inv.status">{{ inv.status_label }}</span>
@@ -758,6 +804,53 @@ h1 {
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: rgba(15, 23, 42, 0.55);
   margin-bottom: 1rem;
+}
+
+.list-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.list-tab {
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(2, 6, 23, 0.35);
+  color: #cbd5e1;
+  padding: 0.4rem 0.85rem;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.list-tab:hover {
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #e2e8f0;
+}
+
+.list-tab--on {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.12);
+  color: #e0f2fe;
+}
+
+.company-name {
+  margin-right: 0.25rem;
+}
+
+.pill--quick {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  background: rgba(251, 191, 36, 0.12);
+  color: #fcd34d;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  vertical-align: middle;
 }
 
 .banner.err {
