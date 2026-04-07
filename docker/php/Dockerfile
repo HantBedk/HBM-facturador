@@ -7,4 +7,13 @@ RUN apt-get update && apt-get install -y \
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
+COPY docker/php/docker-entrypoint.sh /usr/local/bin/docker-entrypoint-laravel.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint-laravel.sh
+
+# PHP-FPM no pasa las variables de docker-compose a los workers; env[] sí llega a Laravel (env(), VIEW_COMPILED_PATH).
+RUN sed -i '/^\[www\]/a env[VIEW_COMPILED_PATH] = /tmp/laravel-views' /usr/local/etc/php-fpm.d/www.conf
+
 WORKDIR /var/www/html
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint-laravel.sh"]
+CMD ["php-fpm"]

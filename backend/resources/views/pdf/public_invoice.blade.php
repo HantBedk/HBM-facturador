@@ -112,22 +112,14 @@
         .lines-table td.num { text-align: right; white-space: nowrap; }
         .lines-table td.cen { text-align: center; }
         .lines-table tbody tr.row-alt { background: #f0f9ff; }
+        .line-tech { font-size: 8px; font-weight: bold; color: #075985; display: block; margin-bottom: 3px; }
         .line-title { font-weight: bold; color: #0f172a; display: block; margin-bottom: 2px; }
         .line-detail { color: #475569; font-size: 8px; }
 
         .totals-wrap { width: 100%; margin-top: 12px; }
         .totals-wrap td { vertical-align: top; }
-        .totals-left { width: 52%; padding-right: 12px; }
-        .totals-right { width: 48%; }
-
-        .pay-box {
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            padding: 8px 10px;
-            background: #f8fafc;
-        }
-        .pay-title { font-size: 9px; font-weight: bold; color: #0f172a; margin: 0 0 6px; }
-        .pay-line { margin: 0 0 3px; font-size: 8px; color: #334155; padding-left: 2px; }
+        .totals-right { width: 100%; text-align: right; }
+        .totals-right .sum-table { margin-left: auto; max-width: 280px; }
 
         .sum-table { width: 100%; border-collapse: collapse; }
         .sum-table td { padding: 4px 0; font-size: 9px; }
@@ -144,12 +136,6 @@
             border-radius: 4px;
             margin-top: 6px;
         }
-
-        .payhist { margin-top: 10px; }
-        .payhist h3 { font-size: 9px; margin: 0 0 4px; color: #0f172a; }
-        .payhist-table { width: 100%; border-collapse: collapse; font-size: 8px; }
-        .payhist-table th, .payhist-table td { border: 1px solid #e2e8f0; padding: 4px 5px; }
-        .payhist-table th { background: #f1f5f9; text-align: left; }
 
         .foot-note {
             margin-top: 12px;
@@ -212,7 +198,6 @@
                         @if(!empty($data['company']['nit']))
                             <p class="billto-line"><strong>NIT:</strong> {{ $data['company']['nit'] }}</p>
                         @endif
-                        <p class="billto-line"><strong>Obra / contacto:</strong> {{ $data['company']['contact'] ?? '—' }}</p>
                         <p class="billto-line"><strong>Dirección:</strong> {{ $data['company']['direccion'] ?? '—' }}</p>
                         <p class="billto-line"><strong>Periodo facturado:</strong> {{ $data['invoice']['period_label_upper'] ?? '' }}</p>
                         <p class="billto-line"><strong>E-mail:</strong> {{ $data['company']['correo'] ?? '—' }}</p>
@@ -256,7 +241,14 @@
                 <tr class="{{ $loop->iteration % 2 === 0 ? 'row-alt' : '' }}">
                     <td>{{ $row['pdf_date_label'] ?? ($row['service_date'] ?? '—') }}</td>
                     <td>
-                        <span class="line-title">{{ $row['pdf_title'] ?? ($row['service_type'] ?? 'Servicio') }}</span>
+                        @php
+                            $svcCategory = $row['pdf_title'] ?? ($row['service_type'] ?? 'Servicio');
+                        @endphp
+                        @if(!empty($row['technician_name']))
+                            <span class="line-tech">{{ $row['technician_name'] }}: {{ $svcCategory }}</span>
+                        @else
+                            <span class="line-title">{{ $svcCategory }}</span>
+                        @endif
                         @if(!empty($row['pdf_detail']))
                             <span class="line-detail">{{ $row['pdf_detail'] }}</span>
                         @elseif(!empty($row['description']) || !empty($row['code']))
@@ -297,16 +289,6 @@
 
         <table class="totals-wrap">
             <tr>
-                <td class="totals-left">
-                    @if(!empty($data['footer']['payment_methods']) && count($data['footer']['payment_methods']) > 0)
-                        <div class="pay-box">
-                            <p class="pay-title">Medios de pago</p>
-                            @foreach($data['footer']['payment_methods'] as $pm)
-                                <p class="pay-line">• {{ $pm }}</p>
-                            @endforeach
-                        </div>
-                    @endif
-                </td>
                 <td class="totals-right">
                     <table class="sum-table">
                         <tr>
@@ -325,51 +307,9 @@
                             </td>
                         </tr>
                     </table>
-                    @php
-                        $paid = (float) ($data['financial']['total_paid'] ?? 0);
-                        $bal = (float) ($data['financial']['balance'] ?? 0);
-                    @endphp
-                    @if($paid > 0 || $bal > 0)
-                        <table class="sum-table" style="margin-top:8px;">
-                            <tr>
-                                <td class="lbl">Total pagado</td>
-                                <td class="val" style="color:#334155;">{{ $fmtCop($paid) }}</td>
-                            </tr>
-                            <tr>
-                                <td class="lbl">Saldo pendiente</td>
-                                <td class="val" style="color:#b45309;">{{ $fmtCop($bal) }}</td>
-                            </tr>
-                        </table>
-                    @endif
                 </td>
             </tr>
         </table>
-
-        <div class="payhist">
-            <h3>Pagos registrados</h3>
-            <table class="payhist-table">
-                <thead>
-                <tr>
-                    <th>Fecha</th>
-                    <th style="text-align:right;width:22%;">Monto</th>
-                    <th>Método</th>
-                    <th>Notas</th>
-                </tr>
-                </thead>
-                <tbody>
-                @forelse($data['payments'] ?? [] as $p)
-                    <tr>
-                        <td>{{ $p['payment_date'] ?? '' }}</td>
-                        <td style="text-align:right;">{{ $fmtCop($p['amount'] ?? 0) }}</td>
-                        <td>{{ $p['method'] ?? '' }}</td>
-                        <td>{{ $p['notes'] ?? '—' }}</td>
-                    </tr>
-                @empty
-                    <tr><td colspan="4" style="color:#64748b;">Sin pagos registrados.</td></tr>
-                @endforelse
-                </tbody>
-            </table>
-        </div>
 
         <div class="foot-note">
             @if(!empty($data['footer']['message']))

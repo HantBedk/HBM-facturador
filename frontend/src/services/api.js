@@ -93,7 +93,9 @@ export async function publicApiBlob(path, options = {}) {
     err.status = res.status
     throw err
   }
-  const blob = await res.blob()
+  const ab = await res.arrayBuffer()
+  const mime = (res.headers.get('Content-Type') || 'application/pdf').split(';')[0].trim().toLowerCase()
+  const blob = new Blob([ab], { type: mime || 'application/pdf' })
   const cd = res.headers.get('content-disposition') || ''
   let filename = 'factura.pdf'
   const m = /filename\*?=(?:UTF-8'')?["']?([^"';]+)/i.exec(cd)

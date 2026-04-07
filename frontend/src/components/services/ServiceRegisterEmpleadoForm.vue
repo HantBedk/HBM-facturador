@@ -539,6 +539,7 @@ const totalDisplay = computed(() => {
             class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] py-2.5 pl-8 pr-3 text-sm text-white tabular-nums outline-none focus:border-sky-400"
             @focus="dismissCatalogHint(idx)"
             @input="updateLine(idx, { amount: $event.target.value })"
+            @wheel.prevent
           />
         </div>
       </li>
@@ -546,9 +547,6 @@ const totalDisplay = computed(() => {
 
     <p v-if="lines.length" class="rounded-2xl border border-sky-500/25 bg-sky-500/10 px-4 py-3 text-center text-sm font-semibold text-sky-100">
       Total referencia (lo que ingresas por línea): {{ totalDisplay }}
-      <span class="mt-1 block text-[0.7rem] font-normal leading-snug text-sky-200/80">
-        La factura a la empresa suma el margen % que define administración (mismo criterio que «Otro»).
-      </span>
     </p>
 
     <!-- Resumen tipo servicio (se sincroniza con los ítems; editable) -->

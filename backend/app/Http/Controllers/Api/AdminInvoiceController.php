@@ -386,7 +386,7 @@ class AdminInvoiceController extends Controller
             $suffix = $isDraft ? '-vista-previa' : '';
             $filename = 'factura-'.preg_replace('/[^a-zA-Z0-9_-]/', '_', $invoice->code).$suffix.'.pdf';
 
-            return Pdf::loadView('pdf.public_invoice', ['data' => $data])->download($filename);
+            return Pdf::loadView('pdf.public_invoice', ['data' => $data])->stream($filename);
         } catch (\Throwable $e) {
             report($e);
 

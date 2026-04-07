@@ -5,6 +5,11 @@
 # NO uses `docker compose down -v` (la opción -v elimina volúmenes y borra todos los datos).
 # Para esquema: `php artisan migrate` (solo aplica migraciones pendientes; no borra filas).
 # Evita en datos reales: `migrate:fresh`, `migrate:refresh`, `db:wipe` (destruyen o vacían tablas).
+#
+# PDF / Blade: vistas compiladas en /tmp/laravel-views (Dockerfile inyecta PHP-FPM env[VIEW_COMPILED_PATH]).
+# Tras cambiar Dockerfile o entrypoint: `docker compose build laravel && docker compose up -d`
+# Si `bootstrap/cache/config.php` se generó fuera del contenedor y falla, dentro del contenedor: `php artisan config:clear`
+# Otras escrituras en storage: `docker compose exec -u root laravel chmod -R 777 storage bootstrap/cache`
 services:
   mysql:
     image: mysql:8.0

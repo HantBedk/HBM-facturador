@@ -128,7 +128,9 @@ export async function downloadInvoicePdfBlob(id, opts = {}) {
     const data = await res.json().catch(() => ({}))
     throw new Error(data.message || `Error ${res.status}`)
   }
-  return res.blob()
+  const ab = await res.arrayBuffer()
+  const mime = (res.headers.get('Content-Type') || 'application/pdf').split(';')[0].trim().toLowerCase()
+  return new Blob([ab], { type: mime || 'application/pdf' })
 }
 
 /**
