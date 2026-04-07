@@ -452,7 +452,9 @@ async function exportServicesCsv() {
               </th>
               <th scope="col" class="num" :aria-sort="thAriaSort('amount')">
                 <button type="button" class="th-sort th-sort--end" @click="toggleSort('amount')">
-                  Valor<span class="sort-ind" aria-hidden="true">{{ sortIndicator('amount') }}</span>
+                  {{ isAdmin ? 'Valor (factura)' : 'Valor (su referencia)' }}<span class="sort-ind" aria-hidden="true">{{
+                    sortIndicator('amount')
+                  }}</span>
                 </button>
               </th>
               <th scope="col" :aria-sort="thAriaSort('status')">

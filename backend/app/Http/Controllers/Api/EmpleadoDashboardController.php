@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Service;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -28,14 +29,14 @@ class EmpleadoDashboardController extends Controller
             ->whereMonth('service_date', $month);
 
         $servicesCountMonth = (clone $monthBase)->count();
-        $totalAmountMonth = (string) (clone $monthBase)->sum('amount');
+        $totalAmountMonth = $this->sumTechnicianReference(clone $monthBase);
 
         $historialBase = Service::query()
             ->where('user_id', $user->id)
             ->visibles();
 
         $servicesCountHistorial = (clone $historialBase)->count();
-        $totalAmountHistorial = (string) (clone $historialBase)->sum('amount');
+        $totalAmountHistorial = $this->sumTechnicianReference(clone $historialBase);
         $avgHistorial = $servicesCountHistorial > 0
             ? (string) round(((float) $totalAmountHistorial) / $servicesCountHistorial, 2)
             : '0';
@@ -44,6 +45,8 @@ class EmpleadoDashboardController extends Controller
             ->where('user_id', $user->id)
             ->visibles()
             ->with(['company:id,nombre'])
+            ->withSum('items', 'technician_line_amount')
+            ->withCount('items')
             ->orderByDesc('created_at')
             ->first();
 
@@ -51,6 +54,8 @@ class EmpleadoDashboardController extends Controller
             ->where('user_id', $user->id)
             ->visibles()
             ->with(['company:id,nombre'])
+            ->withSum('items', 'technician_line_amount')
+            ->withCount('items')
             ->orderByDesc('created_at')
             ->limit(10)
             ->get()
@@ -78,11 +83,28 @@ class EmpleadoDashboardController extends Controller
     }
 
     /**
+     * Suma importes de referencia del técnico (sin margen/incremento de empresa), coherente con Service::technicianReferenceTotalValue().
+     */
+    private function sumTechnicianReference(Builder $base): string
+    {
+        $rows = (clone $base)->withSum('items', 'technician_line_amount')->withCount('items')->get();
+        $sum = 0.0;
+        foreach ($rows as $s) {
+            $sum += $s->technicianReferenceTotalValue();
+        }
+
+        return number_format($sum, 2, '.', '');
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function serviceRow(Service $s): array
     {
         $s->loadMissing('company:id,nombre');
+        if (! $s->relationLoaded('items_count')) {
+            $s->loadSum('items', 'technician_line_amount')->loadCount('items');
+        }
 
         return [
             'id' => $s->id,
@@ -90,7 +112,7 @@ class EmpleadoDashboardController extends Controller
             'service_date' => $s->service_date?->format('Y-m-d'),
             'company_name' => $s->company?->nombre,
             'description' => Str::limit((string) $s->description, 120),
-            'amount' => (string) $s->amount,
+            'amount' => number_format($s->technicianReferenceTotalValue(), 2, '.', ''),
             'created_at' => $s->created_at?->toIso8601String(),
         ];
     }

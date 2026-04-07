@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
+import { requestForgotPassword } from '@/services/authPasswordApi.js'
 import loginBackground from '@/assets/Login.png'
 
 const router = useRoute()
@@ -18,6 +19,13 @@ const remember = ref(true)
 const loading = ref(false)
 const fieldErrors = ref({})
 const globalError = ref('')
+
+const forgotOpen = ref(false)
+const forgotDoc = ref('')
+const forgotCorreo = ref('')
+const forgotLoading = ref(false)
+const forgotError = ref('')
+const forgotSuccess = ref('')
 
 const redirectTarget = computed(() => {
   const r = router.query.redirect
@@ -154,6 +162,48 @@ async function onSubmit(e) {
     mapServerError(e)
   } finally {
     loading.value = false
+  }
+}
+
+function openForgot() {
+  forgotOpen.value = true
+  forgotError.value = ''
+  forgotSuccess.value = ''
+  forgotDoc.value = ''
+  forgotCorreo.value = correo.value.trim()
+}
+
+function closeForgot() {
+  forgotOpen.value = false
+  forgotError.value = ''
+  forgotSuccess.value = ''
+}
+
+async function submitForgot() {
+  forgotError.value = ''
+  forgotSuccess.value = ''
+  const c = forgotCorreo.value.trim()
+  const d = forgotDoc.value.trim()
+  if (!c) {
+    forgotError.value = 'Indique el correo electrónico.'
+    return
+  }
+  if (!emailPattern.test(c)) {
+    forgotError.value = 'Introduce un correo electrónico válido.'
+    return
+  }
+  if (!d) {
+    forgotError.value = 'Indique el número de cédula o documento.'
+    return
+  }
+  forgotLoading.value = true
+  try {
+    const res = await requestForgotPassword({ correo: c, numero_documento: d })
+    forgotSuccess.value = res?.message || 'Solicitud registrada.'
+  } catch (e) {
+    forgotError.value = e.data?.message || e.message || 'No se pudo enviar la solicitud.'
+  } finally {
+    forgotLoading.value = false
   }
 }
 
@@ -305,8 +355,7 @@ async function onSubmit(e) {
           </label>
 
           <p class="text-sm text-sky-300/75">
-            ¿Olvidaste tu contraseña?
-            <span class="text-slate-400">Próximamente</span>
+            <button type="button" class="forgot-link" @click="openForgot">¿Olvidaste tu contraseña?</button>
           </p>
 
           <button
@@ -350,6 +399,56 @@ async function onSubmit(e) {
         </div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="forgotOpen"
+        class="forgot-backdrop"
+        role="presentation"
+        aria-hidden="true"
+        @click.self="closeForgot"
+      />
+      <div v-if="forgotOpen" class="forgot-dialog-wrap" role="dialog" aria-modal="true" aria-labelledby="forgot-title">
+        <div class="forgot-dialog">
+          <h2 id="forgot-title" class="forgot-title">Recuperar acceso</h2>
+          <p class="forgot-lede">
+            Ingrese el <strong>número de documento</strong> (cédula) y el <strong>correo</strong> asociados a su cuenta en HBM.
+            Si los datos coinciden con un usuario activo, se enviará una solicitud interna para que un administrador valide su identidad y asigne una nueva contraseña; no recibirá enlace automático por este medio.
+            Por seguridad, la respuesta del sistema es siempre la misma, con o sin coincidencia.
+          </p>
+          <p v-if="forgotError" class="forgot-banner forgot-banner--err" role="alert">{{ forgotError }}</p>
+          <p v-if="forgotSuccess" class="forgot-banner forgot-banner--ok">{{ forgotSuccess }}</p>
+          <label class="forgot-field">
+            <span>Número de cédula / documento</span>
+            <input
+              v-model="forgotDoc"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              class="forgot-input"
+              placeholder="Solo números, sin puntos"
+            />
+          </label>
+          <label class="forgot-field">
+            <span>Correo electrónico</span>
+            <input v-model="forgotCorreo" type="text" inputmode="email" autocomplete="email" class="forgot-input" />
+          </label>
+          <div class="forgot-actions">
+            <button type="button" class="forgot-btn forgot-btn--ghost" :disabled="forgotLoading" @click="closeForgot">
+              Cerrar
+            </button>
+            <button
+              type="button"
+              class="forgot-btn forgot-btn--primary"
+              :disabled="forgotLoading"
+              @click="submitForgot"
+            >
+              {{ forgotLoading ? 'Enviando…' : 'Enviar solicitud' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -362,5 +461,151 @@ input:-webkit-autofill:active {
   -webkit-box-shadow: 0 0 0 30px transparent inset !important;
   -webkit-text-fill-color: white !important;
   transition: background-color 5000s ease-in-out 0s;
+}
+
+.forgot-link {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.forgot-link:hover {
+  color: #e0f2fe;
+}
+
+.forgot-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.forgot-dialog-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 101;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  pointer-events: none;
+}
+
+.forgot-dialog {
+  pointer-events: auto;
+  width: 100%;
+  max-width: 420px;
+  border-radius: 18px;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: linear-gradient(165deg, rgba(15, 23, 42, 0.98), rgba(12, 18, 34, 0.99));
+  box-shadow:
+    0 0 0 1px rgba(56, 189, 248, 0.12),
+    0 24px 64px rgba(0, 0, 0, 0.55);
+  padding: 1.35rem 1.5rem 1.5rem;
+  color: #e2e8f0;
+}
+
+.forgot-title {
+  margin: 0 0 0.65rem;
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #f8fafc;
+}
+
+.forgot-lede {
+  margin: 0 0 1rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: #94a3b8;
+}
+
+.forgot-banner {
+  margin: 0 0 0.85rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.forgot-banner--err {
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.1);
+  color: #fecaca;
+}
+.forgot-banner--ok {
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  background: rgba(16, 185, 129, 0.1);
+  color: #a7f3d0;
+}
+
+.forgot-field {
+  display: block;
+  margin-bottom: 0.85rem;
+}
+.forgot-field span {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #94a3b8;
+}
+.forgot-input {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: rgba(10, 15, 28, 0.95);
+  color: #f8fafc;
+  padding: 0.6rem 0.75rem;
+  font: inherit;
+  font-size: 0.9rem;
+  outline: none;
+}
+.forgot-input:focus {
+  border-color: rgba(56, 189, 248, 0.65);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.15);
+}
+
+.forgot-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+.forgot-btn {
+  border-radius: 12px;
+  padding: 0.55rem 1rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.forgot-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.forgot-btn--ghost {
+  background: transparent;
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #cbd5e1;
+}
+.forgot-btn--ghost:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.1);
+}
+.forgot-btn--primary {
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  color: #fff;
+  border: none;
+}
+.forgot-btn--primary:hover:not(:disabled) {
+  filter: brightness(1.06);
 }
 </style>

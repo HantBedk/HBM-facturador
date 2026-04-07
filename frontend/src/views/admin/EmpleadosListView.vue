@@ -69,7 +69,7 @@ const ROL_FORM_OPTIONS = computed(() => {
 
 let searchTimer = null
 
-/** Desde notificación de cambio de correo: ?usuario_id= */
+/** Desde notificación (p. ej. cambio de correo, solicitud de restablecimiento de contraseña): ?usuario_id= */
 const filterUsuarioId = computed(() => {
   const raw = route.query.usuario_id
   if (raw == null || raw === '') return null

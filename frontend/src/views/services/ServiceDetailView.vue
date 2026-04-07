@@ -261,7 +261,7 @@ async function onEmpleadoArchive() {
               <dd class="cap">{{ service.status }}</dd>
             </div>
             <div>
-              <dt>Valor</dt>
+              <dt>Valor (su referencia)</dt>
               <dd>{{ money(service.amount) }}</dd>
             </div>
             <div class="wide">
@@ -290,7 +290,7 @@ async function onEmpleadoArchive() {
                   <li v-for="it in serviceItems" :key="it.id" class="emp-item">
                     <p class="emp-item-label">{{ it.label || '—' }}</p>
                     <p class="pre emp-item-desc">{{ it.line_description || '—' }}</p>
-                    <p class="emp-item-amt">{{ money(lineBilledAmount(it)) }}</p>
+                    <p class="emp-item-amt">{{ money(lineTechnicianAmount(it)) }}</p>
                   </li>
                 </ul>
               </dd>

@@ -250,7 +250,7 @@ function toggleRow(id) {
         >
           <div>
             <h3 class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-500">
-              Total Facturado Historial
+              Total acumulado (su referencia)
             </h3>
             <p class="mt-3 text-2xl font-bold tabular-nums text-white sm:text-[1.75rem]">
               {{ formatMoney(summary?.total_amount_historial) }}
@@ -467,7 +467,7 @@ function toggleRow(id) {
                 </th>
                 <th class="px-4 py-3.5 text-right" scope="col" :aria-sort="dashRecentAriaSort('amount')">
                   <button type="button" class="th-sort th-sort--end" @click="toggleDashRecentSort('amount')">
-                    Valor<span class="sort-ind" aria-hidden="true">{{ dashRecentSortInd('amount') }}</span>
+                    Valor (ref.)<span class="sort-ind" aria-hidden="true">{{ dashRecentSortInd('amount') }}</span>
                   </button>
                 </th>
                 <th class="px-4 py-3.5 text-right last:rounded-tr-2xl" />

@@ -33,6 +33,9 @@ class PanelNotification extends Model
     /** Técnico solicitó cambio de correo (pendiente de aprobación admin). */
     public const TYPE_EMAIL_CHANGE_REQUEST = 'email_change_request';
 
+    /** Solicitud «olvidé contraseña» desde login (cédula + correo verificados). */
+    public const TYPE_PASSWORD_RESET_REQUEST = 'password_reset_request';
+
     /** Notificaciones mostradas solo al técnico (panel empleado). */
     public const TYPE_EMP_CORREO_APROBADO = 'emp_correo_aprobado';
 
@@ -94,7 +97,8 @@ class PanelNotification extends Model
             self::TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR,
             self::TYPE_EMP_ABONO_TECNICO_REGISTRADO => 'servicios',
             self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
-            self::TYPE_EMAIL_CHANGE_REQUEST => 'empleados',
+            self::TYPE_EMAIL_CHANGE_REQUEST,
+            self::TYPE_PASSWORD_RESET_REQUEST => 'empleados',
             default => 'facturas',
         };
     }
@@ -116,6 +120,14 @@ class PanelNotification extends Model
         if ($type === self::TYPE_EMAIL_CHANGE_REQUEST) {
             if (isset($meta['empleado_id']) && is_numeric($meta['empleado_id'])) {
                 return '/admin/empleados/rendimiento?usuario_id='.(int) $meta['empleado_id'];
+            }
+
+            return '/admin/empleados/rendimiento';
+        }
+
+        if ($type === self::TYPE_PASSWORD_RESET_REQUEST) {
+            if (isset($meta['usuario_id']) && is_numeric($meta['usuario_id'])) {
+                return '/admin/empleados/rendimiento?usuario_id='.(int) $meta['usuario_id'];
             }
 
             return '/admin/empleados/rendimiento';
@@ -167,7 +179,11 @@ class PanelNotification extends Model
                 self::TYPE_ALERT_SERVICES_ZERO,
                 self::TYPE_CATALOG_SUGGESTION_PENDING,
             ],
-            'empleados' => [self::TYPE_EMPLEADO_PERFIL_COMPLETADO, self::TYPE_EMAIL_CHANGE_REQUEST],
+            'empleados' => [
+                self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
+                self::TYPE_EMAIL_CHANGE_REQUEST,
+                self::TYPE_PASSWORD_RESET_REQUEST,
+            ],
             'facturas' => [
                 self::TYPE_INVOICE_DRAFT,
                 self::TYPE_INVOICE_PENDING_APPROVAL,

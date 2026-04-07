@@ -37,6 +37,9 @@ Route::get('/health', HealthController::class);
 Route::post('/auth/login', [AuthController::class, 'login'])
     ->middleware('throttle:15,1');
 
+Route::post('/auth/forgot-password', [AuthController::class, 'forgotPasswordRequest'])
+    ->middleware('throttle:8,60');
+
 Route::prefix('public')
     ->middleware('throttle:30,1')
     ->group(function () {
