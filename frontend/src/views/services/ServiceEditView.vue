@@ -92,6 +92,13 @@ onMounted(async () => {
   try {
     service.value = await fetchService(route.params.id)
     catalogItems.value = await fetchServiceCatalogActive()
+    if (
+      !isAdmin.value &&
+      service.value?.assignment_status === 'awaiting_completion'
+    ) {
+      await router.replace(`/empleado/servicio/${route.params.id}/completar-asignacion`)
+      return
+    }
   } catch (e) {
     globalError.value = e.data?.message || e.message || 'No se pudo cargar.'
     catalogItems.value = []

@@ -13,6 +13,8 @@ const props = defineProps({
   clientSuggestions: { type: Array, default: () => [] },
   fieldErrors: { type: Object, default: () => ({}) },
   disabled: { type: Boolean, default: false },
+  /** No permitir cambiar empresa / cliente puntual (p. ej. completar asignación administrativa). */
+  billingLocked: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue', 'update:photos'])
@@ -280,6 +282,7 @@ const companySelectValue = computed(() => {
 })
 
 function onCompanySelectChange(ev) {
+  if (props.billingLocked) return
   const v = ev.target.value
   if (v === QUICK_CLIENT_OPTION) {
     patch({ use_quick_client: true, company_id: '' })
@@ -300,7 +303,12 @@ function onCompanySelectChange(ev) {
         Empresa y cliente
       </h2>
       <p class="step-lede">
-        Elige la empresa en el listado; al final puedes indicar cliente puntual si no está registrado en el sistema.
+        <template v-if="billingLocked">
+          Empresa y cliente fijados por la asignación administrativa; complete conceptos e importes abajo.
+        </template>
+        <template v-else>
+          Elige la empresa en el listado; al final puedes indicar cliente puntual si no está registrado en el sistema.
+        </template>
       </p>
 
     <!-- Empresa / cliente puntual (una sola lista) -->
@@ -325,7 +333,7 @@ function onCompanySelectChange(ev) {
           class="w-full appearance-none rounded-2xl border border-slate-700/90 bg-[#141a22] py-3.5 pl-12 pr-10 text-[0.9375rem] text-white outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
           :class="inner.use_quick_client ? 'border-amber-500/35' : ''"
           :value="companySelectValue"
-          :disabled="disabled"
+          :disabled="disabled || billingLocked"
           @change="onCompanySelectChange"
         >
           <option value="" disabled>Seleccionar…</option>

@@ -58,6 +58,8 @@ const filters = ref({
   service_date_to: '',
   q: '',
   page: 1,
+  /** Técnico: filtro `assignment_pending` en API. */
+  assignment_pending: false,
 })
 
 const isAdmin = computed(() => isAdminPanelRole(auth.user?.rol))
@@ -189,6 +191,7 @@ async function load() {
     if (filters.value.service_date_from) params.service_date_from = filters.value.service_date_from
     if (filters.value.service_date_to) params.service_date_to = filters.value.service_date_to
     if (filters.value.q.trim()) params.q = filters.value.q.trim()
+    if (!isAdmin.value && filters.value.assignment_pending) params.assignment_pending = true
     if (sortKey.value) {
       params.sort = sortKey.value
       params.sort_dir = sortDir.value
@@ -253,6 +256,7 @@ watch(
     filters.value.user_id,
     filters.value.service_date_from,
     filters.value.service_date_to,
+    filters.value.assignment_pending,
   ],
   () => scheduleFilterLoad()
 )
@@ -402,6 +406,10 @@ async function exportServicesCsv() {
         <span>Búsqueda (código, cliente, descripción, tipo)</span>
         <input v-model="filters.q" type="search" placeholder="Ej. 20260329, SYF, instalación…" />
       </label>
+      <label v-if="!isAdmin" class="filter-check">
+        <input v-model="filters.assignment_pending" type="checkbox" />
+        <span>Solo asignaciones pendientes</span>
+      </label>
     </div>
     <p class="filter-hint muted">
       <template v-if="isAdmin">
@@ -488,6 +496,12 @@ async function exportServicesCsv() {
                     {{ s.code }}
                   </button>
                   <span v-else class="link">{{ s.code }}</span>
+                  <span
+                    v-if="!isAdmin && s.assignment_status === 'awaiting_completion'"
+                    class="assign-pill"
+                    title="Pendiente de completar asignación"
+                    >Asignación</span
+                  >
                   <template v-if="isAdmin && s.invoices?.length">
                     <RouterLink
                       v-for="inv in s.invoices"
@@ -512,6 +526,7 @@ async function exportServicesCsv() {
               <td v-if="showServiceActions" class="actions-col" @click.stop>
                 <div class="actions-icons">
                   <RouterLink
+                    v-if="!(s.assignment_status === 'awaiting_completion' && !isAdmin)"
                     class="icon-act"
                     :to="editPath(s.id)"
                     title="Editar servicio"
@@ -526,10 +541,30 @@ async function exportServicesCsv() {
                       />
                     </svg>
                   </RouterLink>
+                  <RouterLink
+                    v-if="!isAdmin && s.assignment_status === 'awaiting_completion'"
+                    class="icon-act"
+                    :to="`/empleado/servicio/${s.id}/completar-asignacion`"
+                    title="Completar asignación"
+                    aria-label="Completar asignación"
+                  >
+                    <svg class="icon-svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                  </RouterLink>
                   <button
                     type="button"
                     class="icon-act icon-act--danger"
-                    :disabled="archivingId === s.id || s.status === 'eliminado'"
+                    :disabled="
+                      archivingId === s.id ||
+                      s.status === 'eliminado' ||
+                      (!isAdmin && s.assignment_status === 'awaiting_completion')
+                    "
                     title="Eliminar servicio (marcar como eliminado)"
                     aria-label="Eliminar servicio"
                     @click="openDeleteModal(s)"
@@ -740,8 +775,30 @@ async function exportServicesCsv() {
   grid-column: span 2;
 }
 
+.filter-check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  grid-column: span 2;
+}
+
+.filter-check span {
+  display: inline;
+  margin: 0;
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+
+.filter-check input {
+  width: auto;
+}
+
 @media (max-width: 720px) {
   .grow {
+    grid-column: span 1;
+  }
+  .filter-check {
     grid-column: span 1;
   }
 }
@@ -916,6 +973,18 @@ async function exportServicesCsv() {
 .code-cell-inner > :first-child {
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.assign-pill {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.4rem;
+  border-radius: 6px;
+  background: rgba(14, 165, 233, 0.2);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.35);
 }
 
 .code-cell__invoice {

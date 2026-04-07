@@ -21,6 +21,7 @@ const EmpleadoOnboardingView = () => import('@/views/empleado/EmpleadoOnboarding
 const EmployeeHistorialView = () => import('@/views/empleado/EmployeeHistorialView.vue')
 const ServicesListView = () => import('@/views/services/ServicesListView.vue')
 const ServiceRegisterView = () => import('@/views/services/ServiceRegisterView.vue')
+const ServiceCompleteAssignmentView = () => import('@/views/services/ServiceCompleteAssignmentView.vue')
 const ServiceDetailView = () => import('@/views/services/ServiceDetailView.vue')
 const ServiceEditView = () => import('@/views/services/ServiceEditView.vue')
 const ServiceCatalogView = () => import('@/views/admin/ServiceCatalogView.vue')
@@ -137,6 +138,12 @@ const routes = [
       { path: 'registro-servicio', name: 'emp-registro-servicio', component: ServiceRegisterView },
       { path: 'listado-servicios', name: 'emp-listado-servicios', component: ServicesListView },
       { path: 'servicio/:id(\\d+)', name: 'emp-servicio-detalle', component: ServiceDetailView, props: true },
+      {
+        path: 'servicio/:id(\\d+)/completar-asignacion',
+        name: 'emp-servicio-completar-asignacion',
+        component: ServiceCompleteAssignmentView,
+        props: true,
+      },
       { path: 'servicio/:id(\\d+)/editar', name: 'emp-servicio-editar', component: ServiceEditView, props: true },
       { path: 'servicios/nuevo', redirect: '/empleado/registro-servicio' },
       {

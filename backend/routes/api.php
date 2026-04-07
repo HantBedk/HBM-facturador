@@ -103,6 +103,8 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::get('/admin/export/invoices', [AdminExportController::class, 'invoices']);
         Route::get('/admin/activity-logs', [AdminActivityLogController::class, 'index']);
 
+        Route::post('/admin/services/assign-to-technician', [ServiceController::class, 'assignToTechnician']);
+
         Route::get('/admin/invoices/available-services', [AdminInvoiceController::class, 'availableServices']);
         Route::get('/admin/invoices', [AdminInvoiceController::class, 'index']);
         Route::post('/admin/invoices', [AdminInvoiceController::class, 'store']);
@@ -145,4 +147,6 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::put('/services/{service}', [ServiceController::class, 'update']);
     Route::patch('/services/{service}/archive', [ServiceController::class, 'archive']);
     Route::patch('/services/{service}/technician-paid', [ServiceController::class, 'patchTechnicianPaid']);
+    Route::post('/services/{service}/complete-assignment', [ServiceController::class, 'completeAssignment']);
+    Route::post('/services/{service}/reject-assignment', [ServiceController::class, 'rejectAssignment']);
 });

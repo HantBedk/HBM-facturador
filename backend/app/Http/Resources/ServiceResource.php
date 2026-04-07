@@ -32,6 +32,12 @@ class ServiceResource extends JsonResource
             'technician_line_total' => $this->when($adminView, $techTotalStr),
             'service_date' => $this->service_date?->format('Y-m-d'),
             'status' => $this->status,
+            'assignment_status' => $this->assignment_status,
+            'assigned_by_user_id' => $this->assigned_by_user_id,
+            'assigned_by' => $this->whenLoaded('assignedBy', fn () => $this->assignedBy ? [
+                'id' => $this->assignedBy->id,
+                'nombre' => $this->assignedBy->nombre,
+            ] : null),
             'invoiced' => isset($this->resource->invoices_count)
                 ? (int) $this->resource->invoices_count > 0
                 : ($this->resource->relationLoaded('invoices')

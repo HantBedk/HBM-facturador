@@ -65,6 +65,12 @@ class PanelNotification extends Model
     /** Servicio del técnico quitado del borrador de una factura. */
     public const TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR = 'emp_servicio_excluido_borrador';
 
+    /** Admin asignó un servicio al técnico; debe completarlo o rechazarlo. */
+    public const TYPE_EMP_SERVICIO_ASIGNADO_ADMIN = 'emp_servicio_asignado_admin';
+
+    /** Técnico rechazó una asignación (avisar a administración). */
+    public const TYPE_ADMIN_ASIGNACION_RECHAZADA = 'admin_asignacion_rechazada';
+
     protected $table = 'panel_notifications';
 
     /**
@@ -82,6 +88,7 @@ class PanelNotification extends Model
             self::TYPE_EMP_SERVICIO_ELIMINADO_ADMIN,
             self::TYPE_EMP_SERVICIO_FACTURA_APROBADA,
             self::TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR,
+            self::TYPE_EMP_SERVICIO_ASIGNADO_ADMIN,
         ];
     }
 
@@ -95,6 +102,8 @@ class PanelNotification extends Model
             self::TYPE_EMP_SERVICIO_ELIMINADO_ADMIN,
             self::TYPE_EMP_SERVICIO_FACTURA_APROBADA,
             self::TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR,
+            self::TYPE_EMP_SERVICIO_ASIGNADO_ADMIN,
+            self::TYPE_ADMIN_ASIGNACION_RECHAZADA,
             self::TYPE_EMP_ABONO_TECNICO_REGISTRADO => 'servicios',
             self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
             self::TYPE_EMAIL_CHANGE_REQUEST,
@@ -159,6 +168,9 @@ class PanelNotification extends Model
             self::TYPE_SERVICE_CREATED => $serviceId !== null
                 ? '/admin/servicios/'.$serviceId
                 : '/admin/servicios',
+            self::TYPE_ADMIN_ASIGNACION_RECHAZADA => $serviceId !== null
+                ? '/admin/servicios/'.$serviceId
+                : '/admin/servicios',
             self::TYPE_ALERT_SERVICES_ZERO => '/admin/servicios',
             self::TYPE_CATALOG_SUGGESTION_PENDING => '/admin/catalogo-servicios',
             self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
@@ -178,6 +190,7 @@ class PanelNotification extends Model
                 self::TYPE_SERVICE_CREATED,
                 self::TYPE_ALERT_SERVICES_ZERO,
                 self::TYPE_CATALOG_SUGGESTION_PENDING,
+                self::TYPE_ADMIN_ASIGNACION_RECHAZADA,
             ],
             'empleados' => [
                 self::TYPE_EMPLEADO_PERFIL_COMPLETADO,

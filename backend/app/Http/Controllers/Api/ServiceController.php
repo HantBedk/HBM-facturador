@@ -60,6 +60,10 @@ class ServiceController extends Controller
             $q->where('user_id', $request->integer('user_id'));
         }
 
+        if (filter_var($request->query('assignment_pending'), FILTER_VALIDATE_BOOLEAN)) {
+            $q->where('assignment_status', Service::ASSIGNMENT_AWAITING_COMPLETION);
+        }
+
         if ($request->filled('service_date_from')) {
             $q->whereDate('service_date', '>=', $request->date('service_date_from')->format('Y-m-d'));
         }
@@ -352,6 +356,7 @@ class ServiceController extends Controller
         $service->load([
             'company',
             'user',
+            'assignedBy:id,nombre,correo',
             'photos',
             'catalog:id,name',
             'items.catalogSuggestion',
@@ -359,6 +364,353 @@ class ServiceController extends Controller
                 $rel->select('invoices.id', 'invoices.code');
             },
         ]);
+
+        return new ServiceResource($service);
+    }
+
+    /**
+     * Solo administración: crea un servicio mínimo para el técnico (pendiente de completar importes y líneas).
+     */
+    public function assignToTechnician(Request $request, ServiceCodeGenerator $codes, QuickClientCompanyResolver $quickClients): JsonResponse
+    {
+        if (! $request->user()->isAdminEquipo()) {
+            return response()->json(['message' => 'No autorizado.'], 403);
+        }
+
+        $data = $request->validate([
+            'technician_user_id' => ['required', 'integer', 'exists:users,id'],
+            'company_id' => ['nullable', 'integer', 'exists:companies,id'],
+            'quick_client' => ['nullable', 'array'],
+            'quick_client.nombre' => ['nullable', 'string', 'max:255'],
+            'quick_client.telefono' => ['nullable', 'string', 'max:32'],
+            'catalog_id' => ['required', 'integer', 'exists:service_catalog,id'],
+            'client_name' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $technician = User::query()->findOrFail($data['technician_user_id']);
+        if ($technician->rol !== User::ROL_EMPLEADO) {
+            throw ValidationException::withMessages([
+                'technician_user_id' => ['El usuario debe ser un empleado (técnico).'],
+            ]);
+        }
+        if ($technician->estado !== User::ESTADO_ACTIVO) {
+            throw ValidationException::withMessages([
+                'technician_user_id' => ['El técnico debe estar activo.'],
+            ]);
+        }
+
+        $qcNombre = isset($data['quick_client']['nombre']) ? trim((string) $data['quick_client']['nombre']) : '';
+        $qcTel = isset($data['quick_client']['telefono']) ? trim((string) $data['quick_client']['telefono']) : '';
+        $useQuickClient = $qcNombre !== '' && $qcTel !== '';
+        $companyIdRaw = $data['company_id'] ?? null;
+
+        if ($useQuickClient && $companyIdRaw !== null && $companyIdRaw !== '') {
+            throw ValidationException::withMessages([
+                'company_id' => ['No selecciones empresa si indicas cliente puntual (nombre y teléfono).'],
+            ]);
+        }
+        if (! $useQuickClient && ($companyIdRaw === null || $companyIdRaw === '')) {
+            throw ValidationException::withMessages([
+                'company_id' => ['Selecciona una empresa o completa cliente puntual: nombre y teléfono.'],
+            ]);
+        }
+
+        if ($useQuickClient) {
+            $company = $quickClients->resolveOrCreate($qcNombre, $qcTel);
+            $companyId = (int) $company->id;
+            $clientNameFinal = $qcNombre;
+        } else {
+            $companyId = (int) $companyIdRaw;
+            $company = Company::query()->findOrFail($companyId);
+            $clientNameFinal = trim((string) ($data['client_name'] ?? ''));
+            if ($clientNameFinal === '') {
+                $clientNameFinal = (string) $company->nombre;
+            }
+        }
+
+        if ($company->estado !== Company::ESTADO_ACTIVO) {
+            throw ValidationException::withMessages([
+                'company_id' => ['Solo se pueden asignar servicios para empresas activas.'],
+            ]);
+        }
+
+        $catalogId = (int) $data['catalog_id'];
+        $cat = ServiceCatalog::query()->findOrFail($catalogId);
+        if ($cat->status !== ServiceCatalog::STATUS_ACTIVO) {
+            throw ValidationException::withMessages([
+                'catalog_id' => ['El ítem de catálogo no está activo.'],
+            ]);
+        }
+
+        $itemsPayload = [[
+            'catalog_id' => $catalogId,
+            'amount' => 0.01,
+            'line_description' => 'Asignación desde administración: complete el detalle del trabajo realizado en obra (importes y líneas) antes de facturar.',
+        ]];
+        $normalized = $this->validateAndNormalizeServiceItems($itemsPayload, $companyId);
+
+        $serviceDate = Carbon::now(config('app.timezone'))->startOfDay();
+        $totalAmount = '0.00';
+        foreach ($normalized as $row) {
+            $a = number_format((float) $row['amount'], 2, '.', '');
+            $totalAmount = DecimalMath::add($totalAmount, $a, 2);
+        }
+
+        $masterDescription = 'Servicio asignado por administración. Complete líneas e importes desde el panel del técnico. Ref '.str_replace('.', '', uniqid('', true));
+        $dupData = array_merge($data, ['description' => $masterDescription, 'amount' => $totalAmount, 'company_id' => $companyId]);
+        if ($this->isDuplicate($technician, $dupData, $serviceDate)) {
+            throw ValidationException::withMessages([
+                'description' => ['Ya existe un servicio muy similar para la misma empresa y fecha.'],
+            ]);
+        }
+
+        try {
+            $code = $codes->nextForDate($serviceDate);
+        } catch (\RuntimeException $e) {
+            throw ValidationException::withMessages([
+                'service_date' => [$e->getMessage()],
+            ]);
+        }
+
+        $firstCatalogId = $catalogId;
+
+        $admin = $request->user();
+        $service = DB::transaction(function () use (
+            $code,
+            $companyId,
+            $technician,
+            $admin,
+            $masterDescription,
+            $totalAmount,
+            $serviceDate,
+            $normalized,
+            $firstCatalogId,
+            $clientNameFinal,
+            $cat,
+        ) {
+            $service = Service::create([
+                'code' => $code,
+                'company_id' => $companyId,
+                'user_id' => $technician->id,
+                'assigned_by_user_id' => $admin->id,
+                'catalog_id' => $firstCatalogId,
+                'client_name' => $clientNameFinal,
+                'service_type' => $cat->name,
+                'description' => $masterDescription,
+                'amount' => $totalAmount,
+                'service_date' => $serviceDate->toDateString(),
+                'status' => Service::STATUS_ACTIVO,
+                'assignment_status' => Service::ASSIGNMENT_AWAITING_COMPLETION,
+            ]);
+
+            foreach ($normalized as $sort => $row) {
+                ServiceItem::query()->create([
+                    'service_id' => $service->id,
+                    'catalog_id' => $row['catalog_id'],
+                    'catalog_suggestion_id' => null,
+                    'label' => $row['label'],
+                    'line_description' => $row['line_description'],
+                    'amount' => $row['amount'],
+                    'technician_line_amount' => $row['technician_line_amount'],
+                    'sort_order' => $sort,
+                ]);
+            }
+
+            return $service;
+        });
+
+        $service->load(['company', 'user', 'assignedBy:id,nombre,correo', 'photos', 'catalog:id,name', 'items.catalogSuggestion']);
+
+        app(PanelNotificationDispatcher::class)->notifyUser(
+            (int) $technician->id,
+            PanelNotification::TYPE_EMP_SERVICIO_ASIGNADO_ADMIN,
+            'Le asignaron el servicio '.$service->code.' ('.($service->company?->nombre ?? 'empresa').'). Complete líneas e importes o rechace la asignación.',
+            [
+                'service_id' => $service->id,
+                'link' => '/empleado/servicio/'.$service->id.'/completar-asignacion',
+            ],
+            'emp_assign_'.$service->id
+        );
+
+        ActivityLogger::log(
+            $admin,
+            'servicio_asignado_tecnico',
+            'Asignó servicio '.$service->code.' (ID '.$service->id.') al técnico '.$technician->nombre.' (ID '.$technician->id.').'
+        );
+
+        return (new ServiceResource($service))->response()->setStatusCode(201);
+    }
+
+    /**
+     * El técnico dueño sustituye líneas e importes (misma lógica que el alta) y cierra la asignación.
+     */
+    public function completeAssignment(Request $request, Service $service): JsonResponse|ServiceResource
+    {
+        $this->authorize('view', $service);
+
+        $user = $request->user();
+        if ($user->isAdminEquipo()) {
+            return response()->json(['message' => 'Solo el técnico asignado puede completar esta asignación.'], 403);
+        }
+        if ((int) $service->user_id !== (int) $user->id) {
+            return response()->json(['message' => 'No autorizado.'], 403);
+        }
+        if ($service->assignment_status !== Service::ASSIGNMENT_AWAITING_COMPLETION) {
+            return response()->json(['message' => 'Este servicio no tiene una asignación pendiente de completar.'], 422);
+        }
+        if ($service->invoices()->exists()) {
+            return response()->json([
+                'message' => 'Este servicio ya está asociado a una factura; no puede modificarse.',
+            ], 422);
+        }
+
+        $this->mergeQuickClientFromMultipart($request);
+
+        $data = $request->validate([
+            'client_name' => ['required', 'string', 'max:255'],
+            'service_type' => ['required', 'string', 'max:255'],
+            'photos' => ['sometimes', 'array', 'max:4'],
+            'photos.*' => ['file', 'image', 'mimes:jpeg,jpg,png,gif,webp', 'max:8192'],
+        ]);
+
+        $companyId = (int) $service->company_id;
+        $itemsPayload = $this->parseItemsFromRequest($request);
+        if ($itemsPayload === []) {
+            throw ValidationException::withMessages([
+                'items' => ['Añade líneas del servicio (catálogo o «Otro»).'],
+            ]);
+        }
+
+        $normalized = $this->validateAndNormalizeServiceItems($itemsPayload, $companyId);
+
+        $company = Company::query()->findOrFail($companyId);
+        if ($company->estado !== Company::ESTADO_ACTIVO) {
+            throw ValidationException::withMessages([
+                'company_id' => ['La empresa del servicio no está activa.'],
+            ]);
+        }
+
+        $builtDescription = $this->descriptionFromNormalizedLines($normalized);
+        if (mb_strlen($builtDescription) < 8) {
+            throw ValidationException::withMessages([
+                'items' => ['La descripción del trabajo (líneas) debe sumar al menos 8 caracteres.'],
+            ]);
+        }
+
+        $totalAmount = '0.00';
+        foreach ($normalized as $row) {
+            $a = number_format((float) $row['amount'], 2, '.', '');
+            $totalAmount = DecimalMath::add($totalAmount, $a, 2);
+        }
+
+        $firstCatalogId = null;
+        foreach ($normalized as $row) {
+            if ($row['catalog_id'] !== null) {
+                $firstCatalogId = $row['catalog_id'];
+                break;
+            }
+        }
+
+        DB::transaction(function () use ($service, $normalized, $totalAmount, $data, $builtDescription, $firstCatalogId) {
+            ServiceItem::query()->where('service_id', $service->id)->delete();
+
+            $service->client_name = $data['client_name'];
+            $service->service_type = $data['service_type'];
+            $service->description = $builtDescription;
+            $service->amount = $totalAmount;
+            $service->catalog_id = $firstCatalogId;
+            $service->assignment_status = null;
+            $service->save();
+
+            foreach ($normalized as $sort => $row) {
+                ServiceItem::query()->create([
+                    'service_id' => $service->id,
+                    'catalog_id' => $row['catalog_id'],
+                    'catalog_suggestion_id' => null,
+                    'label' => $row['label'],
+                    'line_description' => $row['line_description'],
+                    'amount' => $row['amount'],
+                    'technician_line_amount' => $row['technician_line_amount'],
+                    'sort_order' => $sort,
+                ]);
+            }
+        });
+
+        $uploaded = $request->file('photos', []);
+        if (! is_array($uploaded)) {
+            $uploaded = array_filter([$uploaded]);
+        }
+        $uploaded = array_values(array_filter($uploaded));
+        foreach ($uploaded as $i => $file) {
+            if (! $file instanceof UploadedFile || ! $file->isValid()) {
+                continue;
+            }
+            $path = $file->store("service_photos/{$service->id}", 'public');
+            ServicePhoto::query()->create([
+                'service_id' => $service->id,
+                'path' => $path,
+                'sort_order' => $i,
+            ]);
+        }
+
+        $service->refresh();
+        $service->load(['company', 'user', 'assignedBy:id,nombre,correo', 'photos', 'catalog:id,name', 'items.catalogSuggestion']);
+        $service->loadCount('invoices');
+
+        ActivityLogger::log(
+            $user,
+            'servicio_asignacion_completada',
+            'Completó asignación del servicio '.$service->code.' (ID '.$service->id.').'
+        );
+
+        return new ServiceResource($service);
+    }
+
+    /**
+     * El técnico rechaza la asignación; el servicio queda eliminado y se avisa a administración.
+     */
+    public function rejectAssignment(Request $request, Service $service): JsonResponse|ServiceResource
+    {
+        $this->authorize('view', $service);
+
+        $user = $request->user();
+        if ($user->isAdminEquipo()) {
+            return response()->json(['message' => 'Solo el técnico asignado puede rechazar esta asignación.'], 403);
+        }
+        if ((int) $service->user_id !== (int) $user->id) {
+            return response()->json(['message' => 'No autorizado.'], 403);
+        }
+        if ($service->assignment_status !== Service::ASSIGNMENT_AWAITING_COMPLETION) {
+            return response()->json(['message' => 'Este servicio no tiene una asignación pendiente.'], 422);
+        }
+        if ($service->invoices()->exists()) {
+            return response()->json([
+                'message' => 'Este servicio ya está asociado a una factura.',
+            ], 422);
+        }
+
+        $service->assignment_status = Service::ASSIGNMENT_REJECTED;
+        $service->status = Service::STATUS_ELIMINADO;
+        $service->save();
+
+        app(PanelNotificationDispatcher::class)->notifyAdmins(
+            PanelNotification::TYPE_ADMIN_ASIGNACION_RECHAZADA,
+            $user->nombre.' rechazó la asignación del servicio '.$service->code.'.',
+            [
+                'service_id' => $service->id,
+                'link' => '/admin/servicios/'.$service->id,
+            ],
+            'admin_reject_assign_'.$service->id
+        );
+
+        $service->load(['company', 'user', 'assignedBy:id,nombre,correo', 'photos', 'catalog:id,name', 'items.catalogSuggestion']);
+        $service->loadCount('invoices');
+
+        ActivityLogger::log(
+            $user,
+            'servicio_asignacion_rechazada',
+            'Rechazó la asignación del servicio '.$service->code.' (ID '.$service->id.').'
+        );
 
         return new ServiceResource($service);
     }
@@ -478,6 +830,13 @@ class ServiceController extends Controller
         if ($service->invoices()->exists()) {
             return response()->json([
                 'message' => 'No se puede marcar como eliminado un servicio que figura en facturas.',
+            ], 422);
+        }
+
+        if ($service->assignment_status === Service::ASSIGNMENT_AWAITING_COMPLETION
+            && ! $request->user()->isAdminEquipo()) {
+            return response()->json([
+                'message' => 'Para una asignación pendiente use «Rechazar asignación» en el detalle del servicio.',
             ], 422);
         }
 
@@ -668,6 +1027,24 @@ class ServiceController extends Controller
                 'items' => ['Un ítem de catálogo no existe o no está activo.'],
             ]);
         }
+    }
+
+    /**
+     * @param  list<array{label: string, line_description: ?string}>  $normalized
+     */
+    private function descriptionFromNormalizedLines(array $normalized): string
+    {
+        $parts = [];
+        foreach ($normalized as $row) {
+            $ld = trim((string) ($row['line_description'] ?? ''));
+            if ($ld === '') {
+                continue;
+            }
+            $head = trim((string) ($row['label'] ?? 'Concepto'));
+            $parts[] = $head.': '.$ld;
+        }
+
+        return implode("\n\n", $parts);
     }
 
     private function isDuplicate(User $user, array $data, Carbon $serviceDate): bool

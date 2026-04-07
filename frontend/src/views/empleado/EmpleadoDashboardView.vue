@@ -7,12 +7,14 @@ import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 
 const auth = useAuthStore()
 const chartGradId = useId()
+const companySearchInputId = useId()
 
 const loading = ref(true)
 const loadError = ref('')
 const data = ref(null)
 
-const companyFilter = ref('')
+/** Búsqueda en vivo sobre empresa (y código/descripción) en los servicios recientes. */
+const companySearch = ref('')
 const selectedRowId = ref(null)
 
 const period = computed(() => data.value?.period)
@@ -20,18 +22,22 @@ const period = computed(() => data.value?.period)
 const summary = computed(() => data.value?.summary)
 const recent = computed(() => data.value?.recent_services || [])
 
-const uniqueCompanies = computed(() => {
-  const set = new Set()
-  for (const r of recent.value) {
-    if (r.company_name) set.add(r.company_name)
-  }
-  return [...set].sort((a, b) => a.localeCompare(b))
+/** Saldo de referencia pendiente de abono (sin `technician_paid_at`; igual criterio que admin). */
+const companyOwes = computed(() => summary.value?.company_owes ?? null)
+const owesPositive = computed(() => {
+  const t = companyOwes.value?.pending_total
+  if (t == null || t === '') return false
+  return Number(t) > 0.005
 })
 
 const filteredRecentBase = computed(() => {
   let rows = [...recent.value]
-  if (companyFilter.value) {
-    rows = rows.filter((r) => r.company_name === companyFilter.value)
+  const q = companySearch.value.trim().toLowerCase()
+  if (q) {
+    rows = rows.filter((r) => {
+      const parts = [r.company_name, r.code, r.description].filter(Boolean).join(' ').toLowerCase()
+      return parts.includes(q)
+    })
   }
   return rows
 })
@@ -178,18 +184,6 @@ function formatMoney(value) {
   }).format(n)
 }
 
-function formatMoneyAvg(value) {
-  if (value === undefined || value === null) return '—'
-  const n = Number(value)
-  if (Number.isNaN(n)) return String(value)
-  return new Intl.NumberFormat('es-CO', {
-    style: 'currency',
-    currency: 'COP',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n)
-}
-
 function formatCode(code) {
   if (code == null || code === '') return '—'
   const s = String(code).trim()
@@ -288,18 +282,51 @@ function toggleRow(id) {
         <article
           class="flex items-start justify-between gap-3 rounded-2xl border border-slate-700/50 bg-[#1a2332] p-5 shadow-lg shadow-black/25"
         >
-          <div>
-            <h3 class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-500">Promedio por Servicio</h3>
-            <p class="mt-3 text-2xl font-bold tabular-nums text-white sm:text-[1.75rem]">
-              {{ formatMoneyAvg(summary?.avg_per_service_historial) }}
-            </p>
+          <div class="min-w-0 flex-1">
+            <h3 class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-500">
+              Saldo pendiente de abono
+            </h3>
+            <template v-if="owesPositive">
+              <p class="mt-3 text-2xl font-bold tabular-nums text-amber-200 sm:text-[1.75rem]">
+                {{ formatMoney(companyOwes?.pending_total) }}
+              </p>
+              <p class="mt-1.5 text-xs leading-relaxed text-slate-500">
+                Pendiente registrar el abono de referencia en
+                {{ companyOwes?.pending_services_count ?? 0 }}
+                servicio(s)
+                <template v-if="(companyOwes?.pending_invoices_count ?? 0) > 0">
+                  ({{ companyOwes?.pending_invoices_count }} factura(s) emitida(s) vinculada(s))
+                </template>
+                <template v-else>.</template>
+              </p>
+            </template>
+            <template v-else>
+              <p class="mt-3 text-sm font-semibold leading-snug text-emerald-300/95">
+                No hay saldo de referencia pendiente de abono. Todo está al día.
+              </p>
+            </template>
           </div>
           <div
-            class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-800/90 text-emerald-400/90"
+            class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-800/90"
+            :class="owesPositive ? 'text-amber-400/95' : 'text-emerald-400/90'"
             aria-hidden="true"
           >
-            <svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-              <path d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+            <svg
+              v-if="owesPositive"
+              class="h-6 w-6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+              />
+            </svg>
+            <svg v-else class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
         </article>
@@ -331,16 +358,27 @@ function toggleRow(id) {
               </svg>
             </button>
           </div>
-          <div class="flex flex-wrap gap-4 lg:gap-5">
-            <div class="flex min-w-[160px] flex-1 flex-col gap-1.5 sm:min-w-[200px]">
-              <label class="text-xs font-medium text-slate-500">Filtrar por Empresa</label>
-              <select
-                v-model="companyFilter"
-                class="rounded-xl border border-slate-600/90 bg-[#0d1219] px-3 py-2.5 text-sm text-slate-200 focus:border-sky-500/50 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
-              >
-                <option value="">Todas las empresas</option>
-                <option v-for="c in uniqueCompanies" :key="c" :value="c">{{ c }}</option>
-              </select>
+          <div class="flex min-w-0 flex-1 flex-col gap-1.5 sm:max-w-md">
+            <label class="text-xs font-medium text-slate-500" :for="companySearchInputId">Buscar</label>
+            <div class="relative">
+              <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 110-15 7.5 7.5 0 010 15z"
+                  />
+                </svg>
+              </span>
+              <input
+                :id="companySearchInputId"
+                v-model="companySearch"
+                type="search"
+                autocomplete="off"
+                enterkeyhint="search"
+                placeholder="Empresa, código o descripción…"
+                class="w-full rounded-xl border border-slate-600/90 bg-[#0d1219] py-2.5 pl-9 pr-3 text-sm text-slate-200 placeholder:text-slate-600 focus:border-sky-500/50 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+              />
             </div>
           </div>
         </div>
@@ -351,7 +389,9 @@ function toggleRow(id) {
               <h2 class="text-sm font-semibold text-slate-200 sm:text-base">
                 Evolución de Rendimiento - {{ nombreCorto }} (Historial)
               </h2>
-              <p class="mt-1 text-xs text-slate-500">Acumulado según filtros; eje inferior por código de servicio.</p>
+              <p class="mt-1 text-xs text-slate-500">
+                Acumulado según la búsqueda; eje inferior por código de servicio.
+              </p>
             </div>
             <div
               v-if="chartSvg.hasData"
@@ -429,7 +469,7 @@ function toggleRow(id) {
               </g>
             </svg>
             <div v-else class="flex h-full items-center justify-center text-sm text-slate-500">
-              Sin datos para el gráfico con los filtros actuales
+              Sin datos para el gráfico con la búsqueda actual
             </div>
           </div>
           <div class="mt-3 flex flex-wrap gap-5 text-xs">
@@ -513,7 +553,7 @@ function toggleRow(id) {
             </tbody>
           </table>
           <p v-if="!sortedDashboardTable.length" class="px-4 py-8 text-center text-sm text-slate-500">
-            No hay servicios con estos filtros.
+            No hay servicios que coincidan con la búsqueda.
           </p>
         </div>
       </section>
@@ -521,7 +561,7 @@ function toggleRow(id) {
       <!-- Desglose por empresa -->
       <section class="rounded-2xl border border-slate-700/40 bg-[#141b26] p-5 sm:p-6">
         <h2 class="text-base font-semibold text-white">Desglose por Empresa (Historial)</h2>
-        <p class="mt-1 text-xs text-slate-500">Según los mismos filtros aplicados a la tabla</p>
+        <p class="mt-1 text-xs text-slate-500">Según la misma búsqueda que la tabla</p>
         <ul class="mt-4 divide-y divide-slate-800/80">
           <li
             v-for="row in companyBreakdown"

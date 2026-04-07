@@ -14,6 +14,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useUiDialogStore } from '@/stores/uiDialog'
 import { tableAriaSort, tableSortIndicator } from '@/utils/tableSort.js'
 import AdminEmpleadoFichaPanel from '@/components/admin/AdminEmpleadoFichaPanel.vue'
+import AdminAssignServicePanel from '@/components/admin/AdminAssignServicePanel.vue'
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -36,6 +37,9 @@ const USER_SORT_FIRST = {
 }
 
 const showPassword = ref(false)
+
+const assignOpen = ref(false)
+const assignTarget = ref(null)
 
 const modalOpen = ref(false)
 const modalMode = ref('create')
@@ -188,6 +192,25 @@ function openEdit(row) {
 
 function closeModal() {
   modalOpen.value = false
+}
+
+function openAssignService(row) {
+  if (row.rol !== 'empleado' || row.estado !== 'activo') return
+  assignTarget.value = row
+  assignOpen.value = true
+}
+
+function closeAssignService() {
+  assignOpen.value = false
+  assignTarget.value = null
+}
+
+async function onServiceAssigned(created) {
+  closeAssignService()
+  await uiDialog.alert({
+    title: 'Servicio asignado',
+    message: `Se creó ${created?.code || 'el servicio'} para el técnico. Aparecerá en su listado como pendiente de completar.`,
+  })
 }
 
 const modalTitle = computed(() => (modalMode.value === 'create' ? 'Nuevo Empleado' : 'Editar usuario'))
@@ -580,6 +603,14 @@ function onFichaUpdated() {
                   Historial
                 </RouterLink>
                 <button
+                  v-if="u.rol === 'empleado' && u.estado === 'activo'"
+                  type="button"
+                  class="link"
+                  @click="openAssignService(u)"
+                >
+                  Asignar servicio
+                </button>
+                <button
                   v-if="u.rol === 'empleado' && Number(u.technician_debt_pending_total) > 0"
                   type="button"
                   class="link link-pay"
@@ -617,6 +648,13 @@ function onFichaUpdated() {
     </div>
 
     <AdminEmpleadoFichaPanel :open="fichaOpen" :row="fichaRow" @close="closeFicha" @updated="onFichaUpdated" />
+
+    <AdminAssignServicePanel
+      :open="assignOpen"
+      :technician="assignTarget"
+      @close="closeAssignService"
+      @assigned="onServiceAssigned"
+    />
 
     <Teleport to="body">
       <div

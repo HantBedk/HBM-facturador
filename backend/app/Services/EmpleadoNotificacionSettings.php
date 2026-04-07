@@ -108,6 +108,7 @@ class EmpleadoNotificacionSettings
             PanelNotification::TYPE_EMP_SERVICIO_ELIMINADO_ADMIN => 'Servicio rechazado o eliminado por administración',
             PanelNotification::TYPE_EMP_SERVICIO_FACTURA_APROBADA => 'Factura aprobada (incluye sus servicios)',
             PanelNotification::TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR => 'Servicio quitado de un borrador de factura',
+            PanelNotification::TYPE_EMP_SERVICIO_ASIGNADO_ADMIN => 'Servicio asignado por administración (completar o rechazar)',
         ];
     }
 }

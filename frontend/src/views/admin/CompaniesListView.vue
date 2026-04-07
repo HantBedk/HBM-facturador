@@ -18,8 +18,7 @@ import { useUiDialogStore } from '@/stores/uiDialog'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import { tableAriaSort, tableSortIndicator } from '@/utils/tableSort.js'
 
-/** Todas | solo empresas registradas | solo clientes puntuales (misma semántica que facturas). */
-const DIRECTORY_TAB_ALL = 'all'
+/** Solo dos vistas: empresas dadas de alta por administración vs. fichas automáticas de compras puntuales (empleados). */
 const DIRECTORY_TAB_REGISTERED = 'registered'
 const DIRECTORY_TAB_QUICK = 'quick'
 
@@ -146,11 +145,9 @@ const {
   { initialKey: 'nombre', initialDir: 'asc' }
 )
 
-const directoryPageTitle = computed(() => {
-  if (directoryTab.value === DIRECTORY_TAB_QUICK) return 'Clientes puntuales'
-  if (directoryTab.value === DIRECTORY_TAB_REGISTERED) return 'Empresas registradas'
-  return 'Todas las empresas y clientes'
-})
+const directoryPageTitle = computed(() =>
+  directoryTab.value === DIRECTORY_TAB_QUICK ? 'Clientes puntuales' : 'Empresas registradas'
+)
 
 const MONTH_NAMES = [
   'Enero',
@@ -825,27 +822,17 @@ async function submitDeleteCompanyModal() {
           <button type="button" class="btn primary" @click="openCreate">+ Nueva empresa</button>
         </div>
         <p class="lede">
-          Clientes del sistema. Solo las activas aparecen al registrar servicios. Solo se puede eliminar una empresa si no
-          tiene servicios ni ítems de catálogo asociados (las facturas se eliminan en cascada si aplica). Para eliminar debe
-          confirmar escribiendo la sigla de factura.
-          Pulse el nombre para ver facturas, servicios fijos, servicios registrados y métricas. Los cargos fijos mensuales se
-          gestionan con el ícono de calendario en <strong>Acciones</strong> o con <strong>Gestionar todo</strong> dentro del
-          panel de la empresa (listado, alta, edición y baja en una sola ventana).
+          <strong>Empresas registradas</strong> son las que usted crea aquí (alta manual): son las cuentas B2B que controla la
+          administración. <strong>Clientes puntuales</strong> son fichas creadas automáticamente cuando un técnico registra un
+          trabajo sin elegir una empresa de la lista (compradores ocasionales); no son «su cartera» y viven en su propia pestaña.
+          Solo las empresas activas aparecen al registrar servicios para técnicos. Para eliminar una empresa registrada debe
+          cumplir condiciones (sin dependencias); confirme escribiendo la sigla de factura.
+          Pulse el nombre para ver facturas, servicios fijos, servicios y métricas.
         </p>
       </div>
     </header>
 
-    <div class="list-tabs card" role="tablist" aria-label="Tipo de cliente en el directorio">
-      <button
-        type="button"
-        role="tab"
-        class="list-tab"
-        :aria-selected="directoryTab === DIRECTORY_TAB_ALL"
-        :class="{ 'list-tab--on': directoryTab === DIRECTORY_TAB_ALL }"
-        @click="directoryTab = DIRECTORY_TAB_ALL"
-      >
-        Todas
-      </button>
+    <div class="list-tabs card" role="tablist" aria-label="Directorio de empresas vs. clientes puntuales">
       <button
         type="button"
         role="tab"

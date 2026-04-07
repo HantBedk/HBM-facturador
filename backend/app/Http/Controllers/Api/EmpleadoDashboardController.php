@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Invoice;
 use App\Models\Service;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -37,9 +39,8 @@ class EmpleadoDashboardController extends Controller
 
         $servicesCountHistorial = (clone $historialBase)->count();
         $totalAmountHistorial = $this->sumTechnicianReference(clone $historialBase);
-        $avgHistorial = $servicesCountHistorial > 0
-            ? (string) round(((float) $totalAmountHistorial) / $servicesCountHistorial, 2)
-            : '0';
+
+        $companyOwes = $this->companyOwesPendingTechnicianPayment($user);
 
         $lastRegistered = Service::query()
             ->where('user_id', $user->id)
@@ -74,12 +75,58 @@ class EmpleadoDashboardController extends Controller
                 'total_amount_month' => $totalAmountMonth,
                 'services_count_historial' => $servicesCountHistorial,
                 'total_amount_historial' => $totalAmountHistorial,
-                'avg_per_service_historial' => $avgHistorial,
+                'company_owes' => $companyOwes,
                 'last_registered' => $lastRegistered ? $this->serviceRow($lastRegistered) : null,
             ],
             'recent_services' => $recent,
             'generated_at' => $now->toIso8601String(),
         ]);
+    }
+
+    /**
+     * Saldo de referencia pendiente de abono (misma regla que administración «pendiente de abono»):
+     * servicios visibles del técnico sin `technician_paid_at` y con importe de referencia &gt; 0.
+     * Incluye servicios aún no ligados a factura o solo en borrador; no exige factura emitida para mostrar deuda.
+     *
+     * `pending_invoices_count`: facturas distintas (no borrador) vinculadas a esos servicios, solo informativo.
+     *
+     * @return array{pending_total: string, pending_services_count: int, pending_invoices_count: int}
+     */
+    private function companyOwesPendingTechnicianPayment(User $user): array
+    {
+        $rows = Service::query()
+            ->where('user_id', $user->id)
+            ->visibles()
+            ->whereNull('technician_paid_at')
+            ->withSum('items', 'technician_line_amount')
+            ->withCount('items')
+            ->with(['invoices' => function ($q) {
+                $q->select('invoices.id', 'invoices.status');
+            }])
+            ->get();
+
+        $sum = 0.0;
+        $svcCount = 0;
+        $invoiceIds = collect();
+        foreach ($rows as $s) {
+            $v = $s->technicianReferenceTotalValue();
+            if ($v <= 0.00001) {
+                continue;
+            }
+            $sum += $v;
+            $svcCount++;
+            foreach ($s->invoices as $inv) {
+                if ($inv->status !== Invoice::STATUS_BORRADOR) {
+                    $invoiceIds->push((int) $inv->id);
+                }
+            }
+        }
+
+        return [
+            'pending_total' => number_format($sum, 2, '.', ''),
+            'pending_services_count' => $svcCount,
+            'pending_invoices_count' => $invoiceIds->unique()->count(),
+        ];
     }
 
     /**

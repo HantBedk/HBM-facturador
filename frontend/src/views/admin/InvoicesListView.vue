@@ -30,8 +30,8 @@ const filters = ref({
   page: 1,
 })
 
-/** Todas | solo empresas registradas | solo clientes puntuales (servicios sin alta). */
-const listTab = ref('all')
+/** Por defecto solo facturas de empresas dadas de alta; «Todas» mezcla también clientes puntuales. */
+const listTab = ref('registered')
 
 const companiesForFilter = computed(() => {
   const list = companies.value || []

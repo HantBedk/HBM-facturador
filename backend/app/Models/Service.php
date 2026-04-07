@@ -15,10 +15,17 @@ class Service extends Model
 
     public const STATUS_ELIMINADO = 'eliminado';
 
+    /** Asignado por admin; el técnico debe completar datos e importes. */
+    public const ASSIGNMENT_AWAITING_COMPLETION = 'awaiting_completion';
+
+    /** El técnico rechazó la asignación. */
+    public const ASSIGNMENT_REJECTED = 'rejected';
+
     protected $fillable = [
         'code',
         'company_id',
         'user_id',
+        'assigned_by_user_id',
         'catalog_id',
         'client_name',
         'service_type',
@@ -26,6 +33,7 @@ class Service extends Model
         'amount',
         'service_date',
         'status',
+        'assignment_status',
         /** Marca contable interna: cuándo se registró el abono/pago al técnico (no sustituye nómina ni comprobantes). */
         'technician_paid_at',
         /** Origen plantilla mensual (servicio fijo); null si lo cargó un técnico. */
@@ -49,7 +57,7 @@ class Service extends Model
     public function technicianReferenceTotalValue(): float
     {
         if ($this->relationLoaded('items') && $this->items->isNotEmpty()) {
-            return (float) $this->items->sum(fn ($i) => (float) ($i->technician_line_amount ?? 0));
+            return (float) $this->items->sum(fn ($i) => (float) ($i->technician_line_amount ?? $i->amount));
         }
 
         $cnt = (int) ($this->items_count ?? 0);
@@ -82,6 +90,11 @@ class Service extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function assignedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_by_user_id');
     }
 
     public function photos(): HasMany
