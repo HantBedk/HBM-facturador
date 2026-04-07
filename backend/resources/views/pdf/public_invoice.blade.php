@@ -36,22 +36,23 @@
 
         .head-center { text-align: center; vertical-align: top; }
         .logo-ph {
-            width: 56px;
-            height: 56px;
+            width: 88px;
+            height: 88px;
             background: #cbd5e1;
             border-radius: 4px;
             display: block;
             margin: 0 auto 8px;
         }
         .logo-img {
-            max-height: 64px;
-            max-width: 140px;
+            max-height: 100px;
+            max-width: 220px;
+            width: auto;
+            height: auto;
             border-radius: 4px;
             display: block;
             margin: 0 auto 8px;
         }
 
-        .issuer-name { font-size: 13px; font-weight: bold; color: #0f172a; margin: 0 0 4px; text-align: center; }
         .issuer-line { margin: 0 0 2px; font-size: 8.5px; color: #334155; text-align: center; }
 
         .billto-box {
@@ -180,7 +181,6 @@
                     @else
                         <span class="logo-ph"></span>
                     @endif
-                    <p class="issuer-name">{{ $data['issuer']['nombre'] ?? '' }}</p>
                     @if(!empty($data['issuer']['nit']))
                         <p class="issuer-line">NIT: {{ $data['issuer']['nit'] }}</p>
                     @endif
