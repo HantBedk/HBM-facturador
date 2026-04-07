@@ -6,9 +6,11 @@ import InvoiceEditorForm from '@/components/admin/InvoiceEditorForm.vue'
 import { fetchAdminCompanies } from '@/services/companiesApi.js'
 import {
   addInvoicePayment,
+  createWalkInInvoiceFinal,
   downloadAdminExportCsv,
   fetchAdminInvoice,
   fetchAdminInvoices,
+  fetchPendingWalkInGroups,
   patchInvoiceStatus,
 } from '@/services/invoicesApi.js'
 import { tableAriaSort, tableSortIndicator } from '@/utils/tableSort.js'
@@ -20,6 +22,11 @@ const links = ref(null)
 const loading = ref(false)
 const exportBusy = ref(false)
 const error = ref('')
+const walkInEmitNotice = ref('')
+
+const pendingWalkInGroups = ref([])
+const pendingWalkInLoading = ref(false)
+const emittingWalkInKey = ref('')
 
 const filters = ref({
   company_id: '',
@@ -30,20 +37,20 @@ const filters = ref({
   page: 1,
 })
 
-/** Por defecto solo facturas de empresas dadas de alta; «Todas» mezcla también clientes puntuales. */
+/** Por defecto solo facturas ligadas a empresas dadas de alta. */
 const listTab = ref('registered')
 
 const companiesForFilter = computed(() => {
   const list = companies.value || []
   if (listTab.value === 'registered') return list.filter((c) => !c.es_cliente_puntual)
-  if (listTab.value === 'quick') return list.filter((c) => c.es_cliente_puntual)
+  if (listTab.value === 'counter') return []
   return list
 })
 
 const companyFilterLabel = computed(() => {
   if (listTab.value === 'registered') return 'Empresa'
-  if (listTab.value === 'quick') return 'Cliente puntual'
-  return 'Empresa / cliente'
+  if (listTab.value === 'counter') return 'Venta sin alta'
+  return 'Empresa / venta sin alta'
 })
 
 const invSortKey = ref('period')
@@ -78,7 +85,7 @@ async function load() {
   try {
     const params = { page: filters.value.page, per_page: 15 }
     if (listTab.value === 'registered') params.company_kind = 'registered'
-    if (listTab.value === 'quick') params.company_kind = 'quick'
+    if (listTab.value === 'counter') params.company_kind = 'counter'
     if (filters.value.company_id) params.company_id = filters.value.company_id
     if (filters.value.status) params.status = filters.value.status
     if (filters.value.period_year) params.period_year = filters.value.period_year
@@ -117,6 +124,68 @@ function closeCreateInvoicePanel() {
 async function onInvoiceCreatedFromPanel() {
   closeCreateInvoicePanel()
   await load()
+  await loadPendingWalkInGroups()
+}
+
+function walkInPendingRowKey(g) {
+  return `${g.contact_phone_key}|${g.period_year}|${g.period_month}`
+}
+
+const WALK_IN_MONTH_LABELS = [
+  '',
+  'Ene',
+  'Feb',
+  'Mar',
+  'Abr',
+  'May',
+  'Jun',
+  'Jul',
+  'Ago',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dic',
+]
+
+function walkInPeriodLabel(g) {
+  const m = WALK_IN_MONTH_LABELS[g.period_month] || String(g.period_month)
+  return `${m} ${g.period_year}`
+}
+
+async function loadPendingWalkInGroups() {
+  pendingWalkInLoading.value = true
+  try {
+    pendingWalkInGroups.value = await fetchPendingWalkInGroups()
+  } catch {
+    pendingWalkInGroups.value = []
+  } finally {
+    pendingWalkInLoading.value = false
+  }
+}
+
+async function emitWalkInFromPending(g) {
+  const key = walkInPendingRowKey(g)
+  if (emittingWalkInKey.value) return
+  error.value = ''
+  walkInEmitNotice.value = ''
+  emittingWalkInKey.value = key
+  try {
+    const result = await createWalkInInvoiceFinal({
+      contact_phone_key: g.contact_phone_key,
+      period_year: g.period_year,
+      period_month: g.period_month,
+    })
+    const code = result.public_verification_code
+    walkInEmitNotice.value = code
+      ? `Factura ${result.code} emitida y aprobada. Código de verificación (guárdelo): ${code}`
+      : `Factura ${result.code} emitida y aprobada.`
+    await load()
+    await loadPendingWalkInGroups()
+  } catch (e) {
+    error.value = e.data?.message || e.message || 'No se pudo emitir la factura de mostrador.'
+  } finally {
+    emittingWalkInKey.value = ''
+  }
 }
 
 function openDetailPanel(inv) {
@@ -142,11 +211,11 @@ function closeDetailPanel() {
 onMounted(async () => {
   document.addEventListener('keydown', onGlobalEscape)
   try {
-    companies.value = await fetchAdminCompanies()
+    companies.value = await fetchAdminCompanies({ company_kind: 'registered' })
   } catch {
     companies.value = []
   }
-  await load()
+  await Promise.all([load(), loadPendingWalkInGroups()])
 })
 
 watch(listTab, () => {
@@ -391,7 +460,7 @@ async function exportInvoicesCsv() {
   try {
     const params = {}
     if (listTab.value === 'registered') params.company_kind = 'registered'
-    if (listTab.value === 'quick') params.company_kind = 'quick'
+    if (listTab.value === 'counter') params.company_kind = 'counter'
     if (filters.value.company_id) params.company_id = filters.value.company_id
     if (filters.value.status) params.status = filters.value.status
     if (filters.value.period_year) params.period_year = filters.value.period_year
@@ -455,12 +524,71 @@ async function exportInvoicesCsv() {
         type="button"
         role="tab"
         class="list-tab"
-        :aria-selected="listTab === 'quick'"
-        :class="{ 'list-tab--on': listTab === 'quick' }"
-        @click="listTab = 'quick'"
+        :aria-selected="listTab === 'counter'"
+        :class="{ 'list-tab--on': listTab === 'counter' }"
+        @click="listTab = 'counter'"
       >
-        Clientes puntuales
+        Ventas sin alta
       </button>
+    </div>
+
+    <div v-if="walkInEmitNotice" class="banner ok">{{ walkInEmitNotice }}</div>
+
+    <div class="card pending-walk-in">
+      <div class="pending-walk-in-head">
+        <div>
+          <h2 class="pending-walk-in-title">Pendientes de facturar (sin empresa)</h2>
+          <p class="pending-walk-in-lede muted">
+            Servicios registrados con teléfono y sin alta en directorio, aún no incluidos en ninguna factura. Pulse
+            <strong>Emitir</strong> para factura aprobada de una vez (mismo criterio que «Venta sin alta»).
+          </p>
+        </div>
+        <button
+          type="button"
+          class="btn secondary"
+          :disabled="pendingWalkInLoading"
+          @click="loadPendingWalkInGroups"
+        >
+          {{ pendingWalkInLoading ? 'Actualizando…' : 'Actualizar pendientes' }}
+        </button>
+      </div>
+      <p v-if="pendingWalkInLoading && !pendingWalkInGroups.length" class="muted pad">Cargando pendientes…</p>
+      <p v-else-if="!pendingWalkInGroups.length" class="muted pad">No hay grupos pendientes en este momento.</p>
+      <div v-else class="table-wrap pending-walk-in-table">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Cliente</th>
+              <th scope="col">Teléfono</th>
+              <th scope="col">Periodo</th>
+              <th class="num" scope="col">Servicios</th>
+              <th class="num" scope="col">Total</th>
+              <th class="actions-col">Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="g in pendingWalkInGroups" :key="walkInPendingRowKey(g)">
+              <td>{{ g.client_name }}</td>
+              <td class="mono">{{ g.client_telefono_display }}</td>
+              <td>{{ walkInPeriodLabel(g) }}</td>
+              <td class="num">{{ g.services_count }}</td>
+              <td class="num">{{ money(g.total) }}</td>
+              <td class="actions-col">
+                <button
+                  type="button"
+                  class="btn primary"
+                  :disabled="!!emittingWalkInKey"
+                  @click="emitWalkInFromPending(g)"
+                >
+                  {{
+                    emittingWalkInKey === walkInPendingRowKey(g) ? 'Emitiendo…' : 'Emitir factura'
+                  }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div class="filters card">
@@ -563,8 +691,13 @@ async function exportInvoicesCsv() {
                 <button type="button" class="code-link" @click="openDetailPanel(inv)">{{ inv.code }}</button>
               </td>
               <td>
-                <span class="company-name">{{ inv.company?.nombre || '—' }}</span>
-                <span v-if="inv.company?.es_cliente_puntual" class="pill pill--quick" title="Cliente puntual (sin alta formal)">Puntual</span>
+                <span class="company-name">{{ inv.company?.nombre || inv.bill_to?.nombre || '—' }}</span>
+                <span
+                  v-if="!inv.company_id"
+                  class="pill pill--counter"
+                  title="Factura sin empresa en directorio (datos en factura)"
+                  >Sin alta</span
+                >
               </td>
               <td>{{ inv.period_label }}</td>
               <td>
@@ -858,7 +991,7 @@ h1 {
   margin-right: 0.25rem;
 }
 
-.pill--quick {
+.pill--counter {
   display: inline-block;
   font-size: 0.65rem;
   font-weight: 700;
@@ -879,6 +1012,50 @@ h1 {
   border: 1px solid rgba(248, 113, 113, 0.45);
   color: #fecaca;
   margin-bottom: 1rem;
+}
+
+.banner.ok {
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  color: #bbf7d0;
+  margin-bottom: 1rem;
+}
+
+.pending-walk-in {
+  margin-bottom: 1rem;
+}
+
+.pending-walk-in-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.pending-walk-in-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+  color: #f8fafc;
+}
+
+.pending-walk-in-lede {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  max-width: 52rem;
+}
+
+.pending-walk-in-table {
+  margin-top: 0.25rem;
+}
+
+.pending-walk-in .pad {
+  margin: 0;
+  padding: 0.5rem 0;
 }
 
 .table-wrap {

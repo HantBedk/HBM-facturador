@@ -106,6 +106,9 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::post('/admin/services/assign-to-technician', [ServiceController::class, 'assignToTechnician']);
 
         Route::get('/admin/invoices/available-services', [AdminInvoiceController::class, 'availableServices']);
+        Route::get('/admin/invoices/available-walk-in-services', [AdminInvoiceController::class, 'availableWalkInServices']);
+        Route::get('/admin/invoices/pending-walk-in-groups', [AdminInvoiceController::class, 'pendingWalkInGroups']);
+        Route::post('/admin/invoices/counter-final', [AdminInvoiceController::class, 'storeWalkInFinal']);
         Route::get('/admin/invoices', [AdminInvoiceController::class, 'index']);
         Route::post('/admin/invoices', [AdminInvoiceController::class, 'store']);
         Route::get('/admin/invoices/{invoice}/pdf', [AdminInvoiceController::class, 'pdf']);

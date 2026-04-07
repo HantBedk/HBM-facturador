@@ -18,10 +18,6 @@ import { useUiDialogStore } from '@/stores/uiDialog'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import { tableAriaSort, tableSortIndicator } from '@/utils/tableSort.js'
 
-/** Solo dos vistas: empresas dadas de alta por administración vs. fichas automáticas de compras puntuales (empleados). */
-const DIRECTORY_TAB_REGISTERED = 'registered'
-const DIRECTORY_TAB_QUICK = 'quick'
-
 const uiDialog = useUiDialogStore()
 
 const rows = ref([])
@@ -29,9 +25,6 @@ const deletingId = ref(null)
 const loading = ref(false)
 const error = ref('')
 const search = ref('')
-
-/** Vista del directorio: por defecto empresas registradas (sin mezclar con puntuales). */
-const directoryTab = ref(DIRECTORY_TAB_REGISTERED)
 
 const modalOpen = ref(false)
 const modalMode = ref('create')
@@ -145,9 +138,7 @@ const {
   { initialKey: 'nombre', initialDir: 'asc' }
 )
 
-const directoryPageTitle = computed(() =>
-  directoryTab.value === DIRECTORY_TAB_QUICK ? 'Clientes puntuales' : 'Empresas registradas'
-)
+const directoryPageTitle = 'Empresas registradas'
 
 const MONTH_NAMES = [
   'Enero',
@@ -629,19 +620,11 @@ function onCompanyPanelKeydown(ev) {
   closeCompanyPanel()
 }
 
-function directoryTabToCompanyKind(tab) {
-  if (tab === DIRECTORY_TAB_REGISTERED) return 'registered'
-  if (tab === DIRECTORY_TAB_QUICK) return 'quick'
-  return undefined
-}
-
 async function load() {
   error.value = ''
   loading.value = true
   try {
-    const params = { q: search.value }
-    const kind = directoryTabToCompanyKind(directoryTab.value)
-    if (kind) params.company_kind = kind
+    const params = { q: search.value, company_kind: 'registered' }
     rows.value = await fetchAdminCompanies(params)
   } catch (e) {
     error.value = e.data?.message || e.message || 'No se pudieron cargar las empresas.'
@@ -668,17 +651,6 @@ watch(
     searchTimer = setTimeout(() => load(), 320)
   }
 )
-
-watch(directoryTab, () => {
-  const row = companyPanelCompany.value
-  if (row && directoryTab.value === DIRECTORY_TAB_REGISTERED && row.es_cliente_puntual) {
-    closeCompanyPanel()
-  }
-  if (row && directoryTab.value === DIRECTORY_TAB_QUICK && !row.es_cliente_puntual) {
-    closeCompanyPanel()
-  }
-  load()
-})
 
 function openCreate() {
   modalMode.value = 'create'
@@ -822,38 +794,14 @@ async function submitDeleteCompanyModal() {
           <button type="button" class="btn primary" @click="openCreate">+ Nueva empresa</button>
         </div>
         <p class="lede">
-          <strong>Empresas registradas</strong> son las que usted crea aquí (alta manual): son las cuentas B2B que controla la
-          administración. <strong>Clientes puntuales</strong> son fichas creadas automáticamente cuando un técnico registra un
-          trabajo sin elegir una empresa de la lista (compradores ocasionales); no son «su cartera» y viven en su propia pestaña.
-          Solo las empresas activas aparecen al registrar servicios para técnicos. Para eliminar una empresa registrada debe
-          cumplir condiciones (sin dependencias); confirme escribiendo la sigla de factura.
-          Pulse el nombre para ver facturas, servicios fijos, servicios y métricas.
+          <strong>Empresas registradas</strong> son las que usted crea aquí (alta manual): cuentas B2B que controla la
+          administración. Las ventas ocasionales sin alta no generan filas en este directorio; el dato del comprador queda en el
+          servicio y en la factura emitida. Solo las empresas activas aparecen al registrar servicios para técnicos. Para
+          eliminar una empresa debe cumplir condiciones (sin dependencias); confirme escribiendo la sigla de factura. Pulse el
+          nombre para ver facturas, servicios fijos, servicios y métricas.
         </p>
       </div>
     </header>
-
-    <div class="list-tabs card" role="tablist" aria-label="Directorio de empresas vs. clientes puntuales">
-      <button
-        type="button"
-        role="tab"
-        class="list-tab"
-        :aria-selected="directoryTab === DIRECTORY_TAB_REGISTERED"
-        :class="{ 'list-tab--on': directoryTab === DIRECTORY_TAB_REGISTERED }"
-        @click="directoryTab = DIRECTORY_TAB_REGISTERED"
-      >
-        Empresas registradas
-      </button>
-      <button
-        type="button"
-        role="tab"
-        class="list-tab"
-        :aria-selected="directoryTab === DIRECTORY_TAB_QUICK"
-        :class="{ 'list-tab--on': directoryTab === DIRECTORY_TAB_QUICK }"
-        @click="directoryTab = DIRECTORY_TAB_QUICK"
-      >
-        Clientes puntuales
-      </button>
-    </div>
 
     <div class="toolbar card">
       <label class="grow">

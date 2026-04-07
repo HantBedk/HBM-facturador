@@ -10,7 +10,9 @@ use Illuminate\Http\Request;
 
 class AdminActivityLogController extends Controller
 {
-    /** Acciones registradas en flujos de factura / pagos. */
+    /**
+     * Acciones del filtro «Solo facturas y pagos»: facturación, cobros a cliente y abonos de referencia a técnicos.
+     */
     private const INVOICE_ACTIONS = [
         'factura_creada',
         'factura_editada',
@@ -18,8 +20,10 @@ class AdminActivityLogController extends Controller
         'factura_enviada',
         'factura_eliminada',
         'factura_token_publico_regenerado',
+        'factura_auto_borrador',
         'pago_registrado',
         'pago_eliminado',
+        'servicio_pago_tecnico',
     ];
 
     /**

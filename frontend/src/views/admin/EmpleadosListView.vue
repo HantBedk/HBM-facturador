@@ -891,6 +891,16 @@ function onFichaUpdated() {
   margin-bottom: 1rem;
 }
 
+/* Modales: superficie opaca para que el texto no compita con la tabla detrás */
+.modal.card {
+  background: #0f172a;
+  border-color: rgba(148, 163, 184, 0.28);
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.95),
+    0 24px 48px -12px rgba(0, 0, 0, 0.6);
+  margin-bottom: 0;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1209,8 +1219,8 @@ button.name-link {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: rgba(2, 6, 23, 0.72);
-  backdrop-filter: blur(6px);
+  background: rgba(2, 6, 23, 0.82);
+  backdrop-filter: blur(8px);
 }
 
 .modal {

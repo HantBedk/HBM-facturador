@@ -21,8 +21,8 @@ class AdminCompanyIndexFilterTest extends TestCase
             'estado' => Company::ESTADO_ACTIVO,
             'es_cliente_puntual' => false,
         ]);
-        $quick = Company::query()->create([
-            'nombre' => 'Cliente puntual',
+        $legacy = Company::query()->create([
+            'nombre' => 'Legacy puntual',
             'factura_sigla' => 'QUI',
             'nit' => null,
             'estado' => Company::ESTADO_ACTIVO,
@@ -35,16 +35,16 @@ class AdminCompanyIndexFilterTest extends TestCase
         $registeredRes = $this->getJson('/api/admin/companies?company_kind=registered')->assertOk();
         $registeredIds = collect($registeredRes->json('data'))->pluck('id')->all();
         $this->assertContains($registered->id, $registeredIds);
-        $this->assertNotContains($quick->id, $registeredIds);
+        $this->assertNotContains($legacy->id, $registeredIds);
 
         $quickRes = $this->getJson('/api/admin/companies?company_kind=quick')->assertOk();
         $quickIds = collect($quickRes->json('data'))->pluck('id')->all();
-        $this->assertContains($quick->id, $quickIds);
+        $this->assertContains($legacy->id, $quickIds);
         $this->assertNotContains($registered->id, $quickIds);
 
         $allRes = $this->getJson('/api/admin/companies')->assertOk();
         $allIds = collect($allRes->json('data'))->pluck('id')->all();
         $this->assertContains($registered->id, $allIds);
-        $this->assertContains($quick->id, $allIds);
+        $this->assertContains($legacy->id, $allIds);
     }
 }

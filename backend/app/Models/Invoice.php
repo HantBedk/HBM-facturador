@@ -34,6 +34,9 @@ class Invoice extends Model
     protected $fillable = [
         'code',
         'company_id',
+        'bill_to_nombre',
+        'bill_to_telefono',
+        'bill_to_nit',
         'period_month',
         'period_year',
         'status',

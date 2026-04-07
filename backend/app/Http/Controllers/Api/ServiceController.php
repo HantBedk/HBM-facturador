@@ -12,8 +12,9 @@ use App\Models\ServiceItem;
 use App\Models\ServicePhoto;
 use App\Models\User;
 use App\Services\ActivityLogger;
+use App\Support\ActivityAmountNarrative;
 use App\Services\PanelNotificationDispatcher;
-use App\Services\QuickClientCompanyResolver;
+use App\Support\PhoneNormalizer;
 use App\Services\TechnicianAbonoNotifier;
 use App\Services\ServiceCodeGenerator;
 use App\Support\CatalogPricing;
@@ -119,7 +120,7 @@ class ServiceController extends Controller
             if ($sort === 'company_nombre') {
                 $q->leftJoin('companies', 'services.company_id', '=', 'companies.id')
                     ->select('services.*')
-                    ->orderBy('companies.nombre', $sortDir)
+                    ->orderByRaw('COALESCE(companies.nombre, services.client_name) '.$sortDir)
                     ->orderBy('services.id', $sortDir);
             } elseif ($sort === 'user_nombre') {
                 $q->leftJoin('users', 'services.user_id', '=', 'users.id')
@@ -149,7 +150,7 @@ class ServiceController extends Controller
         );
     }
 
-    public function store(Request $request, ServiceCodeGenerator $codes, QuickClientCompanyResolver $quickClients): JsonResponse
+    public function store(Request $request, ServiceCodeGenerator $codes): JsonResponse
     {
         $this->authorize('create', Service::class);
 
@@ -188,10 +189,23 @@ class ServiceController extends Controller
             ]);
         }
 
+        $clientTelefono = null;
+        $contactPhoneKey = null;
         if ($useQuickClient) {
-            $company = $quickClients->resolveOrCreate($qcNombre, $qcTel);
-            $companyId = (int) $company->id;
+            $contactPhoneKey = PhoneNormalizer::digitsKey($qcTel);
+            if (strlen($contactPhoneKey) < 7) {
+                throw ValidationException::withMessages([
+                    'quick_client.telefono' => ['El teléfono debe tener al menos 7 dígitos.'],
+                ]);
+            }
+            if (strlen($contactPhoneKey) > 15) {
+                throw ValidationException::withMessages([
+                    'quick_client.telefono' => ['El teléfono no es válido.'],
+                ]);
+            }
+            $companyId = null;
             $data['client_name'] = $qcNombre;
+            $clientTelefono = trim($qcTel) !== '' ? trim($qcTel) : $contactPhoneKey;
         } else {
             $companyId = (int) $companyIdRaw;
         }
@@ -232,13 +246,15 @@ class ServiceController extends Controller
             }
         }
 
-        $normalized = $this->validateAndNormalizeServiceItems($itemsPayload, $companyId);
+        $normalized = $this->validateAndNormalizeServiceItems($itemsPayload);
 
-        $company = Company::query()->findOrFail($companyId);
-        if ($company->estado !== Company::ESTADO_ACTIVO) {
-            throw ValidationException::withMessages([
-                'company_id' => ['Solo se pueden registrar servicios para empresas activas.'],
-            ]);
+        if ($companyId !== null) {
+            $company = Company::query()->findOrFail($companyId);
+            if ($company->estado !== Company::ESTADO_ACTIVO) {
+                throw ValidationException::withMessages([
+                    'company_id' => ['Solo se pueden registrar servicios para empresas activas.'],
+                ]);
+            }
         }
 
         // Fecha de servicio (día contable): siempre la del servidor; no aceptar valor del cliente.
@@ -250,7 +266,11 @@ class ServiceController extends Controller
             $totalAmount = DecimalMath::add($totalAmount, $a, 2);
         }
 
-        $dupData = array_merge($data, ['amount' => $totalAmount, 'company_id' => $companyId]);
+        $dupData = array_merge($data, [
+            'amount' => $totalAmount,
+            'company_id' => $companyId,
+            'contact_phone_key' => $contactPhoneKey,
+        ]);
         if ($this->isDuplicate($request->user(), $dupData, $serviceDate)) {
             throw ValidationException::withMessages([
                 'description' => ['Ya existe un servicio muy similar para la misma empresa y fecha.'],
@@ -282,6 +302,8 @@ class ServiceController extends Controller
             $serviceDate,
             $normalized,
             $firstCatalogId,
+            $clientTelefono,
+            $contactPhoneKey,
         ) {
             $service = Service::create([
                 'code' => $code,
@@ -289,6 +311,8 @@ class ServiceController extends Controller
                 'user_id' => $user->id,
                 'catalog_id' => $firstCatalogId,
                 'client_name' => $data['client_name'],
+                'client_telefono' => $clientTelefono,
+                'contact_phone_key' => $contactPhoneKey,
                 'service_type' => $data['service_type'],
                 'description' => $data['description'],
                 'amount' => $totalAmount,
@@ -333,7 +357,7 @@ class ServiceController extends Controller
 
         app(PanelNotificationDispatcher::class)->notifyAdmins(
             PanelNotification::TYPE_SERVICE_CREATED,
-            'Nuevo servicio '.$service->code.' registrado ('.($service->company?->nombre ?? 'empresa').').',
+            'Nuevo servicio '.$service->code.' registrado ('.($service->company?->nombre ?? $service->client_name ?? 'cliente').').',
             [
                 'service_id' => $service->id,
                 'link' => '/admin/servicios/'.$service->id,
@@ -343,7 +367,7 @@ class ServiceController extends Controller
         ActivityLogger::log(
             $request->user(),
             'servicio_creado',
-            'Creó servicio '.$service->code.' (ID '.$service->id.').'
+            'Creó servicio '.$service->code.' (ID '.$service->id.'). Valor facturable: '.ActivityAmountNarrative::cop($service->amount).'.'
         );
 
         return (new ServiceResource($service))->response()->setStatusCode(201);
@@ -371,7 +395,7 @@ class ServiceController extends Controller
     /**
      * Solo administración: crea un servicio mínimo para el técnico (pendiente de completar importes y líneas).
      */
-    public function assignToTechnician(Request $request, ServiceCodeGenerator $codes, QuickClientCompanyResolver $quickClients): JsonResponse
+    public function assignToTechnician(Request $request, ServiceCodeGenerator $codes): JsonResponse
     {
         if (! $request->user()->isAdminEquipo()) {
             return response()->json(['message' => 'No autorizado.'], 403);
@@ -415,10 +439,24 @@ class ServiceController extends Controller
             ]);
         }
 
+        $clientTelefono = null;
+        $contactPhoneKey = null;
         if ($useQuickClient) {
-            $company = $quickClients->resolveOrCreate($qcNombre, $qcTel);
-            $companyId = (int) $company->id;
+            $contactPhoneKey = PhoneNormalizer::digitsKey($qcTel);
+            if (strlen($contactPhoneKey) < 7) {
+                throw ValidationException::withMessages([
+                    'quick_client.telefono' => ['El teléfono debe tener al menos 7 dígitos.'],
+                ]);
+            }
+            if (strlen($contactPhoneKey) > 15) {
+                throw ValidationException::withMessages([
+                    'quick_client.telefono' => ['El teléfono no es válido.'],
+                ]);
+            }
+            $companyId = null;
             $clientNameFinal = $qcNombre;
+            $clientTelefono = trim($qcTel) !== '' ? trim($qcTel) : $contactPhoneKey;
+            $company = null;
         } else {
             $companyId = (int) $companyIdRaw;
             $company = Company::query()->findOrFail($companyId);
@@ -428,7 +466,7 @@ class ServiceController extends Controller
             }
         }
 
-        if ($company->estado !== Company::ESTADO_ACTIVO) {
+        if ($company !== null && $company->estado !== Company::ESTADO_ACTIVO) {
             throw ValidationException::withMessages([
                 'company_id' => ['Solo se pueden asignar servicios para empresas activas.'],
             ]);
@@ -447,7 +485,7 @@ class ServiceController extends Controller
             'amount' => 0.01,
             'line_description' => 'Asignación desde administración: complete el detalle del trabajo realizado en obra (importes y líneas) antes de facturar.',
         ]];
-        $normalized = $this->validateAndNormalizeServiceItems($itemsPayload, $companyId);
+        $normalized = $this->validateAndNormalizeServiceItems($itemsPayload);
 
         $serviceDate = Carbon::now(config('app.timezone'))->startOfDay();
         $totalAmount = '0.00';
@@ -457,7 +495,12 @@ class ServiceController extends Controller
         }
 
         $masterDescription = 'Servicio asignado por administración. Complete líneas e importes desde el panel del técnico. Ref '.str_replace('.', '', uniqid('', true));
-        $dupData = array_merge($data, ['description' => $masterDescription, 'amount' => $totalAmount, 'company_id' => $companyId]);
+        $dupData = array_merge($data, [
+            'description' => $masterDescription,
+            'amount' => $totalAmount,
+            'company_id' => $companyId,
+            'contact_phone_key' => $contactPhoneKey,
+        ]);
         if ($this->isDuplicate($technician, $dupData, $serviceDate)) {
             throw ValidationException::withMessages([
                 'description' => ['Ya existe un servicio muy similar para la misma empresa y fecha.'],
@@ -487,6 +530,8 @@ class ServiceController extends Controller
             $firstCatalogId,
             $clientNameFinal,
             $cat,
+            $clientTelefono,
+            $contactPhoneKey,
         ) {
             $service = Service::create([
                 'code' => $code,
@@ -495,6 +540,8 @@ class ServiceController extends Controller
                 'assigned_by_user_id' => $admin->id,
                 'catalog_id' => $firstCatalogId,
                 'client_name' => $clientNameFinal,
+                'client_telefono' => $clientTelefono,
+                'contact_phone_key' => $contactPhoneKey,
                 'service_type' => $cat->name,
                 'description' => $masterDescription,
                 'amount' => $totalAmount,
@@ -524,7 +571,7 @@ class ServiceController extends Controller
         app(PanelNotificationDispatcher::class)->notifyUser(
             (int) $technician->id,
             PanelNotification::TYPE_EMP_SERVICIO_ASIGNADO_ADMIN,
-            'Le asignaron el servicio '.$service->code.' ('.($service->company?->nombre ?? 'empresa').'). Complete líneas e importes o rechace la asignación.',
+            'Le asignaron el servicio '.$service->code.' ('.($service->company?->nombre ?? $service->client_name ?? 'cliente').'). Complete líneas e importes o rechace la asignación.',
             [
                 'service_id' => $service->id,
                 'link' => '/empleado/servicio/'.$service->id.'/completar-asignacion',
@@ -535,7 +582,7 @@ class ServiceController extends Controller
         ActivityLogger::log(
             $admin,
             'servicio_asignado_tecnico',
-            'Asignó servicio '.$service->code.' (ID '.$service->id.') al técnico '.$technician->nombre.' (ID '.$technician->id.').'
+            'Asignó servicio '.$service->code.' (ID '.$service->id.') al técnico '.$technician->nombre.' (ID '.$technician->id.'). Valor facturable: '.ActivityAmountNarrative::cop($service->amount).'.'
         );
 
         return (new ServiceResource($service))->response()->setStatusCode(201);
@@ -573,7 +620,7 @@ class ServiceController extends Controller
             'photos.*' => ['file', 'image', 'mimes:jpeg,jpg,png,gif,webp', 'max:8192'],
         ]);
 
-        $companyId = (int) $service->company_id;
+        $companyId = $service->company_id;
         $itemsPayload = $this->parseItemsFromRequest($request);
         if ($itemsPayload === []) {
             throw ValidationException::withMessages([
@@ -581,13 +628,15 @@ class ServiceController extends Controller
             ]);
         }
 
-        $normalized = $this->validateAndNormalizeServiceItems($itemsPayload, $companyId);
+        $normalized = $this->validateAndNormalizeServiceItems($itemsPayload);
 
-        $company = Company::query()->findOrFail($companyId);
-        if ($company->estado !== Company::ESTADO_ACTIVO) {
-            throw ValidationException::withMessages([
-                'company_id' => ['La empresa del servicio no está activa.'],
-            ]);
+        if ($companyId !== null) {
+            $company = Company::query()->findOrFail((int) $companyId);
+            if ($company->estado !== Company::ESTADO_ACTIVO) {
+                throw ValidationException::withMessages([
+                    'company_id' => ['La empresa del servicio no está activa.'],
+                ]);
+            }
         }
 
         $builtDescription = $this->descriptionFromNormalizedLines($normalized);
@@ -660,7 +709,7 @@ class ServiceController extends Controller
         ActivityLogger::log(
             $user,
             'servicio_asignacion_completada',
-            'Completó asignación del servicio '.$service->code.' (ID '.$service->id.').'
+            'Completó asignación del servicio '.$service->code.' (ID '.$service->id.'). Valor facturable: '.ActivityAmountNarrative::cop($service->amount).'.'
         );
 
         return new ServiceResource($service);
@@ -709,7 +758,7 @@ class ServiceController extends Controller
         ActivityLogger::log(
             $user,
             'servicio_asignacion_rechazada',
-            'Rechazó la asignación del servicio '.$service->code.' (ID '.$service->id.').'
+            'Rechazó la asignación del servicio '.$service->code.' (ID '.$service->id.'). Valor en borrador: '.ActivityAmountNarrative::cop($service->amount).'.'
         );
 
         return new ServiceResource($service);
@@ -768,7 +817,7 @@ class ServiceController extends Controller
         ActivityLogger::log(
             $request->user(),
             'servicio_editado',
-            'Editó servicio '.$service->code.' (ID '.$service->id.').'
+            'Editó servicio '.$service->code.' (ID '.$service->id.'). Valor facturable: '.ActivityAmountNarrative::cop($service->amount).'.'
         );
 
         return new ServiceResource($service);
@@ -808,12 +857,13 @@ class ServiceController extends Controller
         $service->loadCount('invoices');
         $service->load(['company', 'user', 'photos', 'catalog:id,name', 'items.catalogSuggestion']);
 
+        $techRef = $service->technicianReferenceTotalValue();
         ActivityLogger::log(
             $request->user(),
             'servicio_pago_tecnico',
             ($service->technician_paid_at
-                ? 'Marcó pago al técnico para servicio '.$service->code.' (ID '.$service->id.').'
-                : 'Quitó marca de pago al técnico en servicio '.$service->code.' (ID '.$service->id.').')
+                ? 'Marcó pago al técnico para servicio '.$service->code.' (ID '.$service->id.'). Importe referencia técnico: '.ActivityAmountNarrative::cop($techRef).'.'
+                : 'Quitó marca de pago al técnico en servicio '.$service->code.' (ID '.$service->id.'). Importe referencia técnico (referencia del abono): '.ActivityAmountNarrative::cop($techRef).'.')
         );
 
         return new ServiceResource($service);
@@ -858,7 +908,7 @@ class ServiceController extends Controller
         ActivityLogger::log(
             $request->user(),
             'servicio_archivado',
-            'Marcó como eliminado el servicio '.$service->code.' (ID '.$service->id.').'
+            'Marcó como eliminado el servicio '.$service->code.' (ID '.$service->id.'). Valor facturable: '.ActivityAmountNarrative::cop($service->amount).'.'
         );
 
         return new ServiceResource($service);
@@ -913,7 +963,7 @@ class ServiceController extends Controller
      * @param  list<array<string, mixed>>  $rows
      * @return list<array{catalog_id: ?int, custom_name: ?string, custom_description: ?string, amount: string, technician_line_amount: string, label: string, line_description: ?string, is_custom: bool, propose_catalog: bool}>
      */
-    private function validateAndNormalizeServiceItems(array $rows, int $companyId): array
+    private function validateAndNormalizeServiceItems(array $rows): array
     {
         if ($rows === []) {
             throw ValidationException::withMessages(['items' => ['Añade al menos una línea.']]);
@@ -1051,14 +1101,24 @@ class ServiceController extends Controller
     {
         $desc = mb_strtolower(trim($data['description']));
 
-        return Service::query()
+        $q = Service::query()
             ->visibles()
             ->where('user_id', $user->id)
-            ->where('company_id', $data['company_id'])
             ->whereDate('service_date', $serviceDate->toDateString())
             ->where('amount', $data['amount'])
-            ->whereRaw('LOWER(TRIM(description)) = ?', [$desc])
-            ->exists();
+            ->whereRaw('LOWER(TRIM(description)) = ?', [$desc]);
+
+        if (($data['company_id'] ?? null) !== null && $data['company_id'] !== '') {
+            $q->where('company_id', $data['company_id']);
+        } else {
+            $key = $data['contact_phone_key'] ?? null;
+            if ($key === null || $key === '') {
+                return false;
+            }
+            $q->whereNull('company_id')->where('contact_phone_key', $key);
+        }
+
+        return $q->exists();
     }
 
     /** FormData envía `quick_client` como JSON string cuando hay fotos. */

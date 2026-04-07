@@ -2,7 +2,7 @@ import { api, apiBaseUrl, getToken } from './api'
 
 /**
  * @param {Record<string, string|number>} [params]
- * @param {string} [params.company_kind] `registered` | `quick` — filtra facturas por tipo de empresa/cliente
+ * @param {string} [params.company_kind] `registered` | `quick` | `counter` — facturas con empresa / venta sin alta (snapshot)
  */
 export function fetchAdminInvoices(params = {}) {
   const qs = new URLSearchParams()
@@ -37,7 +37,31 @@ export function fetchAvailableServicesForInvoice(q) {
 
 /**
  * @param {{
- *   company_id: number|string,
+ *   contact_phone_key: string,
+ *   period_year: number,
+ *   period_month: number,
+ *   invoice_id?: number|string
+ * }} q
+ */
+export function fetchAvailableWalkInServicesForInvoice(q) {
+  const qs = new URLSearchParams({
+    contact_phone_key: String(q.contact_phone_key),
+    period_year: String(q.period_year),
+    period_month: String(q.period_month),
+  })
+  if (q.invoice_id != null && q.invoice_id !== '') qs.set('invoice_id', String(q.invoice_id))
+  return api(`/admin/invoices/available-walk-in-services?${qs}`).then((r) => r.data)
+}
+
+/** @returns {Promise<Array<Record<string, unknown>>>} grupos teléfono+mes con servicios sin facturar */
+export function fetchPendingWalkInGroups() {
+  return api('/admin/invoices/pending-walk-in-groups').then((body) => body.data || [])
+}
+
+/**
+ * @param {{
+ *   company_id?: number|string,
+ *   contact_phone_key?: string,
  *   period_year: number,
  *   period_month: number,
  *   service_ids: number[]
@@ -51,9 +75,25 @@ export function createInvoice(payload) {
 }
 
 /**
+ * Venta sin alta: factura aprobada de una vez, todos los servicios del teléfono en el periodo.
+ * @param {{ contact_phone_key: string, period_year: number, period_month: number }} payload
+ */
+export function createWalkInInvoiceFinal(payload) {
+  return api('/admin/invoices/counter-final', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }).then((r) => ({
+    ...r.data,
+    public_verification_code: r.public_verification_code,
+    public_verification_notice: r.public_verification_notice,
+  }))
+}
+
+/**
  * @param {number|string} id
  * @param {{
- *   company_id: number|string,
+ *   company_id?: number|string,
+ *   contact_phone_key?: string,
  *   period_year: number,
  *   period_month: number,
  *   service_ids: number[]

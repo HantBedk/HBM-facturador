@@ -10,6 +10,7 @@ import {
   fetchServiceCatalogActive,
   getRecentClientNames,
   pushRecentClientName,
+  rejectServiceAssignment,
 } from '@/services/servicesApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
 import { isLineDescriptionStillTemplate } from '@/utils/serviceLineDescriptionTemplate.js'
@@ -26,6 +27,7 @@ const clientSuggestions = ref([])
 const loading = ref(true)
 const loadError = ref('')
 const saving = ref(false)
+const rejecting = ref(false)
 const fieldErrors = ref({})
 const globalError = ref('')
 const toast = ref('')
@@ -58,6 +60,10 @@ function lineKey() {
   return `L-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+/**
+ * Líneas desde el servicio asignado: el técnico debe escribir descripción e importe;
+ * no precargamos el texto ni el importe mínimo que creó administración.
+ */
 function mapItemToLine(it) {
   const cid = it.catalog_id != null && it.catalog_id !== '' ? Number(it.catalog_id) : null
   if (cid != null && !Number.isNaN(cid)) {
@@ -66,8 +72,8 @@ function mapItemToLine(it) {
       catalog_id: cid,
       label: it.label || 'Ítem',
       custom_name: '',
-      line_description: it.line_description || '',
-      amount: it.amount != null ? String(it.amount) : '',
+      line_description: '',
+      amount: '',
       propose_catalog: false,
       isOtherLine: false,
       catalog_hint_desc: '',
@@ -80,8 +86,8 @@ function mapItemToLine(it) {
     catalog_id: null,
     label: it.label || '',
     custom_name: it.label || '',
-    line_description: it.line_description || '',
-    amount: it.amount != null ? String(it.amount) : '',
+    line_description: '',
+    amount: '',
     propose_catalog: false,
     isOtherLine: true,
     catalog_hint_desc: '',
@@ -208,10 +214,11 @@ onMounted(async () => {
       use_quick_client: false,
       quick_telefono: '',
       catalog_id: '',
-      client_name: svc.client_name || '',
+      /* Vacío: el técnico debe indicar el contacto en obra (no precargar nombre de empresa). */
+      client_name: '',
       service_type: svc.service_type || '',
-      description: svc.description || '',
-      amount: svc.amount != null ? String(svc.amount) : '',
+      description: '',
+      amount: '',
       lines: Array.isArray(svc.items) ? svc.items.map(mapItemToLine) : [],
     }
     formResetKey.value += 1
@@ -225,6 +232,29 @@ onMounted(async () => {
 onUnmounted(() => {
   clearTimeout(toastTimer)
 })
+
+async function onRejectAssignment() {
+  const ok = await uiDialog.confirm({
+    title: '¿Rechazar este servicio?',
+    message:
+      'Si pulsaste por error, elige «No, cancelar». Si confirmas, el servicio quedará eliminado, se notificará a administración y no podrás deshacerlo desde aquí.',
+    confirmLabel: 'Sí, rechazar servicio',
+    cancelLabel: 'No, cancelar',
+    danger: true,
+  })
+  if (!ok) return
+  rejecting.value = true
+  globalError.value = ''
+  try {
+    await rejectServiceAssignment(serviceId.value)
+    await uiDialog.alert({ title: 'Listo', message: 'Asignación rechazada. Se notificó a administración.' })
+    await router.push('/empleado/listado-servicios')
+  } catch (e) {
+    globalError.value = e.data?.message || e.message || 'No se pudo rechazar.'
+  } finally {
+    rejecting.value = false
+  }
+}
 
 async function onSubmit() {
   fieldErrors.value = {}
@@ -258,7 +288,7 @@ async function onSubmit() {
     pushRecentClientName(form.value.client_name)
     clearServiceDraft()
     showToast('Servicio completado')
-    await router.push(`/empleado/servicio/${serviceId.value}`)
+    await router.push({ name: 'empleado-dashboard' })
   } catch (e) {
     if (e.data?.errors) fieldErrors.value = e.data.errors
     else globalError.value = e.data?.message || e.message || 'No se pudo guardar.'
@@ -271,14 +301,6 @@ async function onSubmit() {
 <template>
   <section class="mx-auto max-w-md px-3 pb-8 sm:px-0">
     <header class="mb-6 text-center">
-      <p class="mb-4">
-        <RouterLink
-          class="text-sm font-medium text-slate-400 underline decoration-slate-600 underline-offset-2 hover:text-slate-200"
-          to="/empleado/listado-servicios"
-        >
-          ← Volver al listado
-        </RouterLink>
-      </p>
       <h1 class="text-xl font-bold tracking-tight text-white sm:text-2xl">Completar asignación</h1>
       <p class="mt-2 text-[0.8rem] leading-snug text-slate-500">
         Sustituya las líneas provisionales por el detalle real del trabajo e importes de referencia.
@@ -300,16 +322,24 @@ async function onSubmit() {
           v-model="form"
           v-model:photos="photoFiles"
           billing-locked
+          hide-submit-button
           :companies="companies"
           :catalog-items="catalogItems"
           :client-suggestions="clientSuggestions"
           :field-errors="fieldErrors"
-          :disabled="saving"
+          :disabled="saving || rejecting"
         />
-        <div class="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
-          <RouterLink class="btn-secondary text-center" to="/empleado/listado-servicios">Cancelar</RouterLink>
-          <button type="submit" class="btn-primary" :disabled="saving">
-            {{ saving ? 'Guardando…' : 'Guardar y finalizar' }}
+        <div class="complete-actions">
+          <button type="submit" class="btn-primary btn-primary--wide" :disabled="saving || rejecting">
+            {{ saving ? 'Finalizando…' : 'Finalizar servicio' }}
+          </button>
+          <button
+            type="button"
+            class="btn-reject btn-reject--wide"
+            :disabled="saving || rejecting"
+            @click="onRejectAssignment"
+          >
+            {{ rejecting ? 'Rechazando…' : 'Rechazar servicio' }}
           </button>
         </div>
       </form>
@@ -346,6 +376,13 @@ async function onSubmit() {
   color: #fecaca;
   margin-bottom: 1rem;
 }
+.complete-actions {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
 .btn-primary {
   border-radius: 0.75rem;
   padding: 0.65rem 1.25rem;
@@ -355,18 +392,50 @@ async function onSubmit() {
   border: none;
   cursor: pointer;
 }
+
+.btn-primary--wide {
+  width: 100%;
+  padding: 0.95rem 1.25rem;
+  font-size: 1rem;
+  background: linear-gradient(to right, #0ea5e9, #2563eb);
+  color: #f8fafc;
+  box-shadow: 0 10px 25px -5px rgba(14, 165, 233, 0.35);
+}
+
+.btn-primary--wide:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .btn-primary:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
-.btn-secondary {
-  display: inline-block;
+
+.btn-reject {
   border-radius: 0.75rem;
-  padding: 0.65rem 1.25rem;
+  padding: 0.65rem 1rem;
   font-weight: 600;
-  background: #334155;
-  color: #e2e8f0;
-  text-decoration: none;
+  font-size: 0.9rem;
+  background: transparent;
+  color: #fca5a5;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn-reject--wide {
+  width: 100%;
+  padding: 0.75rem 1rem;
+}
+
+.btn-reject:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.btn-reject:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .toast-enter-active,
 .toast-leave-active {

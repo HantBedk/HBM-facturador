@@ -36,6 +36,10 @@ const {
   async onAdminAfterCreate(created) {
     await router.push(`${basePrefix.value}/servicios/${created.id}`)
   },
+  async onEmpleadoAfterCreate() {
+    await new Promise((r) => setTimeout(r, 450))
+    await router.push({ name: 'empleado-dashboard' })
+  },
 })
 </script>
 

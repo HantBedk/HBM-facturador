@@ -28,6 +28,8 @@ class Service extends Model
         'assigned_by_user_id',
         'catalog_id',
         'client_name',
+        'client_telefono',
+        'contact_phone_key',
         'service_type',
         'description',
         'amount',

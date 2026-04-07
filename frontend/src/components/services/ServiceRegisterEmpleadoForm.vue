@@ -15,6 +15,8 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   /** No permitir cambiar empresa / cliente puntual (p. ej. completar asignación administrativa). */
   billingLocked: { type: Boolean, default: false },
+  /** Ocultar el botón interno de envío (p. ej. la vista padre pone su propio `type="submit"`). */
+  hideSubmitButton: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue', 'update:photos'])
@@ -735,11 +737,12 @@ function onCompanySelectChange(ev) {
     </section>
 
     <button
+      v-if="!hideSubmitButton"
       type="submit"
       class="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 py-4 text-base font-bold text-white shadow-lg shadow-sky-500/25 transition hover:brightness-110 active:scale-[0.99] disabled:opacity-50"
       :disabled="disabled"
     >
-      {{ disabled ? 'Guardando…' : 'Guardar servicio' }}
+      {{ disabled ? 'Guardando…' : 'Cargar servicio' }}
     </button>
   </div>
 </template>

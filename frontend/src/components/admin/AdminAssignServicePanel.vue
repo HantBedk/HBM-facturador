@@ -17,7 +17,6 @@ const useQuick = ref(false)
 const qcNombre = ref('')
 const qcTel = ref('')
 const catalogId = ref('')
-const clientName = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
@@ -32,7 +31,6 @@ watch(
     qcNombre.value = ''
     qcTel.value = ''
     catalogId.value = ''
-    clientName.value = ''
     loading.value = true
     try {
       const [co, cat] = await Promise.all([fetchCompanies(), fetchServiceCatalogActive()])
@@ -68,8 +66,6 @@ async function submit() {
       }
     } else {
       payload.company_id = Number(companyId.value)
-      const cn = clientName.value.trim()
-      if (cn) payload.client_name = cn
     }
     const created = await assignServiceToTechnician(payload)
     emit('assigned', created)
@@ -117,7 +113,7 @@ async function submit() {
 
           <label class="field check">
             <input v-model="useQuick" type="checkbox" />
-            <span>Cliente puntual (sin empresa registrada)</span>
+            <span>Cliente no registrado</span>
           </label>
 
           <template v-if="!useQuick">
@@ -127,10 +123,6 @@ async function submit() {
                 <option disabled value="">Seleccionar…</option>
                 <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
               </select>
-            </label>
-            <label class="field">
-              <span>Cliente atendido (opcional; por defecto el nombre de la empresa)</span>
-              <input v-model="clientName" type="text" class="input" placeholder="Contacto en obra" />
             </label>
           </template>
           <template v-else>
@@ -175,15 +167,27 @@ async function submit() {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: rgba(0, 0, 0, 0.55);
+  /* Oscurece la vista detrás sin dejar ver el contenido de la página mezclado */
+  background: rgba(2, 6, 23, 0.78);
+  backdrop-filter: blur(6px);
 }
+
 .assign-svc-modal {
   width: 100%;
   max-width: 26rem;
   max-height: 90vh;
   overflow: auto;
-  padding: 1.25rem 1.35rem;
+  padding: 1.35rem 1.4rem;
+  /* Superficie opaca: el diálogo no compite con el fondo */
+  background: #0f172a;
+  color: #e2e8f0;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.9),
+    0 24px 48px -12px rgba(0, 0, 0, 0.65);
 }
+
 .modal-header {
   display: flex;
   align-items: flex-start;
@@ -191,61 +195,97 @@ async function submit() {
   gap: 0.75rem;
   margin-bottom: 0.5rem;
 }
+
 .modal-title {
   margin: 0;
   font-size: 1.1rem;
   font-weight: 700;
+  color: #f8fafc;
+  line-height: 1.35;
 }
+
 .modal-close {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: none;
-  background: transparent;
-  color: #94a3b8;
-  font-size: 1.5rem;
+  border-radius: 8px;
+  background: rgba(51, 65, 85, 0.55);
+  color: #cbd5e1;
+  font-size: 1.35rem;
   line-height: 1;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 }
+
+.modal-close:hover {
+  background: rgba(71, 85, 105, 0.85);
+  color: #f1f5f9;
+}
+
 .assign-svc-lede {
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   margin: 0 0 1rem;
+  color: #cbd5e1;
+  line-height: 1.45;
 }
+
 .field {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
   margin-bottom: 0.85rem;
   font-size: 0.8rem;
-  color: #94a3b8;
+  color: #cbd5e1;
 }
+
 .field.check {
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
 }
+
+.field.check span {
+  color: #e2e8f0;
+}
+
 .input {
   border-radius: 0.65rem;
-  border: 1px solid rgba(51, 65, 85, 0.9);
-  background: #0f172a;
-  color: #f1f5f9;
+  border: 1px solid rgba(100, 116, 139, 0.45);
+  background: #020617;
+  color: #f8fafc;
   padding: 0.55rem 0.75rem;
   font-size: 0.95rem;
 }
+
+.input:focus {
+  outline: none;
+  border-color: rgba(56, 189, 248, 0.65);
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2);
+}
+
 .banner.err {
-  padding: 0.5rem 0.65rem;
+  padding: 0.6rem 0.75rem;
   border-radius: 0.5rem;
-  background: rgba(248, 113, 113, 0.12);
-  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(127, 29, 29, 0.45);
+  border: 1px solid rgba(248, 113, 113, 0.55);
   color: #fecaca;
   margin-bottom: 0.75rem;
   font-size: 0.85rem;
 }
+
 .assign-svc-footer {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 1rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid rgba(51, 65, 85, 0.6);
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(71, 85, 105, 0.65);
 }
+
 .btn {
   border-radius: 0.65rem;
   padding: 0.5rem 1rem;
@@ -254,21 +294,27 @@ async function submit() {
   border: none;
   font-size: 0.9rem;
 }
+
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
 .btn.secondary {
   background: #334155;
-  color: #e2e8f0;
+  color: #f1f5f9;
+  border: 1px solid rgba(148, 163, 184, 0.25);
 }
+
 .btn.primary {
   background: #0ea5e9;
-  color: #0f172a;
+  color: #0c1222;
 }
+
 .muted {
-  color: #64748b;
+  color: #94a3b8;
 }
+
 .pad {
   padding: 0.75rem 0;
 }

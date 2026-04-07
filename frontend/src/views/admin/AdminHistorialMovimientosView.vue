@@ -37,12 +37,17 @@ function accionEtiqueta(code) {
     factura_enviada: 'Factura enviada',
     factura_eliminada: 'Factura eliminada',
     factura_token_publico_regenerado: 'Código consulta pública',
+    factura_auto_borrador: 'Borradores automáticos (sistema)',
     automation_facturacion_actualizada: 'Facturación automática (borradores)',
     pago_registrado: 'Pago registrado',
     pago_eliminado: 'Pago eliminado',
     servicio_creado: 'Servicio creado',
     servicio_editado: 'Servicio editado',
     servicio_archivado: 'Servicio archivado / eliminado',
+    servicio_pago_tecnico: 'Pago / abono referencia técnico',
+    servicio_asignado_tecnico: 'Servicio asignado a técnico',
+    servicio_asignacion_completada: 'Asignación completada (técnico)',
+    servicio_asignacion_rechazada: 'Asignación rechazada (técnico)',
   }
   return m[code] || code
 }

@@ -107,9 +107,9 @@ class InvoicePdfPayload
                 'is_public_copy' => false,
             ],
             'company' => [
-                'nombre' => $invoice->company?->nombre,
-                'nit' => $invoice->company?->nit,
-                'telefono' => $invoice->company?->telefono,
+                'nombre' => $invoice->company?->nombre ?? $invoice->bill_to_nombre,
+                'nit' => $invoice->company?->nit ?? $invoice->bill_to_nit,
+                'telefono' => $invoice->company?->telefono ?? $invoice->bill_to_telefono,
                 'correo' => $invoice->company?->correo,
                 /** Reservado; el PDF ya no muestra nombres agregados aquí (técnico por línea en `services`). */
                 'contact' => null,

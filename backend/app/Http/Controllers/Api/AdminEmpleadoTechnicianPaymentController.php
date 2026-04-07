@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Service;
 use App\Models\User;
 use App\Services\ActivityLogger;
+use App\Support\ActivityAmountNarrative;
 use App\Services\TechnicianAbonoNotifier;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -109,10 +110,11 @@ class AdminEmpleadoTechnicianPaymentController extends Controller
                 $service->save();
                 $service->refresh()->loadSum('items', 'technician_line_amount')->loadCount('items');
                 $notifier->notifyRegisteredAbono($service, $actor);
+                $ref = $service->technicianReferenceTotalValue();
                 ActivityLogger::log(
                     $actor,
                     'servicio_pago_tecnico',
-                    'Marcó pago al técnico para servicio '.$service->code.' (ID '.$service->id.').'
+                    'Marcó pago al técnico para servicio '.$service->code.' (ID '.$service->id.'). Importe referencia técnico: '.ActivityAmountNarrative::cop($ref).'.'
                 );
             }
         });

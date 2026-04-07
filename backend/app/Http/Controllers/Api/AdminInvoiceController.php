@@ -14,8 +14,10 @@ use App\Services\ActivityLogger;
 use App\Services\InvoiceCodeGenerator;
 use App\Services\InvoicePublicAccessService;
 use App\Services\PanelNotificationDispatcher;
+use App\Support\ActivityAmountNarrative;
 use App\Support\InvoicePdfPayload;
 use App\Support\Pagination;
+use App\Support\PhoneNormalizer;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -39,10 +41,10 @@ class AdminInvoiceController extends Controller
         }
 
         $kind = $request->query('company_kind');
-        if ($kind === 'quick') {
-            $q->whereHas('company', fn ($c) => $c->where('es_cliente_puntual', true));
+        if ($kind === 'quick' || $kind === 'counter') {
+            $q->whereNull('company_id');
         } elseif ($kind === 'registered') {
-            $q->whereHas('company', fn ($c) => $c->where('es_cliente_puntual', false));
+            $q->whereNotNull('company_id');
         }
 
         if ($request->filled('status')) {
@@ -75,7 +77,7 @@ class AdminInvoiceController extends Controller
                 'created_at' => $q->orderBy('invoices.created_at', $sortDir)->orderBy('invoices.id', $sortDir),
                 'company_nombre' => $q->leftJoin('companies', 'invoices.company_id', '=', 'companies.id')
                     ->select('invoices.*')
-                    ->orderBy('companies.nombre', $sortDir)
+                    ->orderByRaw('COALESCE(companies.nombre, invoices.bill_to_nombre) '.$sortDir)
                     ->orderBy('invoices.id', $sortDir),
                 'period' => $q->orderBy('invoices.period_year', $sortDir)
                     ->orderBy('invoices.period_month', $sortDir)
@@ -159,17 +161,324 @@ class AdminInvoiceController extends Controller
         ]);
     }
 
+    /**
+     * Servicios de venta sin empresa (mismo teléfono normalizado) en el mes.
+     */
+    public function availableWalkInServices(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'contact_phone_key' => ['required', 'string', 'min:7', 'max:32'],
+            'period_year' => ['required', 'integer', 'min:2000', 'max:2100'],
+            'period_month' => ['required', 'integer', 'min:1', 'max:12'],
+            'invoice_id' => ['sometimes', 'nullable', 'exists:invoices,id'],
+        ]);
+
+        $phoneKey = PhoneNormalizer::digitsKey($validated['contact_phone_key']);
+        if (strlen($phoneKey) < 7 || strlen($phoneKey) > 15) {
+            throw ValidationException::withMessages([
+                'contact_phone_key' => ['Indique un teléfono válido (solo números, 7–15 dígitos).'],
+            ]);
+        }
+
+        $tz = config('app.timezone');
+        $start = Carbon::createFromDate($validated['period_year'], $validated['period_month'], 1, $tz)->startOfMonth();
+        $end = (clone $start)->endOfMonth();
+
+        $exceptInvoiceId = isset($validated['invoice_id']) ? (int) $validated['invoice_id'] : null;
+
+        $blockedIds = DB::table('invoice_service')
+            ->when($exceptInvoiceId, fn ($q) => $q->where('invoice_id', '!=', $exceptInvoiceId))
+            ->pluck('service_id')
+            ->all();
+
+        $currentIds = $exceptInvoiceId
+            ? DB::table('invoice_service')->where('invoice_id', $exceptInvoiceId)->pluck('service_id')->all()
+            : [];
+
+        $rows = Service::query()
+            ->whereNull('company_id')
+            ->where('contact_phone_key', $phoneKey)
+            ->whereBetween('service_date', [$start->toDateString(), $end->toDateString()])
+            ->visibles()
+            ->with(['user:id,nombre'])
+            ->orderByDesc('service_date')
+            ->orderByDesc('id')
+            ->get()
+            ->filter(function (Service $s) use ($blockedIds, $currentIds) {
+                return ! in_array($s->id, $blockedIds, true) || in_array($s->id, $currentIds, true);
+            })
+            ->values();
+
+        return response()->json([
+            'data' => $rows->map(fn (Service $s) => [
+                'id' => $s->id,
+                'code' => $s->code,
+                'service_date' => $s->service_date?->format('Y-m-d'),
+                'description' => $s->description,
+                'service_type' => $s->service_type,
+                'amount' => (string) $s->amount,
+                'client_name' => $s->client_name,
+                'empleado' => $s->user ? ['nombre' => $s->user->nombre] : null,
+            ])->all(),
+        ]);
+    }
+
+    /**
+     * Grupos de servicios sin empresa aún no facturados (por teléfono + mes calendario del servicio).
+     * Para que administración vea pendientes sin memorizar números.
+     */
+    public function pendingWalkInGroups(): JsonResponse
+    {
+        $blockedIds = DB::table('invoice_service')->pluck('service_id')->all();
+
+        $q = Service::query()
+            ->whereNull('company_id')
+            ->whereNotNull('contact_phone_key')
+            ->where('contact_phone_key', '!=', '')
+            ->visibles();
+
+        if ($blockedIds !== []) {
+            $q->whereNotIn('id', $blockedIds);
+        }
+
+        $services = $q->orderBy('service_date')->orderBy('id')->get([
+            'id',
+            'contact_phone_key',
+            'client_name',
+            'client_telefono',
+            'amount',
+            'service_date',
+        ]);
+
+        $buckets = [];
+        foreach ($services as $svc) {
+            $d = $svc->service_date;
+            if ($d === null) {
+                continue;
+            }
+            $y = (int) $d->format('Y');
+            $m = (int) $d->format('n');
+            $gk = (string) $svc->contact_phone_key.'|'.$y.'|'.$m;
+            if (! isset($buckets[$gk])) {
+                $buckets[$gk] = [];
+            }
+            $buckets[$gk][] = $svc;
+        }
+
+        $rows = [];
+        foreach ($buckets as $items) {
+            $sum = 0.0;
+            $minD = null;
+            $maxD = null;
+            foreach ($items as $it) {
+                $sum += (float) $it->amount;
+                $sd = $it->service_date;
+                if ($sd === null) {
+                    continue;
+                }
+                if ($minD === null || $sd->lt($minD)) {
+                    $minD = $sd;
+                }
+                if ($maxD === null || $sd->gt($maxD)) {
+                    $maxD = $sd;
+                }
+            }
+            /** @var Service $first */
+            $first = $items[0];
+            $d0 = $first->service_date;
+            if ($d0 === null) {
+                continue;
+            }
+            $tel = trim((string) ($first->client_telefono ?? ''));
+            if ($tel === '') {
+                $tel = (string) $first->contact_phone_key;
+            }
+            $rows[] = [
+                'contact_phone_key' => (string) $first->contact_phone_key,
+                'period_year' => (int) $d0->format('Y'),
+                'period_month' => (int) $d0->format('n'),
+                'client_name' => trim((string) ($first->client_name ?? '')) !== '' ? trim((string) $first->client_name) : 'Cliente',
+                'client_telefono_display' => $tel,
+                'services_count' => count($items),
+                'total' => number_format($sum, 2, '.', ''),
+                'first_service_date' => $minD?->toDateString(),
+                'last_service_date' => $maxD?->toDateString(),
+            ];
+        }
+
+        usort($rows, function (array $a, array $b): int {
+            $c = $b['period_year'] <=> $a['period_year'];
+            if ($c !== 0) {
+                return $c;
+            }
+            $c = $b['period_month'] <=> $a['period_month'];
+            if ($c !== 0) {
+                return $c;
+            }
+
+            return strcmp((string) $b['last_service_date'], (string) $a['last_service_date']);
+        });
+
+        return response()->json(['data' => $rows]);
+    }
+
+    /**
+     * Venta sin empresa: incluye todos los servicios del teléfono en el periodo y emite factura ya aprobada (sin borrador).
+     */
+    public function storeWalkInFinal(Request $request, InvoiceCodeGenerator $codes, InvoicePublicAccessService $publicAccess): JsonResponse
+    {
+        $data = $request->validate([
+            'contact_phone_key' => ['required', 'string', 'max:32'],
+            'period_year' => ['required', 'integer', 'min:2000', 'max:2100'],
+            'period_month' => ['required', 'integer', 'min:1', 'max:12'],
+        ]);
+
+        $rawKey = PhoneNormalizer::digitsKey((string) $data['contact_phone_key']);
+        if (strlen($rawKey) < 7 || strlen($rawKey) > 15) {
+            throw ValidationException::withMessages([
+                'contact_phone_key' => ['Indique un teléfono válido (7–15 dígitos).'],
+            ]);
+        }
+
+        $tz = config('app.timezone');
+        $start = Carbon::createFromDate($data['period_year'], $data['period_month'], 1, $tz)->startOfMonth();
+        $end = (clone $start)->endOfMonth();
+
+        $blockedIds = DB::table('invoice_service')->pluck('service_id')->all();
+
+        $candidates = Service::query()
+            ->whereNull('company_id')
+            ->where('contact_phone_key', $rawKey)
+            ->whereBetween('service_date', [$start->toDateString(), $end->toDateString()])
+            ->visibles()
+            ->orderBy('id')
+            ->pluck('id')
+            ->all();
+
+        $serviceIds = array_values(array_filter(
+            $candidates,
+            fn (int $id) => ! in_array($id, $blockedIds, true)
+        ));
+
+        if ($serviceIds === []) {
+            throw ValidationException::withMessages([
+                'contact_phone_key' => ['No hay servicios pendientes de facturar para este teléfono y periodo.'],
+            ]);
+        }
+
+        $this->assertServicesAttachable(
+            null,
+            $rawKey,
+            $data['period_year'],
+            $data['period_month'],
+            $serviceIds,
+            null
+        );
+
+        $total = $this->sumServiceAmounts($serviceIds);
+        if ((float) $total <= 0) {
+            throw ValidationException::withMessages([
+                'contact_phone_key' => ['El total a facturar debe ser mayor a cero.'],
+            ]);
+        }
+
+        $invoice = DB::transaction(function () use ($data, $total, $codes, $rawKey, $serviceIds) {
+            $tz = config('app.timezone');
+            $now = Carbon::now($tz);
+
+            $first = Service::query()->whereIn('id', $serviceIds)->orderBy('id')->first();
+            if ($first === null) {
+                throw ValidationException::withMessages(['contact_phone_key' => ['No se pudieron resolver los servicios.']]);
+            }
+
+            $code = $codes->nextForCounterSale($now);
+
+            $inv = Invoice::query()->create([
+                'code' => $code,
+                'company_id' => null,
+                'bill_to_nombre' => $first->client_name,
+                'bill_to_telefono' => $first->client_telefono,
+                'bill_to_nit' => null,
+                'period_month' => $data['period_month'],
+                'period_year' => $data['period_year'],
+                'status' => Invoice::STATUS_APROBADA,
+                'subtotal' => $total,
+                'total' => $total,
+                'sent_at' => null,
+            ]);
+            $inv->services()->sync($serviceIds);
+
+            return $inv;
+        });
+
+        $plainVerification = $publicAccess->ensureToken($invoice->fresh());
+
+        $invoice->refresh()->load(['company:id,nombre,nit,telefono,es_cliente_puntual', 'services.user', 'services.catalog:id,name', 'payments']);
+
+        $dispatcher = app(PanelNotificationDispatcher::class);
+        $dispatcher->notifyAdmins(
+            PanelNotification::TYPE_INVOICE_PENDING_SEND,
+            'Factura '.$invoice->code.' (venta sin alta) emitida y aprobada; pendiente de envío o de corte automático.',
+            [
+                'invoice_id' => $invoice->id,
+                'link' => '/admin/facturas/'.$invoice->id,
+            ]
+        );
+
+        $techFirstServiceId = [];
+        foreach ($invoice->services as $svc) {
+            $u = $svc->user;
+            if ($u === null || $u->rol !== User::ROL_EMPLEADO) {
+                continue;
+            }
+            $uid = (int) $u->id;
+            if (! isset($techFirstServiceId[$uid])) {
+                $techFirstServiceId[$uid] = (int) $svc->id;
+            }
+        }
+        foreach ($techFirstServiceId as $uid => $firstSid) {
+            $dispatcher->notifyUser(
+                $uid,
+                PanelNotification::TYPE_EMP_SERVICIO_FACTURA_APROBADA,
+                'La factura '.$invoice->code.' fue aprobada e incluye sus servicios (periodo '.$invoice->period_month.'/'.$invoice->period_year.').',
+                [
+                    'invoice_id' => $invoice->id,
+                    'service_id' => $firstSid,
+                    'link' => '/empleado/servicio/'.$firstSid,
+                ],
+                'emp_inv_appr_'.$invoice->id
+            );
+        }
+
+        ActivityLogger::log(
+            $request->user(),
+            'factura_emitida_venta_sin_alta',
+            'Emitió factura aprobada (venta sin alta) '.$invoice->code.' (ID '.$invoice->id.'). Total: '.ActivityAmountNarrative::cop($invoice->total).'.'
+        );
+
+        $resource = new AdminInvoiceResource($invoice);
+        $extra = [];
+        if ($plainVerification !== null) {
+            $extra['public_verification_code'] = $plainVerification;
+            $extra['public_verification_notice'] = 'Comparta este código con el cliente junto al código de factura. No se volverá a mostrar; puede generar uno nuevo desde el detalle.';
+        }
+
+        return $resource->additional($extra)->response()->setStatusCode(201);
+    }
+
     public function store(Request $request, InvoiceCodeGenerator $codes): JsonResponse
     {
         $data = $request->validate([
-            'company_id' => ['required', 'exists:companies,id'],
+            'company_id' => ['required', 'integer', 'exists:companies,id'],
             'period_year' => ['required', 'integer', 'min:2000', 'max:2100'],
             'period_month' => ['required', 'integer', 'min:1', 'max:12'],
             'service_ids' => ['required', 'array', 'min:1', 'distinct'],
             'service_ids.*' => ['integer', 'exists:services,id'],
         ]);
 
-        $company = Company::query()->findOrFail($data['company_id']);
+        $cid = (int) $data['company_id'];
+
+        $company = Company::query()->findOrFail($cid);
         if ($company->estado !== Company::ESTADO_ACTIVO) {
             throw ValidationException::withMessages([
                 'company_id' => ['La empresa debe estar activa para generar facturas.'],
@@ -183,7 +492,8 @@ class AdminInvoiceController extends Controller
         }
 
         $this->assertServicesAttachable(
-            $data['company_id'],
+            $cid,
+            null,
             $data['period_year'],
             $data['period_month'],
             $data['service_ids'],
@@ -192,9 +502,13 @@ class AdminInvoiceController extends Controller
 
         $total = $this->sumServiceAmounts($data['service_ids']);
 
-        $invoice = DB::transaction(function () use ($data, $total, $codes, $company) {
+        $invoice = DB::transaction(function () use ($data, $total, $codes, $cid) {
+            $tz = config('app.timezone');
+            $now = Carbon::now($tz);
+
+            $company = Company::query()->findOrFail($cid);
             try {
-                $code = $codes->nextForCompanyOnDate($company, Carbon::now(config('app.timezone')));
+                $code = $codes->nextForCompanyOnDate($company, $now);
             } catch (\InvalidArgumentException $e) {
                 throw ValidationException::withMessages(['company_id' => [$e->getMessage()]]);
             } catch (\RuntimeException $e) {
@@ -203,7 +517,10 @@ class AdminInvoiceController extends Controller
 
             $inv = Invoice::query()->create([
                 'code' => $code,
-                'company_id' => $data['company_id'],
+                'company_id' => $cid,
+                'bill_to_nombre' => null,
+                'bill_to_telefono' => null,
+                'bill_to_nit' => null,
                 'period_month' => $data['period_month'],
                 'period_year' => $data['period_year'],
                 'status' => Invoice::STATUS_BORRADOR,
@@ -230,7 +547,7 @@ class AdminInvoiceController extends Controller
         ActivityLogger::log(
             $request->user(),
             'factura_creada',
-            'Creó factura borrador '.$invoice->code.' (ID '.$invoice->id.').'
+            'Creó factura borrador '.$invoice->code.' (ID '.$invoice->id.'). Total: '.ActivityAmountNarrative::cop($invoice->total).'.'
         );
 
         return (new AdminInvoiceResource($invoice))->response()->setStatusCode(201);
@@ -245,27 +562,76 @@ class AdminInvoiceController extends Controller
         }
 
         $data = $request->validate([
-            'company_id' => ['required', 'exists:companies,id'],
+            'company_id' => ['nullable', 'integer', 'exists:companies,id'],
+            'contact_phone_key' => ['nullable', 'string', 'max:32'],
             'period_year' => ['required', 'integer', 'min:2000', 'max:2100'],
             'period_month' => ['required', 'integer', 'min:1', 'max:12'],
             'service_ids' => ['required', 'array', 'min:1', 'distinct'],
             'service_ids.*' => ['integer', 'exists:services,id'],
         ]);
 
-        $company = Company::query()->findOrFail($data['company_id']);
-        if ($company->estado !== Company::ESTADO_ACTIVO) {
+        $cid = isset($data['company_id']) ? (int) $data['company_id'] : 0;
+        $rawKey = isset($data['contact_phone_key']) ? PhoneNormalizer::digitsKey((string) $data['contact_phone_key']) : '';
+        $hasCompany = $cid > 0;
+        $hasWalkIn = $rawKey !== '';
+
+        if ($hasCompany === $hasWalkIn) {
             throw ValidationException::withMessages([
-                'company_id' => ['La empresa debe estar activa.'],
+                'company_id' => ['Indique empresa registrada o venta sin alta (teléfono), no ambos ni ninguno.'],
             ]);
         }
 
-        $this->assertServicesAttachable(
-            $data['company_id'],
-            $data['period_year'],
-            $data['period_month'],
-            $data['service_ids'],
-            $invoice->id
-        );
+        if ($invoice->company_id !== null && ! $hasCompany) {
+            throw ValidationException::withMessages([
+                'company_id' => ['Esta factura está ligada a una empresa; use el flujo con empresa.'],
+            ]);
+        }
+        if ($invoice->company_id === null && ! $hasWalkIn) {
+            throw ValidationException::withMessages([
+                'contact_phone_key' => ['Esta factura es venta sin alta; indique el teléfono del cliente.'],
+            ]);
+        }
+        if ($invoice->company_id === null && $hasCompany) {
+            throw ValidationException::withMessages([
+                'company_id' => ['No puede convertir esta factura (venta sin alta) en factura de empresa desde aquí.'],
+            ]);
+        }
+        if ($invoice->company_id !== null && $hasWalkIn) {
+            throw ValidationException::withMessages([
+                'contact_phone_key' => ['Esta factura es de empresa; no use el flujo de venta sin alta.'],
+            ]);
+        }
+
+        if ($hasCompany) {
+            $company = Company::query()->findOrFail($cid);
+            if ($company->estado !== Company::ESTADO_ACTIVO) {
+                throw ValidationException::withMessages([
+                    'company_id' => ['La empresa debe estar activa.'],
+                ]);
+            }
+            $this->assertServicesAttachable(
+                $cid,
+                null,
+                $data['period_year'],
+                $data['period_month'],
+                $data['service_ids'],
+                $invoice->id
+            );
+        } else {
+            if (strlen($rawKey) < 7 || strlen($rawKey) > 15) {
+                throw ValidationException::withMessages([
+                    'contact_phone_key' => ['Indique un teléfono válido (7–15 dígitos).'],
+                ]);
+            }
+            $this->assertServicesAttachable(
+                null,
+                $rawKey,
+                $data['period_year'],
+                $data['period_month'],
+                $data['service_ids'],
+                $invoice->id
+            );
+        }
 
         $total = $this->sumServiceAmounts($data['service_ids']);
 
@@ -274,8 +640,22 @@ class AdminInvoiceController extends Controller
             ->pluck('service_id')
             ->all();
 
-        DB::transaction(function () use ($invoice, $data, $total) {
-            $invoice->company_id = $data['company_id'];
+        DB::transaction(function () use ($invoice, $data, $total, $hasCompany, $cid) {
+            if ($hasCompany) {
+                $invoice->company_id = $cid;
+                $invoice->bill_to_nombre = null;
+                $invoice->bill_to_telefono = null;
+                $invoice->bill_to_nit = null;
+            } else {
+                $invoice->company_id = null;
+                $ordered = Service::query()->whereIn('id', $data['service_ids'])->orderBy('id')->get();
+                $first = $ordered->first();
+                if ($first !== null) {
+                    $invoice->bill_to_nombre = $first->client_name;
+                    $invoice->bill_to_telefono = $first->client_telefono;
+                    $invoice->bill_to_nit = null;
+                }
+            }
             $invoice->period_month = $data['period_month'];
             $invoice->period_year = $data['period_year'];
             $invoice->subtotal = $total;
@@ -314,7 +694,7 @@ class AdminInvoiceController extends Controller
         ActivityLogger::log(
             $request->user(),
             'factura_editada',
-            'Editó borrador de factura '.$invoice->code.' (ID '.$invoice->id.').'
+            'Editó borrador de factura '.$invoice->code.' (ID '.$invoice->id.'). Total: '.ActivityAmountNarrative::cop($invoice->total).'.'
         );
 
         return new AdminInvoiceResource($invoice);
@@ -324,7 +704,8 @@ class AdminInvoiceController extends Controller
      * @param  list<int>  $serviceIds
      */
     private function assertServicesAttachable(
-        int $companyId,
+        ?int $companyId,
+        ?string $contactPhoneKey,
         int $year,
         int $month,
         array $serviceIds,
@@ -341,10 +722,19 @@ class AdminInvoiceController extends Controller
 
         foreach ($serviceIds as $sid) {
             $s = Service::query()->findOrFail($sid);
-            if ((int) $s->company_id !== $companyId) {
-                throw ValidationException::withMessages([
-                    'service_ids' => ['El servicio '.$s->code.' no pertenece a la empresa indicada.'],
-                ]);
+            if ($companyId !== null) {
+                if ((int) $s->company_id !== $companyId) {
+                    throw ValidationException::withMessages([
+                        'service_ids' => ['El servicio '.$s->code.' no pertenece a la empresa indicada.'],
+                    ]);
+                }
+            } else {
+                $key = $contactPhoneKey ?? '';
+                if ($s->company_id !== null || (string) $s->contact_phone_key !== $key) {
+                    throw ValidationException::withMessages([
+                        'service_ids' => ['El servicio '.$s->code.' no corresponde a la venta sin alta (mismo teléfono).'],
+                    ]);
+                }
             }
             $sd = $s->service_date?->toDateString();
             if ($sd === null || $sd < $start->toDateString() || $sd > $end->toDateString()) {
@@ -484,7 +874,7 @@ class AdminInvoiceController extends Controller
         ActivityLogger::log(
             $actor,
             $actionLabel,
-            ($data['status'] === Invoice::STATUS_APROBADA ? 'Aprobó' : 'Marcó como enviada').' factura '.$invoice->code.' (ID '.$invoice->id.').'
+            ($data['status'] === Invoice::STATUS_APROBADA ? 'Aprobó' : 'Marcó como enviada').' factura '.$invoice->code.' (ID '.$invoice->id.'). Total: '.ActivityAmountNarrative::cop($invoice->total).'.'
         );
 
         $resource = new AdminInvoiceResource($invoice);
@@ -515,7 +905,7 @@ class AdminInvoiceController extends Controller
         ActivityLogger::log(
             $request->user(),
             'factura_token_publico_regenerado',
-            'Regeneró código de consulta pública para factura '.$invoice->code.' (ID '.$invoice->id.').'
+            'Regeneró código de consulta pública para factura '.$invoice->code.' (ID '.$invoice->id.'). Total factura: '.ActivityAmountNarrative::cop($invoice->total).'.'
         );
 
         return (new AdminInvoiceResource($invoice))->additional([
@@ -608,7 +998,7 @@ class AdminInvoiceController extends Controller
         ActivityLogger::log(
             $request->user(),
             'pago_registrado',
-            'Registró pago en factura '.$invoice->code.' (ID '.$invoice->id.'). Estado: '.$invoice->status.'.'
+            'Registró pago en factura '.$invoice->code.' (ID '.$invoice->id.'). Monto del pago: '.ActivityAmountNarrative::cop($payment->amount).'. Saldo factura tras el movimiento: '.ActivityAmountNarrative::cop(max(0, (float) $invoice->total - (float) Payment::query()->where('invoice_id', $invoice->id)->sum('amount'))).'. Estado: '.$invoice->status.'.'
         );
 
         return new AdminInvoiceResource($invoice);
@@ -628,6 +1018,7 @@ class AdminInvoiceController extends Controller
             return response()->json(['message' => 'No se pueden modificar pagos en este estado de la factura.'], 422);
         }
 
+        $deletedAmount = $payment->amount;
         $payment->delete();
         $invoice->refresh();
         $this->syncInvoiceStatusFromPayments($invoice);
@@ -636,7 +1027,7 @@ class AdminInvoiceController extends Controller
         ActivityLogger::log(
             $request->user(),
             'pago_eliminado',
-            'Eliminó un pago de la factura '.$invoice->code.' (ID '.$invoice->id.').'
+            'Eliminó un pago de '.ActivityAmountNarrative::cop($deletedAmount).' en la factura '.$invoice->code.' (ID '.$invoice->id.').'
         );
 
         return new AdminInvoiceResource($invoice);
@@ -669,6 +1060,7 @@ class AdminInvoiceController extends Controller
         $prevStatus = $invoice->status;
         $companyNombre = $invoice->company?->nombre ?? '—';
         $periodLabel = (int) $invoice->period_month.'/'.(int) $invoice->period_year;
+        $invTotal = $invoice->total;
 
         DB::transaction(function () use ($invoice) {
             $invoice->payments()->delete();
@@ -679,7 +1071,7 @@ class AdminInvoiceController extends Controller
         ActivityLogger::log(
             $request->user(),
             'factura_eliminada',
-            'Eliminó factura '.$code.' (ID '.$invId.'). Estado previo: '.$prevStatus.'. Empresa: '.$companyNombre.'. Periodo facturación: '.$periodLabel.'. Servicios desvinculados para nueva factura.'
+            'Eliminó factura '.$code.' (ID '.$invId.'). Total factura: '.ActivityAmountNarrative::cop($invTotal).'. Estado previo: '.$prevStatus.'. Empresa: '.$companyNombre.'. Periodo facturación: '.$periodLabel.'. Servicios desvinculados para nueva factura.'
         );
 
         return response()->json(['message' => 'Factura eliminada.']);

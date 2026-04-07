@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\PanelNotification;
 use App\Models\Service;
+use App\Support\ActivityAmountNarrative;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -38,6 +39,7 @@ class AutomaticInvoiceDraftService
 
         $created = 0;
         $codesOut = [];
+        $sumDraftTotals = 0.0;
 
         foreach (Company::query()->activas()->cursor() as $company) {
             $sigla = strtoupper(preg_replace('/[^A-Za-z]/', '', (string) $company->factura_sigla) ?? '');
@@ -83,7 +85,7 @@ class AutomaticInvoiceDraftService
             }
 
             try {
-                DB::transaction(function () use ($company, $year, $month, $serviceIds, $tz, &$created, &$codesOut) {
+                DB::transaction(function () use ($company, $year, $month, $serviceIds, $tz, &$created, &$codesOut, &$sumDraftTotals) {
                     $code = $this->codes->nextForCompanyOnDate($company, Carbon::now($tz));
                     $total = (string) Service::query()->whereIn('id', $serviceIds)->sum('amount');
                     $inv = Invoice::query()->create([
@@ -99,6 +101,7 @@ class AutomaticInvoiceDraftService
                     $inv->services()->sync($serviceIds);
                     $created++;
                     $codesOut[] = $code;
+                    $sumDraftTotals += (float) $total;
                 });
             } catch (\Throwable $e) {
                 report($e);
@@ -123,7 +126,7 @@ class AutomaticInvoiceDraftService
             ActivityLogger::log(
                 null,
                 'factura_auto_borrador',
-                "Sistema: generó {$created} borrador(es) automático(s) para periodo {$month}/{$year}."
+                "Sistema: generó {$created} borrador(es) automático(s) para periodo {$month}/{$year}. Suma de totales de esos borradores: ".ActivityAmountNarrative::cop($sumDraftTotals).'.'
             );
         }
 

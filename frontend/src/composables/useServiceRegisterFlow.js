@@ -15,10 +15,16 @@ import { isLineDescriptionStillTemplate } from '@/utils/serviceLineDescriptionTe
  * @param {{
  *   isEmpleadoRegistro: import('vue').ComputedRef<boolean>,
  *   onAdminAfterCreate: (created: { id: number|string, code?: string }) => void | Promise<void>,
+ *   onEmpleadoAfterCreate?: (created: { id: number|string, code?: string }) => void | Promise<void>,
  *   panelOpenRef?: import('vue').Ref<boolean> | null,
  * }} opts
  */
-export function useServiceRegisterFlow({ isEmpleadoRegistro, onAdminAfterCreate, panelOpenRef = null }) {
+export function useServiceRegisterFlow({
+  isEmpleadoRegistro,
+  onAdminAfterCreate,
+  onEmpleadoAfterCreate,
+  panelOpenRef = null,
+}) {
   const uiDialog = useUiDialogStore()
 
   const companies = ref([])
@@ -289,8 +295,12 @@ export function useServiceRegisterFlow({ isEmpleadoRegistro, onAdminAfterCreate,
 
       if (isEmpleadoRegistro.value) {
         showToast('Servicio guardado')
-        lastCreated.value = { id: created.id, code: created.code }
-        resetFormToDefaults()
+        if (typeof onEmpleadoAfterCreate === 'function') {
+          await onEmpleadoAfterCreate(created)
+        } else {
+          lastCreated.value = { id: created.id, code: created.code }
+          resetFormToDefaults()
+        }
       } else {
         await onAdminAfterCreate(created)
       }

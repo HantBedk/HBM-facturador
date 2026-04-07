@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Company;
+use App\Models\Service;
 use App\Models\ServiceCatalog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -13,7 +14,7 @@ class QuickClientServiceTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_crea_servicio_con_cliente_puntual_y_reutiliza_misma_empresa_por_telefono(): void
+    public function test_crea_servicio_sin_fila_en_companies_y_reutiliza_mismo_telefono(): void
     {
         $cat = ServiceCatalog::query()->create([
             'name' => 'Prueba cat',
@@ -42,12 +43,13 @@ class QuickClientServiceTest extends TestCase
             ],
         ]);
         $r1->assertCreated();
-        $cid = (int) $r1->json('data.company_id');
-        $this->assertGreaterThan(0, $cid);
+        $this->assertNull($r1->json('data.company_id'));
 
-        $company = Company::query()->findOrFail($cid);
-        $this->assertTrue($company->es_cliente_puntual);
-        $this->assertSame('3001234567', $company->telefono_normalizado);
+        $this->assertSame(0, Company::query()->where('es_cliente_puntual', true)->count());
+
+        $s1 = Service::query()->findOrFail((int) $r1->json('data.id'));
+        $this->assertNull($s1->company_id);
+        $this->assertSame('3001234567', $s1->contact_phone_key);
 
         $r2 = $this->postJson('/api/services', [
             'quick_client' => [
@@ -66,9 +68,12 @@ class QuickClientServiceTest extends TestCase
             ],
         ]);
         $r2->assertCreated();
-        $this->assertSame($cid, (int) $r2->json('data.company_id'));
+        $this->assertNull($r2->json('data.company_id'));
 
-        $this->assertSame(1, Company::query()->where('es_cliente_puntual', true)->count());
+        $s2 = Service::query()->findOrFail((int) $r2->json('data.id'));
+        $this->assertSame($s1->contact_phone_key, $s2->contact_phone_key);
+
+        $this->assertSame(0, Company::query()->where('es_cliente_puntual', true)->count());
     }
 
     public function test_no_permite_company_id_junto_a_quick_client(): void

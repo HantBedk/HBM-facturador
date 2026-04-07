@@ -105,7 +105,7 @@ function onCompanySelectChange(ev) {
         <option :value="QUICK_CLIENT_OPTION">— Cliente puntual (no está en la lista) —</option>
       </select>
       <small v-if="fieldErrors.company_id" class="err">{{ fieldErrors.company_id[0] }}</small>
-      <small v-if="inner.use_quick_client" class="hint">Mismo teléfono agrupa servicios para facturar.</small>
+      <small v-if="inner.use_quick_client" class="hint">Mismo teléfono agrupa servicios al facturar; no se guarda como empresa.</small>
     </label>
 
     <label v-if="!inner.use_quick_client" class="field">
