@@ -20,6 +20,8 @@ const loading = ref(false)
 const error = ref('')
 const technicianPaidSaving = ref(false)
 const technicianPaidError = ref('')
+/** Fecha del abono registrado (Y-m-d); por defecto hoy al abrir sin pago previo. */
+const technicianPaidDateInput = ref('')
 
 const svcItemsSource = computed(() => svc.value?.items || [])
 const {
@@ -76,10 +78,14 @@ watch(
       svc.value = null
       error.value = ''
       technicianPaidError.value = ''
+      technicianPaidDateInput.value = ''
       return
     }
     if (id == null || id === '') return
     await reload()
+    if (svc.value && !svc.value.technician_paid_at) {
+      technicianPaidDateInput.value = todayYmd()
+    }
   }
 )
 
@@ -104,7 +110,8 @@ async function markTechnicianPaidToday() {
   technicianPaidError.value = ''
   technicianPaidSaving.value = true
   try {
-    await patchServiceTechnicianPaid(id, { technician_paid_at: todayYmd() })
+    const ymd = (technicianPaidDateInput.value || todayYmd()).trim() || todayYmd()
+    await patchServiceTechnicianPaid(id, { technician_paid_at: ymd })
     await reload()
     emit('changed')
   } catch (e) {
@@ -249,6 +256,10 @@ defineExpose({ reload })
                 Registrado como pagado: {{ formatDate(svc.technician_paid_at) }}
               </p>
               <p v-if="technicianPaidError" class="banner err">{{ technicianPaidError }}</p>
+              <div v-if="!svc.technician_paid_at" class="paid-date-field">
+                <label class="lbl">Fecha del abono registrado</label>
+                <input v-model="technicianPaidDateInput" type="date" class="input input--date" />
+              </div>
               <div class="paid-actions">
                 <button
                   v-if="!svc.technician_paid_at"
@@ -257,7 +268,7 @@ defineExpose({ reload })
                   :disabled="technicianPaidSaving"
                   @click="markTechnicianPaidToday"
                 >
-                  {{ technicianPaidSaving ? 'Guardando…' : 'Registrar pago (hoy)' }}
+                  {{ technicianPaidSaving ? 'Guardando…' : 'Registrar pago al técnico' }}
                 </button>
                 <button
                   v-else
@@ -415,6 +426,25 @@ defineExpose({ reload })
   padding: 0.65rem 1rem;
   border-bottom: 1px solid rgba(148, 163, 184, 0.15);
   flex-shrink: 0;
+}
+
+.paid-date-field {
+  margin-top: 0.65rem;
+}
+
+.paid-date-field .lbl {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
+.input--date {
+  max-width: 11rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(2, 6, 23, 0.35);
+  color: #f8fafc;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
 }
 
 .paid-actions {

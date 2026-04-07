@@ -41,6 +41,9 @@ class PanelNotification extends Model
     /** Pago registrado en una factura donde el técnico tiene servicios. */
     public const TYPE_EMP_PAGO_FACTURA = 'emp_pago_factura';
 
+    /** Admin registró en sistema el abono de referencia al técnico por un servicio (`technician_paid_at`). */
+    public const TYPE_EMP_ABONO_TECNICO_REGISTRADO = 'emp_abono_tecnico_registrado';
+
     /** Admin borró datos de pago del técnico (p. ej. fallo al abonar). */
     public const TYPE_EMP_DATOS_PAGO_REQUIEREN_ACTUALIZACION = 'emp_datos_pago_actualizar';
 
@@ -70,6 +73,7 @@ class PanelNotification extends Model
             self::TYPE_EMP_CORREO_APROBADO,
             self::TYPE_EMP_CORREO_RECHAZADO,
             self::TYPE_EMP_PAGO_FACTURA,
+            self::TYPE_EMP_ABONO_TECNICO_REGISTRADO,
             self::TYPE_EMP_DATOS_PAGO_REQUIEREN_ACTUALIZACION,
             self::TYPE_EMP_SERVICIO_MODIFICADO_ADMIN,
             self::TYPE_EMP_SERVICIO_ELIMINADO_ADMIN,
@@ -87,7 +91,8 @@ class PanelNotification extends Model
             self::TYPE_EMP_SERVICIO_MODIFICADO_ADMIN,
             self::TYPE_EMP_SERVICIO_ELIMINADO_ADMIN,
             self::TYPE_EMP_SERVICIO_FACTURA_APROBADA,
-            self::TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR => 'servicios',
+            self::TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR,
+            self::TYPE_EMP_ABONO_TECNICO_REGISTRADO => 'servicios',
             self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
             self::TYPE_EMAIL_CHANGE_REQUEST => 'empleados',
             default => 'facturas',

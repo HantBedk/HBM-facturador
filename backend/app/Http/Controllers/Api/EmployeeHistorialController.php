@@ -123,6 +123,8 @@ class EmployeeHistorialController extends Controller
             ->values()
             ->all();
 
+        $technicianDebt = $this->technicianDebtGlobal($employee);
+
         return [
             'employee' => [
                 'id' => $employee->id,
@@ -153,7 +155,38 @@ class EmployeeHistorialController extends Controller
                 'busiest_day' => $busiestDay,
             ],
             'services' => $services,
+            /** Referencia de abonos pendientes (sin `technician_paid_at`), todos los períodos. */
+            'technician_debt' => $technicianDebt,
             'generated_at' => Carbon::now($tz)->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array{pending_services_count: int, pending_total: string}
+     */
+    private function technicianDebtGlobal(User $employee): array
+    {
+        $rows = Service::query()
+            ->visibles()
+            ->where('user_id', $employee->id)
+            ->whereNull('technician_paid_at')
+            ->withSum('items', 'technician_line_amount')
+            ->withCount('items')
+            ->get();
+
+        $sum = 0.0;
+        $count = 0;
+        foreach ($rows as $s) {
+            $v = $s->technicianReferenceTotalValue();
+            if ($v > 0.00001) {
+                $sum += $v;
+                $count++;
+            }
+        }
+
+        return [
+            'pending_services_count' => $count,
+            'pending_total' => number_format($sum, 2, '.', ''),
         ];
     }
 

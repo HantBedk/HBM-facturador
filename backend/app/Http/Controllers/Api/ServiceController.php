@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Services\PanelNotificationDispatcher;
 use App\Services\QuickClientCompanyResolver;
+use App\Services\TechnicianAbonoNotifier;
 use App\Services\ServiceCodeGenerator;
 use App\Support\CatalogPricing;
 use App\Support\DecimalMath;
@@ -443,6 +444,14 @@ class ServiceController extends Controller
             ? Carbon::parse($data['technician_paid_at'], config('app.timezone'))->startOfDay()
             : null;
         $service->save();
+
+        $service->refresh();
+        $service->loadSum('items', 'technician_line_amount');
+        $service->loadCount('items');
+
+        if ($service->technician_paid_at !== null) {
+            app(TechnicianAbonoNotifier::class)->notifyRegisteredAbono($service, $request->user());
+        }
 
         $service->loadCount('invoices');
         $service->load(['company', 'user', 'photos', 'catalog:id,name', 'items.catalogSuggestion']);

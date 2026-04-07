@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
+use App\Models\Service;
 use App\Models\User;
 use App\Support\Pagination;
 use Illuminate\Http\JsonResponse;
@@ -74,9 +75,72 @@ class AdminUserController extends Controller
             $q->orderBy('nombre')->orderBy('id');
         }
 
-        return UserResource::collection(
-            $q->paginate(Pagination::perPage($request))->withQueryString()
+        $paginator = $q->paginate(Pagination::perPage($request))->withQueryString();
+
+        $empleadoIds = $paginator->getCollection()
+            ->filter(fn (User $u) => $u->rol === User::ROL_EMPLEADO)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values()
+            ->all();
+
+        // Importante: no usar propiedad estática en UserResource + finally: la serialización JSON ocurre
+        // después del return y el finally ya había dejado el mapa en null. Los atributos de la petición
+        // viven hasta enviar la respuesta.
+        $request->attributes->set(
+            'admin_users_technician_debt',
+            $this->technicianDebtSummariesForUserIds($empleadoIds)
         );
+
+        return UserResource::collection($paginator);
+    }
+
+    /**
+     * @param  list<int>  $userIds
+     * @return array<int, array{technician_debt_pending_total: string, technician_debt_pending_services: int}>
+     */
+    private function technicianDebtSummariesForUserIds(array $userIds): array
+    {
+        $out = [];
+        foreach ($userIds as $uid) {
+            $out[$uid] = [
+                'technician_debt_pending_total' => '0.00',
+                'technician_debt_pending_services' => 0,
+            ];
+        }
+        if ($userIds === []) {
+            return $out;
+        }
+
+        $rows = Service::query()
+            ->visibles()
+            ->whereNull('technician_paid_at')
+            ->whereIn('user_id', $userIds)
+            ->withSum('items', 'technician_line_amount')
+            ->withCount('items')
+            ->get();
+
+        $sums = array_fill_keys($userIds, 0.0);
+        $counts = array_fill_keys($userIds, 0);
+
+        foreach ($rows as $s) {
+            $uid = (int) $s->user_id;
+            $v = $s->technicianReferenceTotalValue();
+            if ($v <= 0.00001) {
+                continue;
+            }
+            $sums[$uid] = ($sums[$uid] ?? 0) + $v;
+            $counts[$uid] = ($counts[$uid] ?? 0) + 1;
+        }
+
+        foreach ($userIds as $uid) {
+            $out[$uid] = [
+                'technician_debt_pending_total' => number_format($sums[$uid], 2, '.', ''),
+                'technician_debt_pending_services' => $counts[$uid],
+            ];
+        }
+
+        return $out;
     }
 
     public function store(Request $request): JsonResponse

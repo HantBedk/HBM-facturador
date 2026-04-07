@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\AdminTechnicianCatalogPricingController;
 use App\Http\Controllers\Api\AdminCorreoSolicitudController;
 use App\Http\Controllers\Api\AdminEmpleadoNotificacionSettingsController;
 use App\Http\Controllers\Api\AdminEmpleadoPerfilController;
+use App\Http\Controllers\Api\AdminEmpleadoTechnicianPaymentController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CompanyController;
@@ -114,6 +115,10 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
 
     Route::get('/empleados', [UserController::class, 'empleadosActivos'])->middleware('role:admin,super_admin');
     Route::get('/admin/empleados/{user}/historial', [EmployeeHistorialController::class, 'forUser'])
+        ->middleware('role:admin,super_admin');
+    Route::get('/admin/empleados/{user}/technician-pending-services', [AdminEmpleadoTechnicianPaymentController::class, 'pendingServices'])
+        ->middleware('role:admin,super_admin');
+    Route::post('/admin/empleados/{user}/technician-pay', [AdminEmpleadoTechnicianPaymentController::class, 'batchPay'])
         ->middleware('role:admin,super_admin');
 
     Route::get('/admin/dashboard', [AdminDashboardController::class, 'index'])->middleware('role:admin,super_admin');

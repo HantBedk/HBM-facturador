@@ -110,6 +110,7 @@ class AdminExportController extends Controller
     {
         $request->validate([
             'company_id' => ['sometimes', 'nullable', 'integer', 'exists:companies,id'],
+            'company_kind' => ['sometimes', 'nullable', 'string', 'in:registered,quick'],
             'status' => ['sometimes', 'nullable', 'string', 'max:32'],
             'period_year' => ['sometimes', 'nullable', 'integer', 'min:2000', 'max:2100'],
             'period_month' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:12'],
@@ -119,6 +120,12 @@ class AdminExportController extends Controller
         $q = Invoice::query()
             ->with('company:id,nombre,nit')
             ->withSum('payments', 'amount');
+
+        if ($request->string('company_kind')->toString() === 'quick') {
+            $q->whereHas('company', fn ($c) => $c->where('es_cliente_puntual', true));
+        } elseif ($request->string('company_kind')->toString() === 'registered') {
+            $q->whereHas('company', fn ($c) => $c->where('es_cliente_puntual', false));
+        }
 
         if ($request->filled('company_id')) {
             $q->where('company_id', $request->integer('company_id'));

@@ -18,6 +18,11 @@ import { useUiDialogStore } from '@/stores/uiDialog'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import { tableAriaSort, tableSortIndicator } from '@/utils/tableSort.js'
 
+/** Todas | solo empresas registradas | solo clientes puntuales (misma semántica que facturas). */
+const DIRECTORY_TAB_ALL = 'all'
+const DIRECTORY_TAB_REGISTERED = 'registered'
+const DIRECTORY_TAB_QUICK = 'quick'
+
 const uiDialog = useUiDialogStore()
 
 const rows = ref([])
@@ -25,6 +30,9 @@ const deletingId = ref(null)
 const loading = ref(false)
 const error = ref('')
 const search = ref('')
+
+/** Vista del directorio: por defecto empresas registradas (sin mezclar con puntuales). */
+const directoryTab = ref(DIRECTORY_TAB_REGISTERED)
 
 const modalOpen = ref(false)
 const modalMode = ref('create')
@@ -137,6 +145,12 @@ const {
   },
   { initialKey: 'nombre', initialDir: 'asc' }
 )
+
+const directoryPageTitle = computed(() => {
+  if (directoryTab.value === DIRECTORY_TAB_QUICK) return 'Clientes puntuales'
+  if (directoryTab.value === DIRECTORY_TAB_REGISTERED) return 'Empresas registradas'
+  return 'Todas las empresas y clientes'
+})
 
 const MONTH_NAMES = [
   'Enero',
@@ -618,13 +632,20 @@ function onCompanyPanelKeydown(ev) {
   closeCompanyPanel()
 }
 
+function directoryTabToCompanyKind(tab) {
+  if (tab === DIRECTORY_TAB_REGISTERED) return 'registered'
+  if (tab === DIRECTORY_TAB_QUICK) return 'quick'
+  return undefined
+}
+
 async function load() {
   error.value = ''
   loading.value = true
   try {
-    rows.value = await fetchAdminCompanies({
-      q: search.value,
-    })
+    const params = { q: search.value }
+    const kind = directoryTabToCompanyKind(directoryTab.value)
+    if (kind) params.company_kind = kind
+    rows.value = await fetchAdminCompanies(params)
   } catch (e) {
     error.value = e.data?.message || e.message || 'No se pudieron cargar las empresas.'
     rows.value = []
@@ -650,6 +671,17 @@ watch(
     searchTimer = setTimeout(() => load(), 320)
   }
 )
+
+watch(directoryTab, () => {
+  const row = companyPanelCompany.value
+  if (row && directoryTab.value === DIRECTORY_TAB_REGISTERED && row.es_cliente_puntual) {
+    closeCompanyPanel()
+  }
+  if (row && directoryTab.value === DIRECTORY_TAB_QUICK && !row.es_cliente_puntual) {
+    closeCompanyPanel()
+  }
+  load()
+})
 
 function openCreate() {
   modalMode.value = 'create'
@@ -789,7 +821,7 @@ async function submitDeleteCompanyModal() {
     <header class="head">
       <div class="head-main">
         <div class="head-title-row">
-          <h1>Empresas</h1>
+          <h1>{{ directoryPageTitle }}</h1>
           <button type="button" class="btn primary" @click="openCreate">+ Nueva empresa</button>
         </div>
         <p class="lede">
@@ -802,6 +834,39 @@ async function submitDeleteCompanyModal() {
         </p>
       </div>
     </header>
+
+    <div class="list-tabs card" role="tablist" aria-label="Tipo de cliente en el directorio">
+      <button
+        type="button"
+        role="tab"
+        class="list-tab"
+        :aria-selected="directoryTab === DIRECTORY_TAB_ALL"
+        :class="{ 'list-tab--on': directoryTab === DIRECTORY_TAB_ALL }"
+        @click="directoryTab = DIRECTORY_TAB_ALL"
+      >
+        Todas
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="list-tab"
+        :aria-selected="directoryTab === DIRECTORY_TAB_REGISTERED"
+        :class="{ 'list-tab--on': directoryTab === DIRECTORY_TAB_REGISTERED }"
+        @click="directoryTab = DIRECTORY_TAB_REGISTERED"
+      >
+        Empresas registradas
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="list-tab"
+        :aria-selected="directoryTab === DIRECTORY_TAB_QUICK"
+        :class="{ 'list-tab--on': directoryTab === DIRECTORY_TAB_QUICK }"
+        @click="directoryTab = DIRECTORY_TAB_QUICK"
+      >
+        Clientes puntuales
+      </button>
+    </div>
 
     <div class="toolbar card">
       <label class="grow">
@@ -1576,6 +1641,35 @@ h1 {
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: rgba(15, 23, 42, 0.55);
   margin-bottom: 1rem;
+}
+
+.list-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.list-tab {
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(2, 6, 23, 0.35);
+  color: #cbd5e1;
+  padding: 0.4rem 0.85rem;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.list-tab:hover {
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #e2e8f0;
+}
+
+.list-tab--on {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.12);
+  color: #e0f2fe;
 }
 
 .toolbar {

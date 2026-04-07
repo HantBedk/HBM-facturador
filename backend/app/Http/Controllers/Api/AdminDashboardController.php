@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\Service;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -19,7 +20,11 @@ class AdminDashboardController extends Controller
         $year = (int) $now->year;
         $month = (int) $now->month;
 
-        $metrics = array_merge($this->buildMetrics($year, $month), $this->technicianCashflowMetrics($year, $month));
+        $metrics = array_merge(
+            $this->buildMetrics($year, $month),
+            $this->technicianCashflowMetrics($year, $month),
+            ['technician_unpaid_by_employee' => $this->technicianUnpaidByEmployee()]
+        );
         $invoiceStatusCounts = $this->invoiceStatusCounts();
         $recent = [
             'services' => $this->recentServices(),
@@ -100,6 +105,54 @@ class AdminDashboardController extends Controller
             'technician_payouts_month' => number_format($payoutSum, 2, '.', ''),
             'net_collected_after_technician_payouts' => number_format($net, 2, '.', ''),
         ];
+    }
+
+    /**
+     * Suma de importes de referencia técnico pendientes (sin `technician_paid_at`), agrupada por técnico.
+     *
+     * @return list<array{user_id: int, nombre: string, services_count: int, pending_total: string}>
+     */
+    private function technicianUnpaidByEmployee(): array
+    {
+        $rows = Service::query()
+            ->visibles()
+            ->whereNull('technician_paid_at')
+            ->whereHas('user', fn ($q) => $q->where('rol', User::ROL_EMPLEADO))
+            ->with(['user:id,nombre'])
+            ->withSum('items', 'technician_line_amount')
+            ->withCount('items')
+            ->get();
+
+        $byUser = [];
+        foreach ($rows as $s) {
+            $uid = (int) $s->user_id;
+            if ($uid === 0) {
+                continue;
+            }
+            $v = $s->technicianReferenceTotalValue();
+            if ($v <= 0.00001) {
+                continue;
+            }
+            if (! isset($byUser[$uid])) {
+                $byUser[$uid] = [
+                    'user_id' => $uid,
+                    'nombre' => $s->user?->nombre ?? '—',
+                    'services_count' => 0,
+                    'pending_total' => 0.0,
+                ];
+            }
+            $byUser[$uid]['services_count']++;
+            $byUser[$uid]['pending_total'] += $v;
+        }
+
+        $list = array_values($byUser);
+        usort($list, fn ($a, $b) => $b['pending_total'] <=> $a['pending_total']);
+        foreach ($list as &$row) {
+            $row['pending_total'] = number_format($row['pending_total'], 2, '.', '');
+        }
+        unset($row);
+
+        return $list;
     }
 
     /**

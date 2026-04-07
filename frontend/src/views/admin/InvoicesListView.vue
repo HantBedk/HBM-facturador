@@ -33,6 +33,19 @@ const filters = ref({
 /** Todas | solo empresas registradas | solo clientes puntuales (servicios sin alta). */
 const listTab = ref('all')
 
+const companiesForFilter = computed(() => {
+  const list = companies.value || []
+  if (listTab.value === 'registered') return list.filter((c) => !c.es_cliente_puntual)
+  if (listTab.value === 'quick') return list.filter((c) => c.es_cliente_puntual)
+  return list
+})
+
+const companyFilterLabel = computed(() => {
+  if (listTab.value === 'registered') return 'Empresa'
+  if (listTab.value === 'quick') return 'Cliente puntual'
+  return 'Empresa / cliente'
+})
+
 const invSortKey = ref('period')
 const invSortDir = ref('desc')
 const INV_SORT_FIRST = {
@@ -138,6 +151,10 @@ onMounted(async () => {
 
 watch(listTab, () => {
   filters.value.page = 1
+  const sel = filters.value.company_id
+  if (sel && !companiesForFilter.value.some((c) => String(c.id) === String(sel))) {
+    filters.value.company_id = ''
+  }
   load()
 })
 
@@ -373,6 +390,8 @@ async function exportInvoicesCsv() {
   exportBusy.value = true
   try {
     const params = {}
+    if (listTab.value === 'registered') params.company_kind = 'registered'
+    if (listTab.value === 'quick') params.company_kind = 'quick'
     if (filters.value.company_id) params.company_id = filters.value.company_id
     if (filters.value.status) params.status = filters.value.status
     if (filters.value.period_year) params.period_year = filters.value.period_year
@@ -457,10 +476,10 @@ async function exportInvoicesCsv() {
         />
       </label>
       <label>
-        <span>Empresa</span>
+        <span>{{ companyFilterLabel }}</span>
         <select v-model="filters.company_id" class="input">
           <option value="">Todas</option>
-          <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
+          <option v-for="c in companiesForFilter" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
         </select>
       </label>
       <label>

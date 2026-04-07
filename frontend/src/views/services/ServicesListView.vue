@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import AdminServiceDetailPanel from '@/components/admin/AdminServiceDetailPanel.vue'
+import AdminServiceRegisterPanel from '@/components/admin/AdminServiceRegisterPanel.vue'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
 import { downloadAdminExportCsv } from '@/services/invoicesApi.js'
@@ -29,6 +30,7 @@ const deleteInputRef = ref(null)
 
 const detailPanelOpen = ref(false)
 const detailServiceId = ref(null)
+const registerPanelOpen = ref(false)
 
 function openDetailPanel(row) {
   detailServiceId.value = row.id
@@ -145,6 +147,11 @@ function onGlobalEscape(ev) {
   if (deleteModalOpen.value) {
     ev.preventDefault()
     closeDeleteModal()
+    return
+  }
+  if (isAdmin.value && registerPanelOpen.value) {
+    ev.preventDefault()
+    registerPanelOpen.value = false
     return
   }
   if (isAdmin.value && detailPanelOpen.value) {
@@ -357,7 +364,10 @@ async function exportServicesCsv() {
         >
           {{ exportBusy ? 'Exportando…' : 'Exportar CSV (Excel)' }}
         </button>
-        <RouterLink class="btn primary" :to="nuevoServicioTo">+ Nuevo servicio</RouterLink>
+        <button v-if="isAdmin" type="button" class="btn primary" @click="registerPanelOpen = true">
+          + Nuevo servicio
+        </button>
+        <RouterLink v-else class="btn primary" :to="nuevoServicioTo">+ Nuevo servicio</RouterLink>
       </div>
     </header>
 
@@ -622,6 +632,14 @@ async function exportServicesCsv() {
         </div>
       </div>
     </Teleport>
+
+    <AdminServiceRegisterPanel
+      v-if="isAdmin"
+      :open="registerPanelOpen"
+      :overlay-z-index="96"
+      @close="registerPanelOpen = false"
+      @created="load"
+    />
 
     <AdminServiceDetailPanel
       v-if="isAdmin"

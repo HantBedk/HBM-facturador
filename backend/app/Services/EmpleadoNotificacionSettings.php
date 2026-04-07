@@ -102,6 +102,7 @@ class EmpleadoNotificacionSettings
             PanelNotification::TYPE_EMP_CORREO_APROBADO => 'Correo: solicitud aprobada',
             PanelNotification::TYPE_EMP_CORREO_RECHAZADO => 'Correo: solicitud rechazada',
             PanelNotification::TYPE_EMP_PAGO_FACTURA => 'Pagos registrados en facturas (donde participa el técnico)',
+            PanelNotification::TYPE_EMP_ABONO_TECNICO_REGISTRADO => 'Abono de referencia al técnico registrado por administración (por servicio)',
             PanelNotification::TYPE_EMP_DATOS_PAGO_REQUIEREN_ACTUALIZACION => 'Aviso al borrar datos de pago desde administración',
             PanelNotification::TYPE_EMP_SERVICIO_MODIFICADO_ADMIN => 'Servicio modificado por administración',
             PanelNotification::TYPE_EMP_SERVICIO_ELIMINADO_ADMIN => 'Servicio rechazado o eliminado por administración',

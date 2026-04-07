@@ -36,6 +36,8 @@ const employee = computed(() => payload.value?.employee)
 const period = computed(() => payload.value?.period)
 const summary = computed(() => payload.value?.summary)
 const services = computed(() => payload.value?.services || [])
+/** Pendiente de abono de referencia (todos los períodos); solo admin en historial. */
+const technicianDebt = computed(() => payload.value?.technician_debt)
 
 const {
   sortedRows: sortedHistorialServices,
@@ -405,6 +407,34 @@ function serviceTypeClass(tipo) {
           </div>
         </div>
 
+        <div
+          v-if="isAdmin && technicianDebt && Number(technicianDebt.pending_services_count) > 0"
+          class="panel debt-ref-panel"
+        >
+          <h2 class="debt-ref-title">Pendiente de abono (referencia técnico)</h2>
+          <p class="debt-ref-lede muted">
+            Suma de importes de referencia sin registrar pago en sistema (cualquier fecha de servicio). Marque el pago en el
+            detalle de cada servicio.
+          </p>
+          <div class="debt-ref-row">
+            <div>
+              <span class="debt-ref-k">Servicios con saldo ref.</span>
+              <p class="debt-ref-v">{{ technicianDebt.pending_services_count }}</p>
+            </div>
+            <div>
+              <span class="debt-ref-k">Total ref. pendiente</span>
+              <p class="debt-ref-v">{{ formatMoney(technicianDebt.pending_total) }}</p>
+            </div>
+            <RouterLink
+              v-if="employee?.id"
+              class="debt-ref-link"
+              :to="{ path: '/admin/servicios', query: { user_id: String(employee.id) } }"
+            >
+              Ver servicios del técnico →
+            </RouterLink>
+          </div>
+        </div>
+
         <div class="kpi-strip">
           <article class="kpi-card">
             <h3 class="kpi-lbl">Servicios</h3>
@@ -570,6 +600,61 @@ function serviceTypeClass(tipo) {
 
 .muted {
   color: #94a3b8;
+}
+
+.debt-ref-panel {
+  margin-bottom: 1rem;
+  padding: 1rem 1.15rem;
+  border-color: rgba(251, 191, 36, 0.35);
+  background: rgba(30, 41, 59, 0.95);
+}
+
+.debt-ref-title {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #fde68a;
+}
+
+.debt-ref-lede {
+  margin: 0 0 0.85rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.debt-ref-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem 1.5rem;
+}
+
+.debt-ref-k {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+  margin-bottom: 0.2rem;
+}
+
+.debt-ref-v {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.debt-ref-link {
+  margin-left: auto;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #7dd3fc;
+  text-decoration: none;
+}
+
+.debt-ref-link:hover {
+  text-decoration: underline;
 }
 
 .panel {

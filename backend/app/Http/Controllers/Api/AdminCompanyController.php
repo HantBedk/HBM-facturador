@@ -39,6 +39,13 @@ class AdminCompanyController extends Controller
             $q->where('estado', $request->string('estado')->toString());
         }
 
+        $kind = $request->query('company_kind');
+        if ($kind === 'quick') {
+            $q->where('es_cliente_puntual', true);
+        } elseif ($kind === 'registered') {
+            $q->where('es_cliente_puntual', false);
+        }
+
         return CompanyResource::collection($q->get());
     }
 
