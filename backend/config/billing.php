@@ -27,8 +27,8 @@ return [
         ))
     ))),
 
-    /** Ruta relativa a `public/` (ej. `img/logo.png`) o ruta absoluta legible por PHP. */
-    'logo_path' => env('BILLING_LOGO_PATH', ''),
+    /** Ruta relativa a `public/` (por defecto `logo-HBM.png` en la raíz de `public/`). */
+    'logo_path' => env('BILLING_LOGO_PATH', 'logo-HBM.png'),
 
     'footer_message' => env('BILLING_FOOTER_MESSAGE', 'Gracias por su confianza.'),
 

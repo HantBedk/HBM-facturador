@@ -34,20 +34,25 @@
         .head-main td { vertical-align: top; padding: 0 6px 0 0; }
         .head-main td:last-child { padding-right: 0; }
 
-        .issuer-row { width: 100%; border-collapse: collapse; }
-        .issuer-row td { vertical-align: top; padding: 0; }
-
+        .head-center { text-align: center; vertical-align: top; }
         .logo-ph {
-            width: 52px;
-            height: 52px;
+            width: 56px;
+            height: 56px;
             background: #cbd5e1;
             border-radius: 4px;
-            display: inline-block;
+            display: block;
+            margin: 0 auto 8px;
         }
-        .logo-img { max-height: 52px; max-width: 52px; border-radius: 4px; display: block; }
+        .logo-img {
+            max-height: 64px;
+            max-width: 140px;
+            border-radius: 4px;
+            display: block;
+            margin: 0 auto 8px;
+        }
 
-        .issuer-name { font-size: 14px; font-weight: bold; color: #0f172a; margin: 0 0 3px; }
-        .issuer-line { margin: 0; font-size: 8.5px; color: #334155; }
+        .issuer-name { font-size: 13px; font-weight: bold; color: #0f172a; margin: 0 0 4px; text-align: center; }
+        .issuer-line { margin: 0 0 2px; font-size: 8.5px; color: #334155; text-align: center; }
 
         .billto-box {
             background: #e0f2fe;
@@ -118,33 +123,30 @@
 
         .totals-wrap { width: 100%; margin-top: 12px; }
         .totals-wrap td { vertical-align: top; }
-        .totals-right { width: 100%; text-align: right; }
-        .totals-right .sum-table { margin-left: auto; max-width: 280px; }
+        .totals-left { width: 52%; padding-right: 10px; }
+        .totals-right { width: 48%; text-align: right; }
+        .totals-right .sum-table { margin-left: auto; width: auto; max-width: 200px; }
 
-        .sum-table { width: 100%; border-collapse: collapse; }
-        .sum-table td { padding: 4px 0; font-size: 9px; }
-        .sum-table .lbl { text-align: right; color: #475569; padding-right: 10px; }
-        .sum-table .val { text-align: right; font-weight: bold; color: #0c4a6e; }
+        .sum-table { border-collapse: collapse; }
+        .sum-table td { padding: 2px 0; font-size: 8.5px; }
+        .sum-table .lbl { text-align: right; color: #475569; padding-right: 6px; white-space: nowrap; }
+        .sum-table .val { text-align: right; font-weight: bold; color: #0c4a6e; padding-left: 4px; }
         .sum-table .grand td { padding: 0; border: none; }
         .grand-bar {
             background: #0c4a6e;
             color: #fff;
             font-weight: bold;
-            font-size: 10px;
-            padding: 8px 10px;
+            font-size: 9px;
+            padding: 6px 8px;
             text-align: right;
             border-radius: 4px;
-            margin-top: 6px;
+            margin-top: 4px;
         }
 
-        .foot-note {
-            margin-top: 12px;
-            padding-top: 8px;
-            border-top: 1px solid #e2e8f0;
-            font-size: 7.5px;
-            color: #64748b;
-        }
-        .foot-note .thanks { font-weight: bold; color: #334155; margin-bottom: 3px; }
+        .footer-side { font-size: 7.5px; color: #64748b; line-height: 1.45; }
+        .footer-side .thanks { font-weight: bold; color: #334155; margin: 0; font-size: 8px; line-height: 1.35; }
+        .footer-side .footer-terms { margin: 0; line-height: 1.55; }
+        .footer-side .thanks + .footer-terms { margin-top: 12px; }
     </style>
 </head>
 <body>
@@ -161,37 +163,6 @@
         <table class="head-main">
             <tr>
                 <td style="width: 36%;">
-                    <table class="issuer-row">
-                        <tr>
-                            <td style="width: 58px; padding-right: 8px;">
-                                @if(!empty($data['issuer']['logo_data_uri']))
-                                    <img class="logo-img" src="{{ $data['issuer']['logo_data_uri'] }}" alt="" />
-                                @else
-                                    <span class="logo-ph"></span>
-                                @endif
-                            </td>
-                            <td>
-                                <p class="issuer-name">{{ $data['issuer']['nombre'] ?? '' }}</p>
-                                @if(!empty($data['issuer']['nit']))
-                                    <p class="issuer-line">NIT: {{ $data['issuer']['nit'] }}</p>
-                                @endif
-                                @if(!empty($data['issuer']['regimen']))
-                                    <p class="issuer-line">{{ $data['issuer']['regimen'] }}</p>
-                                @endif
-                                @if(!empty($data['issuer']['direccion']))
-                                    <p class="issuer-line">{{ $data['issuer']['direccion'] }}</p>
-                                @endif
-                                @if(!empty($data['issuer']['telefono']))
-                                    <p class="issuer-line">{{ $data['issuer']['telefono'] }}</p>
-                                @endif
-                                @if(!empty($data['issuer']['correo']))
-                                    <p class="issuer-line">{{ $data['issuer']['correo'] }}</p>
-                                @endif
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-                <td style="width: 34%;">
                     <div class="billto-box">
                         <p class="billto-title">FACTURAR A:</p>
                         <p class="billto-line"><strong>Razón social:</strong> {{ $data['company']['nombre'] ?? '—' }}</p>
@@ -202,6 +173,29 @@
                         <p class="billto-line"><strong>Periodo facturado:</strong> {{ $data['invoice']['period_label_upper'] ?? '' }}</p>
                         <p class="billto-line"><strong>E-mail:</strong> {{ $data['company']['correo'] ?? '—' }}</p>
                     </div>
+                </td>
+                <td style="width: 34%;" class="head-center">
+                    @if(!empty($data['issuer']['logo_data_uri']))
+                        <img class="logo-img" src="{{ $data['issuer']['logo_data_uri'] }}" alt="" />
+                    @else
+                        <span class="logo-ph"></span>
+                    @endif
+                    <p class="issuer-name">{{ $data['issuer']['nombre'] ?? '' }}</p>
+                    @if(!empty($data['issuer']['nit']))
+                        <p class="issuer-line">NIT: {{ $data['issuer']['nit'] }}</p>
+                    @endif
+                    @if(!empty($data['issuer']['regimen']))
+                        <p class="issuer-line">{{ $data['issuer']['regimen'] }}</p>
+                    @endif
+                    @if(!empty($data['issuer']['direccion']))
+                        <p class="issuer-line">{{ $data['issuer']['direccion'] }}</p>
+                    @endif
+                    @if(!empty($data['issuer']['telefono']))
+                        <p class="issuer-line">{{ $data['issuer']['telefono'] }}</p>
+                    @endif
+                    @if(!empty($data['issuer']['correo']))
+                        <p class="issuer-line">{{ $data['issuer']['correo'] }}</p>
+                    @endif
                 </td>
                 <td style="width: 30%;" class="inv-side">
                     <p class="inv-doc-title">FACTURA</p>
@@ -289,6 +283,18 @@
 
         <table class="totals-wrap">
             <tr>
+                <td class="totals-left">
+                    @if(!empty($data['footer']['message']) || !empty($data['footer']['payment_terms']))
+                        <div class="footer-side">
+                            @if(!empty($data['footer']['message']))
+                                <p class="thanks">{{ $data['footer']['message'] }}</p>
+                            @endif
+                            @if(!empty($data['footer']['payment_terms']))
+                                <p class="footer-terms"><strong>Condiciones:</strong> {{ $data['footer']['payment_terms'] }}</p>
+                            @endif
+                        </div>
+                    @endif
+                </td>
                 <td class="totals-right">
                     <table class="sum-table">
                         <tr>
@@ -310,16 +316,6 @@
                 </td>
             </tr>
         </table>
-
-        <div class="foot-note">
-            @if(!empty($data['footer']['message']))
-                <p class="thanks">{{ $data['footer']['message'] }}</p>
-            @endif
-            @if(!empty($data['footer']['payment_terms']))
-                <p><strong>Condiciones:</strong> {{ $data['footer']['payment_terms'] }}</p>
-            @endif
-            <p>Documento generado electrónicamente. Valores en COP.</p>
-        </div>
     </div>
 </div>
 </body>
