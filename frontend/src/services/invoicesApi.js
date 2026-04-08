@@ -75,8 +75,15 @@ export function createInvoice(payload) {
 }
 
 /**
- * Venta sin alta: factura aprobada de una vez, todos los servicios del teléfono en el periodo.
- * @param {{ contact_phone_key: string, period_year: number, period_month: number }} payload
+ * Venta sin alta: factura aprobada de una vez. Sin `service_ids`, todos los del teléfono en el periodo.
+ * @param {{
+ *   contact_phone_key: string,
+ *   period_year: number,
+ *   period_month: number,
+ *   service_ids?: number[],
+ *   bill_to_nombre?: string,
+ *   bill_to_telefono?: string,
+ * }} payload
  */
 export function createWalkInInvoiceFinal(payload) {
   return api('/admin/invoices/counter-final', {

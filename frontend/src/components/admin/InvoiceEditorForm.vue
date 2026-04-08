@@ -1,15 +1,13 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import { fetchAdminCompanies } from '@/services/companiesApi.js'
 import {
   createInvoice,
-  createWalkInInvoiceFinal,
   fetchAdminInvoice,
   fetchAvailableServicesForInvoice,
   fetchAvailableWalkInServicesForInvoice,
-  fetchPendingWalkInGroups,
   updateInvoice,
 } from '@/services/invoicesApi.js'
 
@@ -40,8 +38,6 @@ const loadingServices = ref(false)
 const saving = ref(false)
 const loadError = ref('')
 const saveError = ref('')
-/** Tras emitir venta sin alta (código de verificación puede ir aquí). */
-const finalizeNotice = ref('')
 
 const companyId = ref('')
 /** Teléfono tal como lo escribe el usuario (se normaliza a dígitos para la API). */
@@ -51,10 +47,7 @@ const periodMonth = ref(new Date().getMonth() + 1)
 
 const available = ref([])
 const selectedIds = ref([])
-
-/** Grupos con servicios sin empresa aún no facturados (misma API que el listado de facturas). */
-const pendingWalkInGroups = ref([])
-const pendingWalkInPick = ref('')
+const selectAllCheckboxRef = ref(null)
 
 const {
   sortedRows: sortedAvailable,
@@ -117,12 +110,46 @@ function toggleId(id) {
   }
 }
 
-const isCounterDirectNew = computed(() => !isEdit.value && companyPickerTab.value === 'counter')
+const allAvailableSelected = computed(() => {
+  const rows = sortedAvailable.value
+  if (!rows.length) return false
+  return rows.every((r) => selectedIds.value.includes(r.id))
+})
+
+const someAvailableSelected = computed(() => {
+  const rows = sortedAvailable.value
+  if (!rows.length) return false
+  const n = rows.filter((r) => selectedIds.value.includes(r.id)).length
+  return n > 0 && n < rows.length
+})
+
+function selectAllAvailableServices() {
+  selectedIds.value = sortedAvailable.value.map((r) => r.id)
+}
+
+function clearServiceSelection() {
+  selectedIds.value = []
+}
+
+function toggleSelectAllCheckbox() {
+  if (allAvailableSelected.value) {
+    clearServiceSelection()
+  } else {
+    selectAllAvailableServices()
+  }
+}
+
+watch([allAvailableSelected, someAvailableSelected, sortedAvailable], () => {
+  nextTick(() => {
+    const el = selectAllCheckboxRef.value
+    if (el && 'indeterminate' in el) {
+      el.indeterminate = someAvailableSelected.value
+    }
+  })
+}, { flush: 'post' })
 
 const totalPreview = computed(() => {
-  const rows = isCounterDirectNew.value
-    ? sortedAvailable.value
-    : sortedAvailable.value.filter((row) => isSelected(row.id))
+  const rows = sortedAvailable.value.filter((row) => isSelected(row.id))
   let t = 0
   for (const row of rows) {
     t += Number(row.amount) || 0
@@ -139,16 +166,6 @@ function money(v) {
   const n = Number(v)
   if (Number.isNaN(n)) return '—'
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
-}
-
-function walkInPendingKey(g) {
-  return `${g.contact_phone_key}|${g.period_year}|${g.period_month}`
-}
-
-function walkInPendingOptionLabel(g) {
-  const m = MONTHS.find(([n]) => n === g.period_month)
-  const mes = m ? m[1] : String(g.period_month)
-  return `${g.client_name} · ${g.client_telefono_display} · ${mes} ${g.period_year} · ${g.services_count} serv. · ${money(g.total)}`
 }
 
 async function loadAvailable() {
@@ -195,31 +212,8 @@ watch([companyId, periodYear, periodMonth, walkInPhoneInput, companyPickerTab], 
   loadAvailable()
 })
 
-watch(companyPickerTab, () => {
-  if (skipWatch.value) return
-  companyId.value = ''
-  walkInPhoneInput.value = ''
-  available.value = []
-  selectedIds.value = []
-  pendingWalkInPick.value = ''
-})
-
-watch(pendingWalkInPick, (val) => {
-  if (skipWatch.value || !val) return
-  const g = pendingWalkInGroups.value.find((x) => walkInPendingKey(x) === val)
-  if (!g) return
-  skipWatch.value = true
-  companyPickerTab.value = 'counter'
-  walkInPhoneInput.value = g.client_telefono_display || g.contact_phone_key
-  periodYear.value = g.period_year
-  periodMonth.value = g.period_month
-  skipWatch.value = false
-  loadAvailable()
-})
-
 async function bootstrap() {
   loadError.value = ''
-  finalizeNotice.value = ''
   loading.value = true
   skipWatch.value = true
   try {
@@ -257,17 +251,11 @@ async function bootstrap() {
     companyPickerTab.value = 'registered'
     companyId.value = ''
     walkInPhoneInput.value = ''
-    pendingWalkInPick.value = ''
     periodYear.value = new Date().getFullYear()
     periodMonth.value = new Date().getMonth() + 1
     invoice.value = null
     available.value = []
     selectedIds.value = []
-    try {
-      pendingWalkInGroups.value = await fetchPendingWalkInGroups()
-    } catch {
-      pendingWalkInGroups.value = []
-    }
   }
 
   loading.value = false
@@ -282,11 +270,6 @@ watch(
   { immediate: true }
 )
 
-function goToInvoiceList() {
-  finalizeNotice.value = ''
-  router.push('/admin/facturas')
-}
-
 async function onSubmit() {
   saveError.value = ''
   if (companyPickerTab.value === 'registered' && !companyId.value) {
@@ -295,45 +278,6 @@ async function onSubmit() {
   }
   if (companyPickerTab.value === 'counter' && walkInPhoneDigits.value.length < 7) {
     saveError.value = 'Indique un teléfono con al menos 7 dígitos (venta sin alta).'
-    return
-  }
-
-  if (isCounterDirectNew.value) {
-    if (available.value.length === 0) {
-      saveError.value = 'No hay servicios pendientes de facturar para este teléfono y periodo.'
-      return
-    }
-    saving.value = true
-    try {
-      const result = await createWalkInInvoiceFinal({
-        contact_phone_key: walkInPhoneDigits.value,
-        period_year: Number(periodYear.value),
-        period_month: Number(periodMonth.value),
-      })
-      const code = result.public_verification_code
-      const notice = code
-        ? `Factura ${result.code} emitida y aprobada. Código de verificación (guárdelo; no se repetirá): ${code}`
-        : `Factura ${result.code} emitida y aprobada.`
-      finalizeNotice.value = notice
-      try {
-        pendingWalkInGroups.value = await fetchPendingWalkInGroups()
-      } catch {
-        /* ignore */
-      }
-      pendingWalkInPick.value = ''
-      if (props.embedded) {
-        emit('saved', result)
-      }
-    } catch (e) {
-      if (e.data?.errors) {
-        const first = Object.values(e.data.errors).flat()[0]
-        saveError.value = first || e.message
-      } else {
-        saveError.value = e.data?.message || e.message || 'No se pudo emitir la factura.'
-      }
-    } finally {
-      saving.value = false
-    }
     return
   }
 
@@ -387,74 +331,26 @@ async function onSubmit() {
           {{ isEdit ? (invoice?.code ? `Editar factura (${invoice.code})` : 'Editar factura') : 'Nueva factura' }}
         </h1>
         <p class="lede">
-          <strong>Empresa registrada</strong>: borrador y luego aprobación; código <strong>FAC-YYMMDD-SIGLA</strong>.
-          <strong>Venta sin alta</strong>: se facturan todos los servicios del mismo teléfono en el periodo,
-          <strong>sin borrador</strong> — factura aprobada al instante (<strong>FAC-YYMMDD-W01…</strong>).
+          <strong>Nueva factura</strong>: empresa del directorio, borrador y luego aprobación; código <strong>FAC-YYMMDD-SIGLA</strong>.
+          La emisión directa de <strong>venta sin alta</strong> (aprobada al instante) está en el listado de facturas, pendientes o vista
+          «Solo ventas sin alta».
         </p>
       </div>
     </header>
 
     <p v-else class="lede lede--embedded">
-      Empresa (borrador) o venta sin alta (emisión directa aprobada).
+      Empresa (borrador). Venta sin alta aprobada de una vez: desde el listado de facturas.
     </p>
 
-    <p v-if="finalizeNotice" class="banner ok">
-      {{ finalizeNotice }}
-      <button
-        v-if="!embedded"
-        type="button"
-        class="btn-inline"
-        @click="goToInvoiceList"
-      >
-        Ir al listado
-      </button>
-    </p>
     <p v-if="loadError && !loading" class="banner err">{{ loadError }}</p>
     <p v-if="saveError" class="banner err">{{ saveError }}</p>
 
     <p v-if="loading" class="muted">Cargando…</p>
 
     <form v-else class="card form" @submit.prevent="onSubmit">
-      <div v-if="!isEdit && pendingWalkInGroups.length" class="field field--wide pending-walk-in-pick">
-        <label>
-          <span>Elegir pendiente sin facturar</span>
-          <select v-model="pendingWalkInPick" class="input" :disabled="saving || !!finalizeNotice">
-            <option value="">— Manual: pestaña «Venta sin alta» o escriba teléfono —</option>
-            <option v-for="g in pendingWalkInGroups" :key="walkInPendingKey(g)" :value="walkInPendingKey(g)">
-              {{ walkInPendingOptionLabel(g) }}
-            </option>
-          </select>
-        </label>
-        <p class="tab-hint">Rellena teléfono y periodo según servicios ya registrados; no hace falta recordar el número.</p>
-      </div>
-
-      <div class="picker-tabs" role="tablist" aria-label="Tipo de facturación">
-        <button
-          type="button"
-          role="tab"
-          class="picker-tab"
-          :aria-selected="companyPickerTab === 'registered'"
-          :class="{ 'picker-tab--on': companyPickerTab === 'registered' }"
-          :disabled="saving"
-          @click="companyPickerTab = 'registered'"
-        >
-          Empresas registradas
-        </button>
-        <button
-          type="button"
-          role="tab"
-          class="picker-tab"
-          :aria-selected="companyPickerTab === 'counter'"
-          :class="{ 'picker-tab--on': companyPickerTab === 'counter' }"
-          :disabled="saving"
-          @click="companyPickerTab = 'counter'"
-        >
-          Venta sin alta
-        </button>
-      </div>
       <p v-if="companyPickerTab === 'counter'" class="tab-hint">
-        Mismo teléfono que al registrar cada servicio sin empresa. Se incluyen <strong>todos</strong> los servicios del periodo
-        aún sin facturar (varios técnicos si aplica). No se crea fila en el directorio de empresas.
+        Borrador <strong>venta sin alta</strong>: mismo teléfono que al registrar el servicio sin empresa. Marque las líneas a incluir;
+        al aprobar desde el listado se cerrará el flujo. Para emitir aprobada de una vez use pendientes en facturas.
       </p>
 
       <div class="grid">
@@ -494,14 +390,19 @@ async function onSubmit() {
         <div class="services-head">
           <h2>Servicios del periodo</h2>
           <p class="hint">
-            <template v-if="isCounterDirectNew">
-              Vista previa: estos servicios se incluirán enteros en la factura aprobada.
-            </template>
-            <template v-else>
-              Solo servicios visibles del periodo que aún no están en otra factura. Al editar un borrador, puede marcar líneas.
-            </template>
+            Solo servicios visibles del periodo que aún no están en otra factura. Al editar un borrador, puede marcar líneas.
           </p>
           <p v-if="loadingServices" class="muted">Cargando servicios…</p>
+          <div
+            v-if="available.length && !loadingServices"
+            class="bulk-select-row"
+            role="group"
+            aria-label="Selección masiva de servicios"
+          >
+            <button type="button" class="bulk-link" @click="selectAllAvailableServices">Seleccionar todos</button>
+            <span class="bulk-sep" aria-hidden="true">·</span>
+            <button type="button" class="bulk-link" @click="clearServiceSelection">Quitar selección</button>
+          </div>
         </div>
 
         <div v-if="!loadingServices && available.length === 0" class="muted box-empty">
@@ -512,7 +413,20 @@ async function onSubmit() {
           <table class="table">
             <thead>
               <tr>
-                <th v-if="!isCounterDirectNew" class="chk" />
+                <th class="chk">
+                  <input
+                    ref="selectAllCheckboxRef"
+                    type="checkbox"
+                    :checked="allAvailableSelected"
+                    :disabled="!sortedAvailable.length || loadingServices"
+                    :aria-label="
+                      allAvailableSelected
+                        ? 'Quitar selección de todos los servicios visibles'
+                        : 'Seleccionar todos los servicios visibles'
+                    "
+                    @change="toggleSelectAllCheckbox"
+                  />
+                </th>
                 <th scope="col" :aria-sort="availAriaSort('code')">
                   <button type="button" class="th-sort" @click="toggleAvailSort('code')">
                     Código<span class="sort-ind" aria-hidden="true">{{ availSortInd('code') }}</span>
@@ -537,7 +451,7 @@ async function onSubmit() {
             </thead>
             <tbody>
               <tr v-for="row in sortedAvailable" :key="row.id">
-                <td v-if="!isCounterDirectNew" class="chk">
+                <td class="chk">
                   <input type="checkbox" :checked="isSelected(row.id)" @change="toggleId(row.id)" />
                 </td>
                 <td class="mono">{{ row.code }}</td>
@@ -561,16 +475,10 @@ async function onSubmit() {
         <button
           type="submit"
           class="btn primary"
-          :disabled="saving || !canSubmitInvoice || !!finalizeNotice"
+          :disabled="saving || !canSubmitInvoice"
         >
           {{
-            saving
-              ? 'Procesando…'
-              : isCounterDirectNew
-                ? 'Emitir factura (aprobada)'
-                : isEdit
-                  ? 'Guardar cambios'
-                  : 'Crear borrador'
+            saving ? 'Procesando…' : isEdit ? 'Guardar cambios' : 'Crear borrador'
           }}
         </button>
       </div>
@@ -630,73 +538,11 @@ h1 {
   margin-bottom: 1rem;
 }
 
-.banner.ok {
-  padding: 0.65rem 0.85rem;
-  border-radius: 10px;
-  background: rgba(34, 197, 94, 0.12);
-  border: 1px solid rgba(34, 197, 94, 0.4);
-  color: #bbf7d0;
-  margin-bottom: 1rem;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.btn-inline {
-  margin-left: auto;
-  padding: 0.35rem 0.75rem;
-  border-radius: 8px;
-  border: 1px solid rgba(34, 197, 94, 0.5);
-  background: rgba(34, 197, 94, 0.15);
-  color: #ecfdf5;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.btn-inline:hover {
-  background: rgba(34, 197, 94, 0.25);
-}
-
 .card {
   padding: 1.25rem;
   border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: rgba(15, 23, 42, 0.55);
-}
-
-.picker-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.picker-tab {
-  border-radius: 10px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(2, 6, 23, 0.45);
-  color: #cbd5e1;
-  padding: 0.45rem 0.85rem;
-  font: inherit;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.picker-tab:hover:not(:disabled) {
-  border-color: rgba(56, 189, 248, 0.45);
-  color: #e2e8f0;
-}
-
-.picker-tab--on {
-  border-color: rgba(56, 189, 248, 0.55);
-  background: rgba(56, 189, 248, 0.12);
-  color: #e0f2fe;
-}
-
-.picker-tab:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
 }
 
 .tab-hint {
@@ -748,6 +594,42 @@ h1 {
   margin: 0 0 0.75rem;
   font-size: 0.82rem;
   color: #64748b;
+}
+
+.bulk-select-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin: 0 0 0.65rem;
+  font-size: 0.8rem;
+}
+
+.bulk-link {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: #38bdf8;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.bulk-link:hover {
+  color: #7dd3fc;
+}
+
+.bulk-link:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.bulk-sep {
+  color: #64748b;
+  user-select: none;
 }
 
 .box-empty {

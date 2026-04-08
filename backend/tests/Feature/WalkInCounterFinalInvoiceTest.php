@@ -134,4 +134,60 @@ class WalkInCounterFinalInvoiceTest extends TestCase
         $after->assertOk();
         $this->assertCount(0, $after->json('data'));
     }
+
+    public function test_counter_final_con_service_ids_emite_solo_esos_servicios(): void
+    {
+        $t1 = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
+        $t2 = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+
+        $s1 = Service::query()->create([
+            'code' => 'W-SUB-01',
+            'company_id' => null,
+            'user_id' => $t1->id,
+            'client_name' => 'Cliente Y',
+            'client_telefono' => '310 000 1122',
+            'contact_phone_key' => '3100001122',
+            'service_type' => 'Teclado',
+            'description' => 'Primer servicio con descripción suficiente para validación.',
+            'amount' => 10000.00,
+            'service_date' => '2026-04-05',
+            'status' => Service::STATUS_ACTIVO,
+        ]);
+        Service::query()->create([
+            'code' => 'W-SUB-02',
+            'company_id' => null,
+            'user_id' => $t2->id,
+            'client_name' => 'Cliente Y',
+            'client_telefono' => '3100001122',
+            'contact_phone_key' => '3100001122',
+            'service_type' => 'Cable',
+            'description' => 'Segundo servicio con descripción suficiente para validación.',
+            'amount' => 20000.00,
+            'service_date' => '2026-04-08',
+            'status' => Service::STATUS_ACTIVO,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $r = $this->postJson('/api/admin/invoices/counter-final', [
+            'contact_phone_key' => '3100001122',
+            'period_year' => 2026,
+            'period_month' => 4,
+            'service_ids' => [$s1->id],
+        ]);
+
+        $r->assertCreated()
+            ->assertJsonPath('data.total', '10000.00');
+
+        $invId = (int) $r->json('data.id');
+        $inv = Invoice::query()->with('services')->findOrFail($invId);
+        $this->assertCount(1, $inv->services);
+        $this->assertSame($s1->id, $inv->services->first()->id);
+
+        $pending = $this->getJson('/api/admin/invoices/pending-walk-in-groups');
+        $pending->assertOk();
+        $this->assertCount(1, $pending->json('data'));
+        $this->assertSame(1, $pending->json('data.0.services_count'));
+    }
 }

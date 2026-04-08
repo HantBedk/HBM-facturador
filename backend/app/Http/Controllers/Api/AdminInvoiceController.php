@@ -331,6 +331,10 @@ class AdminInvoiceController extends Controller
             'contact_phone_key' => ['required', 'string', 'max:32'],
             'period_year' => ['required', 'integer', 'min:2000', 'max:2100'],
             'period_month' => ['required', 'integer', 'min:1', 'max:12'],
+            'service_ids' => ['sometimes', 'array', 'min:1'],
+            'service_ids.*' => ['integer', 'exists:services,id'],
+            'bill_to_nombre' => ['nullable', 'string', 'max:190'],
+            'bill_to_telefono' => ['nullable', 'string', 'max:64'],
         ]);
 
         $rawKey = PhoneNormalizer::digitsKey((string) $data['contact_phone_key']);
@@ -355,15 +359,30 @@ class AdminInvoiceController extends Controller
             ->pluck('id')
             ->all();
 
-        $serviceIds = array_values(array_filter(
+        $allEligibleIds = array_values(array_filter(
             $candidates,
             fn (int $id) => ! in_array($id, $blockedIds, true)
         ));
 
-        if ($serviceIds === []) {
+        if ($allEligibleIds === []) {
             throw ValidationException::withMessages([
                 'contact_phone_key' => ['No hay servicios pendientes de facturar para este teléfono y periodo.'],
             ]);
+        }
+
+        if (! empty($data['service_ids'] ?? [])) {
+            $requested = array_values(array_unique(array_map('intval', $data['service_ids'])));
+            $allowedFlip = array_flip($allEligibleIds);
+            foreach ($requested as $rid) {
+                if (! isset($allowedFlip[$rid])) {
+                    throw ValidationException::withMessages([
+                        'service_ids' => ['Uno o más servicios no pertenecen a este pendiente o ya fueron facturados.'],
+                    ]);
+                }
+            }
+            $serviceIds = $requested;
+        } else {
+            $serviceIds = $allEligibleIds;
         }
 
         $this->assertServicesAttachable(
@@ -382,7 +401,10 @@ class AdminInvoiceController extends Controller
             ]);
         }
 
-        $invoice = DB::transaction(function () use ($data, $total, $codes, $rawKey, $serviceIds) {
+        $billNombre = trim((string) ($data['bill_to_nombre'] ?? ''));
+        $billTelefono = trim((string) ($data['bill_to_telefono'] ?? ''));
+
+        $invoice = DB::transaction(function () use ($data, $total, $codes, $serviceIds, $billNombre, $billTelefono) {
             $tz = config('app.timezone');
             $now = Carbon::now($tz);
 
@@ -396,8 +418,8 @@ class AdminInvoiceController extends Controller
             $inv = Invoice::query()->create([
                 'code' => $code,
                 'company_id' => null,
-                'bill_to_nombre' => $first->client_name,
-                'bill_to_telefono' => $first->client_telefono,
+                'bill_to_nombre' => $billNombre !== '' ? $billNombre : $first->client_name,
+                'bill_to_telefono' => $billTelefono !== '' ? $billTelefono : $first->client_telefono,
                 'bill_to_nit' => null,
                 'period_month' => $data['period_month'],
                 'period_year' => $data['period_year'],
