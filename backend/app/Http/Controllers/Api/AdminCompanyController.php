@@ -20,7 +20,7 @@ class AdminCompanyController extends Controller
 {
     public function index(Request $request): AnonymousResourceCollection
     {
-        $q = Company::query()->orderBy('nombre');
+        $q = Company::query()->orderByRaw('es_cliente_puntual asc')->orderBy('nombre');
 
         if ($request->filled('q')) {
             $raw = $request->string('q')->toString();
@@ -37,6 +37,13 @@ class AdminCompanyController extends Controller
             Company::ESTADO_INACTIVO,
         ], true)) {
             $q->where('estado', $request->string('estado')->toString());
+        }
+
+        $kind = $request->query('company_kind');
+        if ($kind === 'quick') {
+            $q->where('es_cliente_puntual', true);
+        } elseif ($kind === 'registered') {
+            $q->where('es_cliente_puntual', false);
         }
 
         return CompanyResource::collection($q->get());

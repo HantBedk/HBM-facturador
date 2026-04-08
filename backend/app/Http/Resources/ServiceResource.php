@@ -12,6 +12,9 @@ class ServiceResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $adminView = $request->user()?->isAdminEquipo() ?? false;
+        $techTotalStr = $this->technicianLineTotalAttribute();
+
         return [
             'id' => $this->id,
             'code' => $this->code,
@@ -19,14 +22,23 @@ class ServiceResource extends JsonResource
             'user_id' => $this->user_id,
             'catalog_id' => $this->catalog_id,
             'client_name' => $this->client_name,
+            'client_telefono' => $this->client_telefono,
             'service_type' => $this->service_type,
             'description' => $this->description,
-            /** Total facturable (suma de líneas que van a factura). */
-            'amount' => $this->amount,
-            /** Suma de importes de referencia del técnico por línea (menor que lo facturado si aplica margen). */
-            'technician_line_total' => $this->technicianLineTotalAttribute(),
+            /**
+             * Admin: total facturable (cliente). Técnico: solo suma de referencia propia (sin margen/incremento de empresa).
+             */
+            'amount' => $adminView ? $this->amount : $techTotalStr,
+            /** Solo administración: desglose técnico vs factura. */
+            'technician_line_total' => $this->when($adminView, $techTotalStr),
             'service_date' => $this->service_date?->format('Y-m-d'),
             'status' => $this->status,
+            'assignment_status' => $this->assignment_status,
+            'assigned_by_user_id' => $this->assigned_by_user_id,
+            'assigned_by' => $this->whenLoaded('assignedBy', fn () => $this->assignedBy ? [
+                'id' => $this->assignedBy->id,
+                'nombre' => $this->assignedBy->nombre,
+            ] : null),
             'invoiced' => isset($this->resource->invoices_count)
                 ? (int) $this->resource->invoices_count > 0
                 : ($this->resource->relationLoaded('invoices')
@@ -61,28 +73,38 @@ class ServiceResource extends JsonResource
                 'url' => Storage::disk('public')->url($p->path),
                 'sort_order' => $p->sort_order,
             ])->values()->all()),
-            'items' => $this->whenLoaded('items', fn () => $this->items->map(fn ($it) => [
-                'id' => $it->id,
-                'catalog_id' => $it->catalog_id,
-                'catalog_suggestion_id' => $it->catalog_suggestion_id,
-                'label' => $it->label,
-                'line_description' => $it->line_description,
-                /** Importe en factura (línea). */
-                'amount' => (string) $it->amount,
-                /** Importe de referencia del técnico (lo que “ve” o ingresó). */
-                'technician_line_amount' => $it->technician_line_amount !== null ? (string) $it->technician_line_amount : null,
-                'sort_order' => (int) $it->sort_order,
-                'suggestion_status' => $it->relationLoaded('catalogSuggestion') && $it->catalogSuggestion
-                    ? $it->catalogSuggestion->status
-                    : null,
-            ])->values()->all()),
+            'items' => $this->whenLoaded('items', function () use ($adminView) {
+                return $this->items->map(function ($it) use ($adminView) {
+                    $billed = (string) $it->amount;
+                    $tech = $it->technician_line_amount !== null ? (string) $it->technician_line_amount : $billed;
+
+                    $row = [
+                        'id' => $it->id,
+                        'catalog_id' => $it->catalog_id,
+                        'catalog_suggestion_id' => $it->catalog_suggestion_id,
+                        'label' => $it->label,
+                        'line_description' => $it->line_description,
+                        /** Admin: importe en factura. Técnico: solo referencia propia (sin incremento empresa). */
+                        'amount' => $adminView ? $billed : $tech,
+                        'sort_order' => (int) $it->sort_order,
+                        'suggestion_status' => $it->relationLoaded('catalogSuggestion') && $it->catalogSuggestion
+                            ? $it->catalogSuggestion->status
+                            : null,
+                    ];
+                    if ($adminView) {
+                        $row['technician_line_amount'] = $it->technician_line_amount !== null ? (string) $it->technician_line_amount : null;
+                    }
+
+                    return $row;
+                })->values()->all();
+            }),
         ];
     }
 
     private function technicianLineTotalAttribute(): string
     {
         if ($this->relationLoaded('items') && $this->items->isNotEmpty()) {
-            $s = $this->items->sum(fn ($i) => (float) $i->technician_line_amount);
+            $s = $this->items->sum(fn ($i) => (float) ($i->technician_line_amount ?? $i->amount));
 
             return number_format($s, 2, '.', '');
         }

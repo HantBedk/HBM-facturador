@@ -19,7 +19,17 @@ class Company extends Model
         'estado',
         'telefono',
         'correo',
+        /** Cliente puntual (sin alta formal); `telefono_normalizado` agrupa por teléfono. */
+        'es_cliente_puntual',
+        'telefono_normalizado',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'es_cliente_puntual' => 'boolean',
+        ];
+    }
 
     protected static function booted(): void
     {

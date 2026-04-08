@@ -23,5 +23,6 @@ function historialQueryString(period) {
  */
 export function fetchEmpleadoHistorialAdmin(userId, period) {
   const s = historialQueryString(period)
-  return api(`/admin/empleados/${userId}/historial?${s}`).then((r) => r.data)
+  // `api()` devuelve el JSON raíz; el backend no envuelve en `{ data: ... }`.
+  return api(`/admin/empleados/${userId}/historial?${s}`)
 }

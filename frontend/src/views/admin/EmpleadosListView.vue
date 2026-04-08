@@ -9,10 +9,12 @@ import {
   rejectCorreoSolicitud,
   updateUser,
 } from '@/services/usersApi.js'
+import { fetchTechnicianPendingServices, postTechnicianBatchPay } from '@/services/empleadoTechnicianPayApi.js'
 import { useAuthStore } from '@/stores/auth'
 import { useUiDialogStore } from '@/stores/uiDialog'
 import { tableAriaSort, tableSortIndicator } from '@/utils/tableSort.js'
 import AdminEmpleadoFichaPanel from '@/components/admin/AdminEmpleadoFichaPanel.vue'
+import AdminAssignServicePanel from '@/components/admin/AdminAssignServicePanel.vue'
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -35,6 +37,9 @@ const USER_SORT_FIRST = {
 }
 
 const showPassword = ref(false)
+
+const assignOpen = ref(false)
+const assignTarget = ref(null)
 
 const modalOpen = ref(false)
 const modalMode = ref('create')
@@ -68,7 +73,7 @@ const ROL_FORM_OPTIONS = computed(() => {
 
 let searchTimer = null
 
-/** Desde notificación de cambio de correo: ?usuario_id= */
+/** Desde notificación (p. ej. cambio de correo, solicitud de restablecimiento de contraseña): ?usuario_id= */
 const filterUsuarioId = computed(() => {
   const raw = route.query.usuario_id
   if (raw == null || raw === '') return null
@@ -187,6 +192,25 @@ function openEdit(row) {
 
 function closeModal() {
   modalOpen.value = false
+}
+
+function openAssignService(row) {
+  if (row.rol !== 'empleado' || row.estado !== 'activo') return
+  assignTarget.value = row
+  assignOpen.value = true
+}
+
+function closeAssignService() {
+  assignOpen.value = false
+  assignTarget.value = null
+}
+
+async function onServiceAssigned(created) {
+  closeAssignService()
+  await uiDialog.alert({
+    title: 'Servicio asignado',
+    message: `Se creó ${created?.code || 'el servicio'} para el técnico. Aparecerá en su listado como pendiente de completar.`,
+  })
 }
 
 const modalTitle = computed(() => (modalMode.value === 'create' ? 'Nuevo Empleado' : 'Editar usuario'))
@@ -313,6 +337,127 @@ const pageSummary = computed(() => {
   return `${m.from ?? 0}–${m.to ?? 0} de ${m.total}`
 })
 
+/** Suma ref. pendiente en la página actual (solo filas técnico). */
+const pageRefPendingTotal = computed(() => {
+  let sum = 0
+  for (const u of rows.value) {
+    if (u.rol !== 'empleado') continue
+    const n = Number(u.technician_debt_pending_total)
+    if (!Number.isNaN(n)) sum += n
+  }
+  return sum
+})
+
+function formatMoneyRef(v) {
+  if (v === undefined || v === null || v === '') return '—'
+  const n = Number(v)
+  if (Number.isNaN(n)) return '—'
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0,
+  }).format(n)
+}
+
+const payModalOpen = ref(false)
+const payTarget = ref(null)
+const payServices = ref([])
+const payLoading = ref(false)
+const paySaving = ref(false)
+const payError = ref('')
+const payDate = ref('')
+const selectedServiceIds = ref([])
+
+function todayYmd() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const paySelectedTotal = computed(() => {
+  const set = new Set(selectedServiceIds.value)
+  let t = 0
+  for (const s of payServices.value) {
+    if (set.has(s.id)) {
+      const n = Number(s.technician_line_total)
+      if (!Number.isNaN(n)) t += n
+    }
+  }
+  return t
+})
+
+async function openPayModal(row) {
+  if (row.rol !== 'empleado') return
+  payTarget.value = row
+  payError.value = ''
+  selectedServiceIds.value = []
+  payDate.value = todayYmd()
+  payServices.value = []
+  payModalOpen.value = true
+  payLoading.value = true
+  try {
+    const res = await fetchTechnicianPendingServices(row.id)
+    payServices.value = Array.isArray(res.data) ? res.data : []
+    if (payServices.value.length) {
+      selectedServiceIds.value = payServices.value.map((s) => s.id)
+    }
+  } catch (e) {
+    payError.value = e.data?.message || e.message || 'No se pudieron cargar los servicios.'
+    payServices.value = []
+  } finally {
+    payLoading.value = false
+  }
+}
+
+function closePayModal() {
+  payModalOpen.value = false
+  payTarget.value = null
+  payServices.value = []
+  payError.value = ''
+}
+
+function togglePaySvc(id) {
+  const i = selectedServiceIds.value.indexOf(id)
+  if (i >= 0) {
+    selectedServiceIds.value = selectedServiceIds.value.filter((x) => x !== id)
+  } else {
+    selectedServiceIds.value = [...selectedServiceIds.value, id]
+  }
+}
+
+function selectAllPaySvc() {
+  selectedServiceIds.value = payServices.value.map((s) => s.id)
+}
+
+function clearPaySvc() {
+  selectedServiceIds.value = []
+}
+
+async function submitPayModal() {
+  const row = payTarget.value
+  if (!row || paySaving.value || selectedServiceIds.value.length === 0) return
+  paySaving.value = true
+  payError.value = ''
+  try {
+    await postTechnicianBatchPay(row.id, {
+      service_ids: selectedServiceIds.value,
+      technician_paid_at: payDate.value || todayYmd(),
+    })
+    closePayModal()
+    await load()
+  } catch (e) {
+    payError.value = e.data?.message || e.message || 'No se pudo registrar el pago.'
+  } finally {
+    paySaving.value = false
+  }
+}
+
+function formatPayServiceDate(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso + 'T12:00:00')
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
 const fichaOpen = ref(false)
 const fichaRow = ref(null)
 
@@ -341,7 +486,8 @@ function onFichaUpdated() {
         </div>
         <p class="lede">
           Alta y edición de cuentas. Pulse el nombre para abrir la ficha en un panel (técnicos: contacto, documento y
-          datos de pago). Use «Historial» para métricas y servicios por mes.
+          datos de pago). La columna «Ref. pendiente» muestra el total de referencia técnico sin abono registrado; use
+          «Pagar» para elegir servicios y fechar el abono. «Historial» abre métricas y servicios por mes.
           <template v-if="isAdminNotSuper">
             Solo gestiona técnicos; las cuentas administrador las gestiona un super administrador.
           </template>
@@ -361,6 +507,11 @@ function onFichaUpdated() {
         <input v-model="search" type="search" class="input" placeholder="Nombre o correo…" />
       </label>
     </div>
+
+    <p v-if="!loading && rows.length && pageRefPendingTotal > 0" class="meta-line muted page-debt-hint">
+      Referencia técnico pendiente en esta página (suma):
+      <strong>{{ formatMoneyRef(String(pageRefPendingTotal)) }}</strong>
+    </p>
 
     <p v-if="error" class="banner err">{{ error }}</p>
 
@@ -386,6 +537,7 @@ function onFichaUpdated() {
                   Estado<span class="sort-ind" aria-hidden="true">{{ userSortInd('estado') }}</span>
                 </button>
               </th>
+              <th class="num" scope="col">Ref. pendiente</th>
               <th scope="col" :aria-sort="userAriaSort('created_at')">
                 <button type="button" class="th-sort" @click="toggleUserSort('created_at')">
                   Alta<span class="sort-ind" aria-hidden="true">{{ userSortInd('created_at') }}</span>
@@ -431,6 +583,15 @@ function onFichaUpdated() {
                   {{ u.estado === 'activo' ? 'Activo' : 'Inactivo' }}
                 </button>
               </td>
+              <td class="num cell-ref">
+                <template v-if="u.rol === 'empleado'">
+                  {{ formatMoneyRef(u.technician_debt_pending_total) }}
+                  <span v-if="(u.technician_debt_pending_services || 0) > 0" class="ref-svc-count muted">
+                    ({{ u.technician_debt_pending_services }} srv.)
+                  </span>
+                </template>
+                <template v-else>—</template>
+              </td>
               <td class="muted">{{ formatDate(u.created_at) }}</td>
               <td class="actions-col">
                 <button type="button" class="link" @click="openEdit(u)">Editar</button>
@@ -441,6 +602,22 @@ function onFichaUpdated() {
                 >
                   Historial
                 </RouterLink>
+                <button
+                  v-if="u.rol === 'empleado' && u.estado === 'activo'"
+                  type="button"
+                  class="link"
+                  @click="openAssignService(u)"
+                >
+                  Asignar servicio
+                </button>
+                <button
+                  v-if="u.rol === 'empleado' && Number(u.technician_debt_pending_total) > 0"
+                  type="button"
+                  class="link link-pay"
+                  @click="openPayModal(u)"
+                >
+                  Pagar
+                </button>
                 <template v-if="u.rol === 'empleado' && u.correo_solicitado">
                   <button type="button" class="link link-ok" @click="onApproveCorreo(u)">Aprobar correo</button>
                   <button type="button" class="link link-warn" @click="onRejectCorreo(u)">Rechazar</button>
@@ -448,7 +625,7 @@ function onFichaUpdated() {
               </td>
             </tr>
             <tr v-if="!rows.length">
-              <td colspan="5" class="empty muted">No hay resultados.</td>
+              <td colspan="6" class="empty muted">No hay resultados.</td>
             </tr>
           </tbody>
         </table>
@@ -471,6 +648,95 @@ function onFichaUpdated() {
     </div>
 
     <AdminEmpleadoFichaPanel :open="fichaOpen" :row="fichaRow" @close="closeFicha" @updated="onFichaUpdated" />
+
+    <AdminAssignServicePanel
+      :open="assignOpen"
+      :technician="assignTarget"
+      @close="closeAssignService"
+      @assigned="onServiceAssigned"
+    />
+
+    <Teleport to="body">
+      <div
+        v-if="payModalOpen"
+        class="modal-backdrop pay-modal-backdrop"
+        role="presentation"
+        @click.self="closePayModal"
+      >
+        <div class="modal card pay-modal" role="dialog" aria-modal="true" aria-labelledby="pay-modal-title">
+          <div class="modal-header">
+            <h2 id="pay-modal-title" class="modal-title">
+              Registrar abono a {{ payTarget?.nombre || 'técnico' }}
+            </h2>
+            <button type="button" class="modal-close" aria-label="Cerrar" @click="closePayModal">×</button>
+          </div>
+          <p class="muted pay-modal-lede">
+            Seleccione los servicios a los que aplica la misma fecha de abono de referencia. El técnico recibirá un aviso en
+            su panel por cada servicio.
+          </p>
+          <p v-if="payError" class="banner err">{{ payError }}</p>
+          <div v-if="payLoading" class="muted pad">Cargando servicios…</div>
+          <template v-else-if="payServices.length">
+            <div class="pay-modal-toolbar">
+              <button type="button" class="btn secondary btn-sm" @click="selectAllPaySvc">Seleccionar todos</button>
+              <button type="button" class="btn secondary btn-sm" @click="clearPaySvc">Ninguno</button>
+              <label class="pay-date-label">
+                <span>Fecha del abono</span>
+                <input v-model="payDate" type="date" class="input pay-date-input" />
+              </label>
+            </div>
+            <div class="pay-table-wrap">
+              <table class="table pay-table">
+                <thead>
+                  <tr>
+                    <th class="chk" scope="col" />
+                    <th scope="col">Código</th>
+                    <th scope="col">Fecha</th>
+                    <th scope="col">Empresa</th>
+                    <th class="num" scope="col">Ref. técnico</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="s in payServices" :key="s.id">
+                    <td class="chk">
+                      <input
+                        type="checkbox"
+                        :checked="selectedServiceIds.includes(s.id)"
+                        :aria-label="`Incluir servicio ${s.code}`"
+                        @change="togglePaySvc(s.id)"
+                      />
+                    </td>
+                    <td class="mono">{{ s.code }}</td>
+                    <td>{{ formatPayServiceDate(s.service_date) }}</td>
+                    <td>{{ s.company_name || '—' }}</td>
+                    <td class="num">{{ formatMoneyRef(s.technician_line_total) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="pay-modal-footer">
+              <p class="pay-total">
+                Total seleccionado: <strong>{{ formatMoneyRef(String(paySelectedTotal)) }}</strong>
+              </p>
+              <div class="pay-modal-actions">
+                <button type="button" class="btn secondary" :disabled="paySaving" @click="closePayModal">
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  class="btn primary"
+                  :disabled="paySaving || selectedServiceIds.length === 0"
+                  @click="submitPayModal"
+                >
+                  {{ paySaving ? 'Guardando…' : 'Confirmar abono' }}
+                </button>
+              </div>
+            </div>
+          </template>
+          <p v-else class="muted pad">No hay servicios con referencia técnico pendiente para este usuario.</p>
+        </div>
+      </div>
+    </Teleport>
 
     <Teleport to="body">
       <div v-if="modalOpen" class="modal-backdrop" @click.self="closeModal">
@@ -623,6 +889,16 @@ function onFichaUpdated() {
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: rgba(15, 23, 42, 0.55);
   margin-bottom: 1rem;
+}
+
+/* Modales: superficie opaca para que el texto no compita con la tabla detrás */
+.modal.card {
+  background: #0f172a;
+  border-color: rgba(148, 163, 184, 0.28);
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.95),
+    0 24px 48px -12px rgba(0, 0, 0, 0.6);
+  margin-bottom: 0;
 }
 
 .toolbar {
@@ -943,8 +1219,8 @@ button.name-link {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: rgba(2, 6, 23, 0.72);
-  backdrop-filter: blur(6px);
+  background: rgba(2, 6, 23, 0.82);
+  backdrop-filter: blur(8px);
 }
 
 .modal {
@@ -1074,5 +1350,112 @@ button.name-link {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.page-debt-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+}
+
+.table th.num,
+.table td.num {
+  text-align: right;
+}
+
+.cell-ref {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ref-svc-count {
+  display: block;
+  font-size: 0.72rem;
+  margin-top: 0.15rem;
+}
+
+.link-pay {
+  color: #fde68a !important;
+  font-weight: 600;
+}
+
+.pay-modal-backdrop {
+  z-index: 120;
+}
+
+.pay-modal {
+  max-width: min(640px, calc(100vw - 2rem));
+  max-height: min(90vh, 720px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pay-modal-lede {
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.pay-modal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.65rem 1rem;
+  margin-bottom: 0.65rem;
+}
+
+.btn-sm {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.82rem;
+}
+
+.pay-date-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.pay-date-input {
+  max-width: 11rem;
+}
+
+.pay-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 10px;
+}
+
+.pay-table {
+  font-size: 0.82rem;
+}
+
+.pay-table th.chk,
+.pay-table td.chk {
+  width: 2.25rem;
+  text-align: center;
+}
+
+.pay-modal-footer {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.pay-total {
+  margin: 0 0 0.65rem;
+  font-size: 0.9rem;
+  color: #e2e8f0;
+}
+
+.pay-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  flex-wrap: wrap;
 }
 </style>

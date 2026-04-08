@@ -1,50 +1,14 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
-import ServiceFormFields from '@/components/services/ServiceFormFields.vue'
 import ServiceRegisterEmpleadoForm from '@/components/services/ServiceRegisterEmpleadoForm.vue'
-import {
-  clearServiceDraft,
-  createService,
-  fetchCompanies,
-  fetchServiceCatalogActive,
-  getRecentClientNames,
-  loadServiceDraft,
-  pushRecentClientName,
-  saveServiceDraft,
-} from '@/services/servicesApi.js'
-import { useUiDialogStore } from '@/stores/uiDialog'
-import { isLineDescriptionStillTemplate } from '@/utils/serviceLineDescriptionTemplate.js'
+import { useServiceRegisterFlow } from '@/composables/useServiceRegisterFlow.js'
 
 const auth = useAuthStore()
-const uiDialog = useUiDialogStore()
 const router = useRouter()
 const route = useRoute()
-
-const companies = ref([])
-const catalogItems = ref([])
-const clientSuggestions = ref([])
-const loading = ref(false)
-const fieldErrors = ref({})
-const globalError = ref('')
-const toast = ref('')
-const lastCreated = ref(null)
-const formResetKey = ref(0)
-/** Archivos locales (solo registro empleado); máx. 4 en UI */
-const photoFiles = ref([])
-
-const form = ref({
-  company_id: '',
-  catalog_id: '',
-  client_name: '',
-  service_type: '',
-  description: '',
-  amount: '',
-  /** Solo registro empleado: líneas de catálogo / Otro */
-  lines: [],
-})
 
 const isEmpleadoRegistro = computed(() => route.name === 'emp-registro-servicio')
 
@@ -53,275 +17,46 @@ const cancelTo = computed(() =>
   isAdminPanelRole(auth.user?.rol) ? `${basePrefix.value}/servicios` : '/empleado'
 )
 
-let persistTimer = null
-let toastTimer = null
-
-function scheduleDraftPersist() {
-  if (isEmpleadoRegistro.value) return
-  clearTimeout(persistTimer)
-  persistTimer = setTimeout(() => {
-    saveServiceDraft(form.value)
-  }, 400)
-}
-
-function showToast(message) {
-  toast.value = message
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => {
-    toast.value = ''
-  }, 3200)
-}
-
-function resetFormToDefaults() {
-  form.value = {
-    company_id: '',
-    catalog_id: '',
-    client_name: '',
-    service_type: '',
-    description: '',
-    amount: '',
-    lines: [],
-  }
-  photoFiles.value = []
-  formResetKey.value += 1
-}
-
-/** Texto guardado en `services.description`: detalle por concepto (sin campo extra en UI empleado). */
-function buildServiceDescriptionFromLines(rawLines) {
-  const parts = []
-  for (const row of rawLines) {
-    const ld = String(row.line_description || '').trim()
-    if (!ld) continue
-    const head =
-      row.catalog_id != null && row.catalog_id !== ''
-        ? String(row.label || 'Ítem').trim()
-        : String(row.custom_name || '').trim() || 'Concepto'
-    parts.push(`${head}: ${ld}`)
-  }
-  return parts.join('\n\n')
-}
-
-function buildPayloadItemsFromLines(rawLines) {
-  return rawLines.map((row) => {
-    if (row.catalog_id != null && row.catalog_id !== '') {
-      const o = { catalog_id: Number(row.catalog_id), amount: Number(row.amount) }
-      const d = String(row.line_description || '').trim()
-      if (d) o.line_description = d
-      return o
-    }
-    const o = {
-      custom_name: String(row.custom_name || '').trim(),
-      amount: Number(row.amount),
-    }
-    const d = String(row.line_description || '').trim()
-    if (d) {
-      o.custom_description = d
-      o.line_description = d
-    }
-    return o
-  })
-}
-
-function validateBeforeSubmit() {
-  fieldErrors.value = {}
-  const e = {}
-  if (!form.value.company_id) e.company_id = ['Selecciona una empresa.']
-  if (!String(form.value.client_name || '').trim()) {
-    e.client_name = ['Indica el nombre del cliente atendido.']
-  }
-  if (!String(form.value.service_type || '').trim()) {
-    e.service_type = ['Indica el tipo de servicio (catálogo o texto libre).']
-  }
-    if (!isEmpleadoRegistro.value) {
-    const desc = String(form.value.description || '').trim()
-    if (!desc) e.description = ['La descripción es obligatoria.']
-    else if (desc.length < 8) {
-      e.description = ['Describe el trabajo con más detalle (mínimo 8 caracteres).']
-    }
-  }
-
-  if (isEmpleadoRegistro.value) {
-    const ls = Array.isArray(form.value.lines) ? form.value.lines : []
-    if (!ls.length) {
-      e.items = ['Añade al menos un ítem del catálogo o «Otro».']
-    }
-    for (let i = 0; i < ls.length; i++) {
-      const row = ls[i]
-      const amt = Number(row.amount)
-      if (Number.isNaN(amt) || amt < 0.01) {
-        e.items = [`Revisa el importe de la línea ${i + 1}.`]
-        break
-      }
-      if (row.catalog_id != null && row.catalog_id !== '') {
-        const ld = String(row.line_description || '').trim()
-        if (ld.length < 8) {
-          e.items = [`Describe el trabajo en la línea ${i + 1} (mín. 8 caracteres).`]
-          break
-        }
-      } else {
-        const name = String(row.custom_name || '').trim()
-        if (name.length < 2) {
-          e.items = [`Indica el nombre del servicio en la línea ${i + 1} («Otro» o lista orientativa).`]
-          break
-        }
-        const ld = String(row.line_description || '').trim()
-        if (ld.length < 8) {
-          e.items = [`Describe el trabajo en la línea ${i + 1} (mín. 8 caracteres).`]
-          break
-        }
-      }
-    }
-    const built = buildServiceDescriptionFromLines(ls)
-    if (built.length < 8) {
-      e.items = e.items || ['Falta detalle en las líneas para armar la descripción del servicio (mín. 8 caracteres en conjunto).']
-    }
-  } else {
-    const amt = Number(form.value.amount)
-    if (Number.isNaN(amt) || amt < 0.01) {
-      e.amount = ['Indica un valor numérico mayor a cero.']
-    }
-  }
-
-  fieldErrors.value = e
-  return Object.keys(e).length === 0
-}
-
-async function refreshCatalog() {
-  try {
-    catalogItems.value = await fetchServiceCatalogActive()
-  } catch {
-    catalogItems.value = []
-  }
-}
-
-onMounted(async () => {
-  clientSuggestions.value = getRecentClientNames()
-  if (!isEmpleadoRegistro.value) {
-    const draft = loadServiceDraft()
-    if (draft && typeof draft === 'object') {
-      form.value = {
-        company_id: draft.company_id ?? '',
-        catalog_id: draft.catalog_id ?? '',
-        client_name: draft.client_name ?? '',
-        service_type: draft.service_type ?? '',
-        description: draft.description ?? '',
-        amount: draft.amount ?? '',
-        lines: [],
-      }
-    }
-  }
-  try {
-    companies.value = await fetchCompanies()
-  } catch (e) {
-    globalError.value = e.data?.message || 'No se pudieron cargar las empresas.'
-  }
-  await refreshCatalog()
+const {
+  companies,
+  catalogItems,
+  clientSuggestions,
+  loading,
+  fieldErrors,
+  globalError,
+  toast,
+  lastCreated,
+  formResetKey,
+  photoFiles,
+  form,
+  onSubmit,
+} = useServiceRegisterFlow({
+  isEmpleadoRegistro,
+  panelOpenRef: null,
+  async onAdminAfterCreate(created) {
+    await router.push(`${basePrefix.value}/servicios/${created.id}`)
+  },
+  async onEmpleadoAfterCreate() {
+    await new Promise((r) => setTimeout(r, 450))
+    await router.push({ name: 'empleado-dashboard' })
+  },
 })
-
-watch(
-  () => form.value.company_id,
-  (cid, prev) => {
-    if (isEmpleadoRegistro.value && prev !== undefined && String(cid) !== String(prev)) {
-      form.value.lines = []
-      form.value.amount = ''
-      form.value.catalog_id = ''
-    }
-  }
-)
-
-watch(form, () => scheduleDraftPersist(), { deep: true })
-
-onUnmounted(() => {
-  clearTimeout(persistTimer)
-  clearTimeout(toastTimer)
-})
-
-async function onSubmit() {
-  fieldErrors.value = {}
-  globalError.value = ''
-  if (!validateBeforeSubmit()) return
-
-  if (isEmpleadoRegistro.value) {
-    const ls = Array.isArray(form.value.lines) ? form.value.lines : []
-    const anyTemplate = ls.some((row) => isLineDescriptionStillTemplate(row, catalogItems.value))
-    if (anyTemplate) {
-      const proceed = await uiDialog.confirm({
-        title: 'Descripciones sin personalizar',
-        message:
-          'Una o más líneas siguen con el texto automático del catálogo (no lo editaste). Es mejor aclarar qué trabajo hiciste en cada concepto. ¿Deseas enviar igualmente?',
-        confirmLabel: 'Enviar igual',
-        cancelLabel: 'Revisar líneas',
-      })
-      if (!proceed) return
-    }
-  }
-
-  loading.value = true
-  try {
-    const payload = {
-      company_id: Number(form.value.company_id),
-      client_name: form.value.client_name.trim(),
-      service_type: form.value.service_type.trim(),
-      description: form.value.description.trim(),
-      amount: Number(form.value.amount),
-    }
-    if (isEmpleadoRegistro.value) {
-      const ls = Array.isArray(form.value.lines) ? form.value.lines : []
-      payload.items = buildPayloadItemsFromLines(ls)
-      payload.description = buildServiceDescriptionFromLines(ls)
-      let t = 0
-      for (const row of ls) {
-        const n = Number(row.amount)
-        if (!Number.isNaN(n)) t += n
-      }
-      payload.amount = Number(t.toFixed(2))
-    } else if (form.value.catalog_id !== '' && form.value.catalog_id != null) {
-      payload.catalog_id = Number(form.value.catalog_id)
-    }
-    const created = await createService(
-      payload,
-      isEmpleadoRegistro.value ? photoFiles.value : []
-    )
-    pushRecentClientName(form.value.client_name)
-    clearServiceDraft()
-
-    if (isEmpleadoRegistro.value) {
-      showToast('Servicio guardado')
-      lastCreated.value = { id: created.id, code: created.code }
-      resetFormToDefaults()
-    } else {
-      await uiDialog.alert({
-        title: 'Servicio registrado',
-        message: `Servicio registrado correctamente.\nCódigo: ${created.code}`,
-      })
-      await router.push(`${basePrefix.value}/servicios/${created.id}`)
-    }
-  } catch (e) {
-    if (e.data?.errors) fieldErrors.value = e.data.errors
-    else globalError.value = e.data?.message || e.message || 'No se pudo guardar.'
-  } finally {
-    loading.value = false
-  }
-}
 </script>
 
 <template>
-  <section :class="isEmpleadoRegistro ? 'mx-auto max-w-md pb-8' : 'page'">
-    <header :class="isEmpleadoRegistro ? 'mb-6 text-center' : 'head'">
-      <h1
-        :class="
-          isEmpleadoRegistro
-            ? 'text-xl font-bold tracking-tight text-white sm:text-2xl'
-            : ''
-        "
-      >
-        Registrar servicio
-      </h1>
-      <p v-if="isEmpleadoRegistro" class="mx-auto mt-2 max-w-md text-center text-sm leading-relaxed text-slate-400">
-        Tres pasos: empresa y cliente, conceptos cobrados (detalle por ítem) y fotos si aplica.
+  <section class="mx-auto max-w-md px-3 pb-8 sm:px-0">
+    <header class="mb-6 text-center">
+      <p v-if="!isEmpleadoRegistro" class="mb-4">
+        <RouterLink
+          class="text-sm font-medium text-slate-400 underline decoration-slate-600 underline-offset-2 hover:text-slate-200"
+          :to="cancelTo"
+        >
+          ← Volver al listado
+        </RouterLink>
       </p>
-      <p v-if="!isEmpleadoRegistro" class="muted">
-        Completa los datos del trabajo realizado. La fecha del servicio y el código (SERV-…) los asigna el servidor al guardar.
+      <h1 class="text-xl font-bold tracking-tight text-white sm:text-2xl">Registrar servicio</h1>
+      <p class="mt-2 text-[0.8rem] leading-snug text-slate-500">
+        La fecha del servicio y el código (SERV-…) los asigna el servidor al guardar.
       </p>
     </header>
 
@@ -341,11 +76,10 @@ async function onSubmit() {
     </p>
 
     <form
-      :class="isEmpleadoRegistro ? 'rounded-3xl border border-slate-800/80 bg-[#121820] p-5 shadow-xl shadow-black/30 sm:p-6' : 'card'"
+      class="rounded-3xl border border-slate-800/80 bg-[#121820] p-5 shadow-xl shadow-black/30 sm:p-6"
       @submit.prevent="onSubmit"
     >
       <ServiceRegisterEmpleadoForm
-        v-if="isEmpleadoRegistro"
         :key="formResetKey"
         v-model="form"
         v-model:photos="photoFiles"
@@ -355,24 +89,6 @@ async function onSubmit() {
         :field-errors="fieldErrors"
         :disabled="loading"
       />
-
-      <template v-else>
-        <ServiceFormFields
-          v-model="form"
-          :companies="companies"
-          :catalog-items="catalogItems"
-          :client-suggestions="clientSuggestions"
-          :field-errors="fieldErrors"
-          :disabled="loading"
-          service-date-from-server
-        />
-        <div class="actions">
-          <RouterLink class="btn secondary" :to="cancelTo">Cancelar</RouterLink>
-          <button class="btn primary" type="submit" :disabled="loading">
-            {{ loading ? 'Guardando…' : 'Guardar servicio' }}
-          </button>
-        </div>
-      </template>
     </form>
 
     <Teleport to="body">
@@ -391,20 +107,6 @@ async function onSubmit() {
 </template>
 
 <style scoped>
-.page {
-  max-width: 920px;
-  margin: 0 auto;
-}
-
-.head h1 {
-  margin: 0 0 0.35rem;
-}
-
-.muted {
-  color: #94a3b8;
-  margin: 0 0 1rem;
-}
-
 .banner {
   padding: 0.65rem 0.85rem;
   border-radius: 10px;
@@ -412,49 +114,6 @@ async function onSubmit() {
   border: 1px solid rgba(248, 113, 113, 0.45);
   color: #fecaca;
   margin-bottom: 1rem;
-}
-
-.card {
-  padding: 1.25rem;
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.55);
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  justify-content: flex-end;
-  margin-top: 1.25rem;
-}
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.55rem 1rem;
-  border-radius: 10px;
-  text-decoration: none;
-  font-weight: 600;
-  cursor: pointer;
-  border: 1px solid transparent;
-}
-
-.btn.secondary {
-  border-color: rgba(148, 163, 184, 0.35);
-  color: #e2e8f0;
-  background: transparent;
-}
-
-.btn.primary {
-  background: linear-gradient(90deg, #2563eb, #7c3aed);
-  color: #fff;
-}
-
-.btn.primary:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
 }
 
 .toast-enter-active,

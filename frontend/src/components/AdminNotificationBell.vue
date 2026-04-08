@@ -38,15 +38,73 @@ const badgeClass = {
 }
 
 let pollTimer = null
+/** Evita toast en la primera carga; luego compara con el último conteo conocido. */
+const prevUnreadCount = ref(null)
+const toastOpen = ref(false)
+const toastMessage = ref('')
+const toastCategoryLabel = ref('')
+const toastLink = ref(null)
+let toastHideTimer = null
+
+function truncateText(s, max) {
+  const t = String(s || '').trim()
+  if (t.length <= max) return t
+  return `${t.slice(0, max - 1)}…`
+}
+
+function dismissToast() {
+  toastOpen.value = false
+  toastLink.value = null
+  toastCategoryLabel.value = ''
+  if (toastHideTimer) {
+    clearTimeout(toastHideTimer)
+    toastHideTimer = null
+  }
+}
 
 async function refreshCount() {
   try {
     const o = await fetchUnreadNotificationCount()
-    count.value = o.count
+    const newCount = o.count
+
+    if (prevUnreadCount.value !== null && newCount > prevUnreadCount.value) {
+      try {
+        const latest = await fetchAdminNotifications({ limit: 1, unread_only: true })
+        const n = latest[0]
+        toastMessage.value = n?.message
+          ? truncateText(n.message, 200)
+          : 'Tienes notificaciones nuevas en el panel.'
+        toastCategoryLabel.value = n?.category_label ? String(n.category_label) : ''
+        toastLink.value = n?.link ?? n?.meta?.link ?? null
+      } catch {
+        toastMessage.value = 'Tienes notificaciones nuevas en el panel.'
+        toastLink.value = null
+        toastCategoryLabel.value = ''
+      }
+      toastOpen.value = true
+      if (toastHideTimer) clearTimeout(toastHideTimer)
+      toastHideTimer = setTimeout(dismissToast, 9000)
+    }
+
+    prevUnreadCount.value = newCount
+    count.value = newCount
     byCategory.value = o.byCategory
   } catch {
     /* silencioso en barra */
   }
+}
+
+async function onToastActivate() {
+  const path = toastLink.value
+  dismissToast()
+  if (path && typeof path === 'string') {
+    open.value = false
+    await router.push(path)
+    return
+  }
+  open.value = true
+  await loadList()
+  await refreshCount()
 }
 
 async function loadList() {
@@ -124,15 +182,22 @@ function onDocClick(ev) {
   if (root && !root.contains(ev.target)) open.value = false
 }
 
+function onToastKeydown(ev) {
+  if (ev.key === 'Escape') dismissToast()
+}
+
 onMounted(() => {
   refreshCount()
   pollTimer = setInterval(refreshCount, 45000)
   document.addEventListener('click', onDocClick)
+  document.addEventListener('keydown', onToastKeydown)
 })
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  dismissToast()
   document.removeEventListener('click', onDocClick)
+  document.removeEventListener('keydown', onToastKeydown)
 })
 </script>
 
@@ -241,5 +306,61 @@ onUnmounted(() => {
         </template>
       </div>
     </div>
+
+    <Teleport to="body">
+      <Transition name="admin-notif-toast">
+        <div
+          v-if="toastOpen"
+          class="admin-notif-toast fixed bottom-4 right-4 z-[220] flex max-w-[min(100vw-1.5rem,22rem)] flex-col gap-2 rounded-xl border border-slate-600/80 bg-[#1c212c] p-3 shadow-2xl shadow-black/50"
+          role="status"
+          aria-live="polite"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <p
+                v-if="toastCategoryLabel"
+                class="m-0 mb-1 text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500"
+              >
+                {{ toastCategoryLabel }}
+              </p>
+              <p class="m-0 text-[0.8rem] leading-snug text-slate-100">{{ toastMessage }}</p>
+            </div>
+            <button
+              type="button"
+              class="shrink-0 rounded-md p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200"
+              aria-label="Cerrar aviso"
+              @click.stop="dismissToast"
+            >
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div class="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              class="rounded-lg border border-slate-600 px-2.5 py-1 text-[0.7rem] font-semibold text-slate-300 hover:bg-slate-800"
+              @click.stop="onToastActivate"
+            >
+              {{ toastLink ? 'Abrir destino' : 'Ver notificaciones' }}
+            </button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
+
+<style scoped>
+.admin-notif-toast-enter-active,
+.admin-notif-toast-leave-active {
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease;
+}
+.admin-notif-toast-enter-from,
+.admin-notif-toast-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
+}
+</style>

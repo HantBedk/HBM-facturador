@@ -13,6 +13,10 @@ const props = defineProps({
   clientSuggestions: { type: Array, default: () => [] },
   fieldErrors: { type: Object, default: () => ({}) },
   disabled: { type: Boolean, default: false },
+  /** No permitir cambiar empresa / cliente puntual (p. ej. completar asignación administrativa). */
+  billingLocked: { type: Boolean, default: false },
+  /** Ocultar el botón interno de envío (p. ej. la vista padre pone su propio `type="submit"`). */
+  hideSubmitButton: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue', 'update:photos'])
@@ -71,13 +75,15 @@ function afterLineAdded() {
 }
 
 function toggleCatalogPanel() {
-  if (props.disabled || !props.modelValue.company_id) return
+  const canBill =
+    props.modelValue.use_quick_client || (props.modelValue.company_id !== '' && props.modelValue.company_id != null)
+  if (props.disabled || !canBill) return
   catalogPanelOpen.value = !catalogPanelOpen.value
   if (catalogPanelOpen.value) typeFilter.value = ''
 }
 
 watch(
-  () => props.modelValue.company_id,
+  () => [props.modelValue.company_id, props.modelValue.use_quick_client],
   () => {
     catalogPanelOpen.value = false
     typeFilter.value = ''
@@ -144,6 +150,9 @@ function addCatalogLine(item) {
       amount: '',
       propose_catalog: false,
       isOtherLine: false,
+      /** Tope orientativo (precio base del catálogo): el importe no puede superarlo en este formulario. */
+      catalog_max_price:
+        hintPrice != null && Number.isFinite(hintPrice) && hintPrice > 0 ? hintPrice : null,
       catalog_hint_desc: hintDesc,
       catalog_hint_price: hintPrice,
       catalog_hint_dismissed: false,
@@ -205,6 +214,41 @@ function dismissCatalogHint(index) {
   updateLine(index, { catalog_hint_dismissed: true })
 }
 
+/** Precio máximo (COP) para líneas de catálogo: `base_price` del ítem. */
+function catalogMaxPriceForRow(row) {
+  if (row == null || row.catalog_id == null || row.isOtherLine) return null
+  const stored = row.catalog_max_price
+  if (stored != null && stored !== '') {
+    const n = Number(stored)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  const c = props.catalogItems.find((x) => Number(x.id) === Number(row.catalog_id))
+  if (c != null && c.base_price != null) {
+    const n = Number(c.base_price)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return null
+}
+
+function onLineAmountInput(index, ev) {
+  const raw = ev.target.value
+  const row = lines.value[index]
+  const maxP = catalogMaxPriceForRow(row)
+  let next = raw
+  if (maxP != null && raw !== '' && String(raw).trim() !== '') {
+    const n = Number(raw)
+    if (!Number.isNaN(n) && n > maxP) {
+      next = Number.isInteger(maxP) ? String(maxP) : String(Number(maxP.toFixed(2)))
+    }
+  }
+  updateLine(index, { amount: next })
+}
+
+function amountInputMaxAttr(row) {
+  const m = catalogMaxPriceForRow(row)
+  return m != null ? m : undefined
+}
+
 /** Solo ítems que devuelve el servidor. Si el admin vació el catálogo, no se muestra lista orientativa local. */
 const effectiveTypeCatalog = computed(() =>
   props.catalogItems.map((c) => ({
@@ -245,11 +289,11 @@ function pickCatalogRow(item) {
 
 function onTypeInput(e) {
   typeFilter.value = e.target.value
-  if (props.modelValue.company_id) catalogPanelOpen.value = true
+  if (props.modelValue.company_id || props.modelValue.use_quick_client) catalogPanelOpen.value = true
 }
 
 function onTypeFocus() {
-  if (!props.modelValue.company_id) return
+  if (!props.modelValue.company_id && !props.modelValue.use_quick_client) return
   catalogPanelOpen.value = true
   if (lines.value.length > 0) typeFilter.value = ''
 }
@@ -266,6 +310,28 @@ const totalDisplay = computed(() => {
     maximumFractionDigits: 0,
   }).format(n)
 })
+
+/** Valor sentinela al final del &lt;select&gt; (no es ID de empresa). */
+const QUICK_CLIENT_OPTION = '__quick_client__'
+
+const companySelectValue = computed(() => {
+  if (props.modelValue.use_quick_client) return QUICK_CLIENT_OPTION
+  const id = props.modelValue.company_id
+  if (id === '' || id == null) return ''
+  return String(id)
+})
+
+function onCompanySelectChange(ev) {
+  if (props.billingLocked) return
+  const v = ev.target.value
+  if (v === QUICK_CLIENT_OPTION) {
+    patch({ use_quick_client: true, company_id: '' })
+  } else if (v) {
+    patch({ use_quick_client: false, company_id: Number(v) })
+  } else {
+    patch({ use_quick_client: false, company_id: '' })
+  }
+}
 </script>
 
 <template>
@@ -276,12 +342,19 @@ const totalDisplay = computed(() => {
         <span class="step-badge" aria-hidden="true">1</span>
         Empresa y cliente
       </h2>
-      <p class="step-lede">¿Para qué empresa fue el trabajo y quién recibió el servicio?</p>
+      <p class="step-lede">
+        <template v-if="billingLocked">
+          Empresa y cliente fijados por la asignación administrativa; complete conceptos e importes abajo.
+        </template>
+        <template v-else>
+          Elige la empresa en el listado; al final puedes indicar cliente puntual si no está registrado en el sistema.
+        </template>
+      </p>
 
-    <!-- Empresa -->
+    <!-- Empresa / cliente puntual (una sola lista) -->
     <div>
       <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Empresa <span class="text-red-400">*</span>
+        Empresa o cliente a facturar <span class="text-red-400">*</span>
       </label>
       <div class="relative">
         <span
@@ -298,12 +371,16 @@ const totalDisplay = computed(() => {
         </span>
         <select
           class="w-full appearance-none rounded-2xl border border-slate-700/90 bg-[#141a22] py-3.5 pl-12 pr-10 text-[0.9375rem] text-white outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
-          :value="inner.company_id"
-          :disabled="disabled"
-          @change="patch({ company_id: $event.target.value ? Number($event.target.value) : '' })"
+          :class="inner.use_quick_client ? 'border-amber-500/35' : ''"
+          :value="companySelectValue"
+          :disabled="disabled || billingLocked"
+          @change="onCompanySelectChange"
         >
-          <option value="" disabled>Seleccionar empresa</option>
-          <option v-for="c in companies" :key="c.id" :value="c.id">{{ c.nombre }}</option>
+          <option value="" disabled>Seleccionar…</option>
+          <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
+          <option :value="QUICK_CLIENT_OPTION" class="text-amber-200">
+            Cliente sin registro
+          </option>
         </select>
         <span
           class="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500"
@@ -315,12 +392,47 @@ const totalDisplay = computed(() => {
         </span>
       </div>
       <p v-if="fieldErrors.company_id" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.company_id[0] }}</p>
+      <p v-if="inner.use_quick_client" class="mt-2 text-[0.75rem] leading-snug text-amber-500/90">
+        Mismo teléfono agrupa servicios de este cliente para facturación.
+      </p>
     </div>
 
     <!-- Cliente -->
-    <div>
+    <div v-if="!inner.use_quick_client">
       <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
         Cliente atendido <span class="text-red-400">*</span>
+      </label>
+      <div class="relative">
+        <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true">
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+            <path
+              d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </span>
+        <input
+          :value="inner.client_name"
+          :list="clientListId"
+          autocomplete="off"
+          placeholder="Nombre del contacto en obra"
+          :disabled="disabled"
+          class="w-full rounded-2xl border border-slate-700/90 bg-[#141a22] py-3.5 pl-12 pr-4 text-[0.9375rem] text-white placeholder:text-slate-600 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
+          @input="patch({ client_name: $event.target.value })"
+        />
+        <datalist :id="clientListId">
+          <option v-for="s in clientSuggestions" :key="s" :value="s" />
+        </datalist>
+      </div>
+      <p v-if="fieldErrors.client_name" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.client_name[0] }}</p>
+    </div>
+
+    <!-- Cliente puntual: nombre + teléfono -->
+    <template v-else>
+    <div>
+      <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+        Nombre del cliente <span class="text-red-400">*</span>
       </label>
       <div class="relative">
         <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true">
@@ -347,6 +459,35 @@ const totalDisplay = computed(() => {
       </div>
       <p v-if="fieldErrors.client_name" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.client_name[0] }}</p>
     </div>
+
+    <div>
+      <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+        Teléfono <span class="text-red-400">*</span>
+      </label>
+      <div class="relative">
+        <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true">
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+            <path
+              d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </span>
+        <input
+          :value="inner.quick_telefono"
+          type="tel"
+          inputmode="tel"
+          autocomplete="tel"
+          placeholder="Ej. 3001234567"
+          :disabled="disabled"
+          class="w-full rounded-2xl border border-slate-700/90 bg-[#141a22] py-3.5 pl-12 pr-4 text-[0.9375rem] text-white placeholder:text-slate-600 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
+          @input="patch({ quick_telefono: $event.target.value })"
+        />
+      </div>
+      <p v-if="fieldErrors.quick_telefono" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.quick_telefono[0] }}</p>
+    </div>
+    </template>
     </section>
 
     <!-- Paso 2 -->
@@ -369,7 +510,7 @@ const totalDisplay = computed(() => {
         <button
           type="button"
           class="flex min-h-[3.25rem] shrink-0 cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-sky-500/55 bg-sky-500/20 px-4 py-2 text-sm font-bold text-sky-100 shadow-inner shadow-sky-950/30 transition hover:bg-sky-500/30 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-40 sm:min-w-[10.5rem]"
-          :disabled="disabled || !inner.company_id"
+          :disabled="disabled || (!inner.company_id && !inner.use_quick_client)"
           :aria-expanded="catalogPanelOpen"
           aria-controls="catalog-panel-list"
           @click="toggleCatalogPanel"
@@ -394,7 +535,7 @@ const totalDisplay = computed(() => {
             type="text"
             autocomplete="off"
             placeholder="Filtrar lista (opcional)"
-            :disabled="disabled || !inner.company_id"
+            :disabled="disabled || (!inner.company_id && !inner.use_quick_client)"
             class="h-[3.25rem] w-full rounded-2xl border border-slate-700/90 bg-[#141a22] py-3.5 pl-12 pr-4 text-[0.9375rem] text-white placeholder:text-slate-600 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
             @input="onTypeInput"
             @focus="onTypeFocus"
@@ -403,7 +544,7 @@ const totalDisplay = computed(() => {
       </div>
 
       <div
-        v-show="catalogPanelOpen && inner.company_id && filteredCatalog.length && !disabled"
+        v-show="catalogPanelOpen && (inner.company_id || inner.use_quick_client) && filteredCatalog.length && !disabled"
         id="catalog-panel-list"
         class="mt-3 max-h-60 overflow-y-auto rounded-xl border border-slate-600/80 bg-[#1a222d]"
         role="listbox"
@@ -424,13 +565,18 @@ const totalDisplay = computed(() => {
         </button>
       </div>
 
-      <p v-if="inner.company_id && catalogPanelOpen && !filteredCatalog.length && !disabled" class="mt-2 text-sm text-amber-400/90">
+      <p
+        v-if="(inner.company_id || inner.use_quick_client) && catalogPanelOpen && !filteredCatalog.length && !disabled"
+        class="mt-2 text-sm text-amber-400/90"
+      >
         No hay ítems en el catálogo para esta empresa.
       </p>
-      <p v-if="!inner.company_id" class="mt-2 text-[0.75rem] text-amber-500/90">Primero elige empresa; luego abre «Ver catálogo» y toca cada ítem que quieras sumar.</p>
-      <p v-else-if="inner.company_id" class="mt-2 text-[0.75rem] text-slate-500">
+      <p v-if="!inner.company_id && !inner.use_quick_client" class="mt-2 text-[0.75rem] text-amber-500/90">
+        Primero elige empresa o cliente puntual; luego abre «Ver catálogo» y toca cada ítem que quieras sumar.
+      </p>
+      <p v-else-if="inner.company_id || inner.use_quick_client" class="mt-2 text-[0.75rem] text-slate-500">
         <template v-if="catalogItems.length">{{ catalogItems.length }} ítem(s) en catálogo (definidos por administración).</template>
-        <template v-else>Sin ítems en catálogo: use solo «Otro…» y complete nombre del concepto, descripción e importe.</template>
+        <template v-else>Sin ítems en catálogo: use solo «Nuevo ítem» y complete nombre del concepto, descripción e importe.</template>
         Puedes tocar varios ítems seguidos sin cerrar el panel.
       </p>
       <p v-if="fieldErrors.items" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.items[0] }}</p>
@@ -450,7 +596,7 @@ const totalDisplay = computed(() => {
                 row.catalog_id != null
                   ? row.label
                   : row.isOtherLine
-                    ? 'Otro — nuevo ítem'
+                    ? 'Nuevo ítem'
                     : 'Orientativo (sin fila en catálogo servidor)'
               }}
             </p>
@@ -532,13 +678,14 @@ const totalDisplay = computed(() => {
             :value="row.amount"
             type="number"
             inputmode="decimal"
-            min="0"
-            step="1"
+            min="0.01"
+            step="0.01"
+            :max="amountInputMaxAttr(row)"
             :disabled="disabled"
             :placeholder="row.catalog_id != null ? 'Importe de referencia (obligatorio para validar)' : ''"
             class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] py-2.5 pl-8 pr-3 text-sm text-white tabular-nums outline-none focus:border-sky-400"
             @focus="dismissCatalogHint(idx)"
-            @input="updateLine(idx, { amount: $event.target.value })"
+            @input="onLineAmountInput(idx, $event)"
             @wheel.prevent
           />
         </div>
@@ -629,11 +776,12 @@ const totalDisplay = computed(() => {
     </section>
 
     <button
+      v-if="!hideSubmitButton"
       type="submit"
       class="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 py-4 text-base font-bold text-white shadow-lg shadow-sky-500/25 transition hover:brightness-110 active:scale-[0.99] disabled:opacity-50"
       :disabled="disabled"
     >
-      {{ disabled ? 'Guardando…' : 'Guardar servicio' }}
+      {{ disabled ? 'Guardando…' : 'Cargar servicio' }}
     </button>
   </div>
 </template>

@@ -17,13 +17,20 @@ class AdminInvoiceResource extends JsonResource
             'id' => $this->id,
             'code' => $this->code,
             'company_id' => $this->company_id,
-            'company' => $this->whenLoaded('company', fn () => [
+            /** Factura sin fila en `companies` (venta mostrador); el PDF usa estos datos. */
+            'bill_to' => [
+                'nombre' => $this->bill_to_nombre,
+                'telefono' => $this->bill_to_telefono,
+                'nit' => $this->bill_to_nit,
+            ],
+            'company' => $this->whenLoaded('company', fn () => $this->company ? [
                 'id' => $this->company->id,
                 'nombre' => $this->company->nombre,
                 'nit' => $this->company->nit,
                 'telefono' => $this->company->telefono,
                 'correo' => $this->company->correo,
-            ]),
+                'es_cliente_puntual' => (bool) ($this->company->es_cliente_puntual ?? false),
+            ] : null),
             'period_month' => $this->period_month,
             'period_year' => $this->period_year,
             'period_label' => $this->periodLabel((int) $this->period_month, (int) $this->period_year),
@@ -49,6 +56,8 @@ class AdminInvoiceResource extends JsonResource
                     'description' => $s->description,
                     'service_type' => $s->service_type,
                     'client_name' => $s->client_name,
+                    'contact_phone_key' => $s->contact_phone_key,
+                    'client_telefono' => $s->client_telefono,
                     'amount' => (string) $s->amount,
                     'empleado' => $s->user ? ['nombre' => $s->user->nombre] : null,
                 ])->values()->all();

@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
-import { archiveService, fetchService, updateService } from '@/services/servicesApi.js'
+import { archiveService, fetchService, rejectServiceAssignment, updateService } from '@/services/servicesApi.js'
 import ServiceCorrectionFields from '@/components/services/ServiceCorrectionFields.vue'
 import { useUiDialogStore } from '@/stores/uiDialog'
 
@@ -46,6 +46,14 @@ const canEmpleadoManage = computed(
     service.value &&
     !service.value.invoiced &&
     service.value.status !== 'eliminado'
+)
+
+const isAwaitingAssignment = computed(
+  () => !isAdmin.value && service.value?.assignment_status === 'awaiting_completion'
+)
+
+const canEmpleadoEditActions = computed(
+  () => canEmpleadoManage.value && !isAwaitingAssignment.value
 )
 
 const statusLabel = computed(() => {
@@ -194,6 +202,30 @@ async function onSaveCorrections() {
   }
 }
 
+async function onRejectAssignment() {
+  const s = service.value
+  if (!s || s.assignment_status !== 'awaiting_completion') return
+  const ok = await uiDialog.confirm({
+    title: 'Rechazar asignación',
+    message:
+      'Se marcará el servicio como eliminado y se avisará a administración. ¿Continuar?',
+    confirmLabel: 'Rechazar',
+    cancelLabel: 'Cancelar',
+    danger: true,
+  })
+  if (!ok) return
+  try {
+    service.value = await rejectServiceAssignment(s.id)
+    await uiDialog.alert({ title: 'Listo', message: 'Asignación rechazada.' })
+    await router.push(`${base.value}/listado-servicios`)
+  } catch (e) {
+    await uiDialog.alert({
+      title: 'Error',
+      message: e.data?.message || e.message || 'No se pudo rechazar.',
+    })
+  }
+}
+
 async function onEmpleadoArchive() {
   const s = service.value
   if (!s || s.invoiced || s.status === 'eliminado') return
@@ -238,7 +270,13 @@ async function onEmpleadoArchive() {
           Editar en vista ampliada
         </RouterLink>
       </div>
-      <div v-else-if="service && canEmpleadoManage" class="actions actions-emp">
+      <div v-else-if="service && canEmpleadoManage && isAwaitingAssignment" class="actions actions-emp actions-emp--stack">
+        <RouterLink class="btn primary" :to="`/empleado/servicio/${service.id}/completar-asignacion`">
+          Completar asignación
+        </RouterLink>
+        <button type="button" class="btn danger" @click="onRejectAssignment">Rechazar</button>
+      </div>
+      <div v-else-if="service && canEmpleadoEditActions" class="actions actions-emp">
         <RouterLink class="btn primary" :to="`${base}/servicio/${service.id}/editar`">Editar</RouterLink>
         <button type="button" class="btn danger" @click="onEmpleadoArchive">Eliminar</button>
       </div>
@@ -250,6 +288,16 @@ async function onEmpleadoArchive() {
     <div v-else-if="service" class="layout" :class="{ admin: isAdmin }">
       <!-- Empleado: vista simple -->
       <template v-if="!isAdmin">
+        <div v-if="isAwaitingAssignment" class="card banner-assign">
+          <p class="banner-assign-title">Asignación pendiente</p>
+          <p class="banner-assign-text">
+            Complete líneas e importes de referencia o rechace la asignación. Los datos de empresa quedan fijados por
+            administración.
+            <span v-if="service.assigned_by?.nombre" class="muted">
+              Asignado por {{ service.assigned_by.nombre }}.
+            </span>
+          </p>
+        </div>
         <div class="card">
           <dl class="grid">
             <div>
@@ -261,7 +309,7 @@ async function onEmpleadoArchive() {
               <dd class="cap">{{ service.status }}</dd>
             </div>
             <div>
-              <dt>Valor</dt>
+              <dt>Valor (su referencia)</dt>
               <dd>{{ money(service.amount) }}</dd>
             </div>
             <div class="wide">
@@ -290,7 +338,7 @@ async function onEmpleadoArchive() {
                   <li v-for="it in serviceItems" :key="it.id" class="emp-item">
                     <p class="emp-item-label">{{ it.label || '—' }}</p>
                     <p class="pre emp-item-desc">{{ it.line_description || '—' }}</p>
-                    <p class="emp-item-amt">{{ money(lineBilledAmount(it)) }}</p>
+                    <p class="emp-item-amt">{{ money(lineTechnicianAmount(it)) }}</p>
                   </li>
                 </ul>
               </dd>
@@ -539,6 +587,35 @@ h1 {
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: flex-start;
+}
+
+.actions-emp--stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.banner-assign {
+  margin-bottom: 1rem;
+  border-color: rgba(56, 189, 233, 0.35);
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.banner-assign-title {
+  margin: 0 0 0.35rem;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #7dd3fc;
+}
+
+.banner-assign-text {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #cbd5e1;
+}
+
+.banner-assign-text .muted {
+  color: #64748b;
 }
 
 .layout.admin {

@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\AdminTechnicianCatalogPricingController;
 use App\Http\Controllers\Api\AdminCorreoSolicitudController;
 use App\Http\Controllers\Api\AdminEmpleadoNotificacionSettingsController;
 use App\Http\Controllers\Api\AdminEmpleadoPerfilController;
+use App\Http\Controllers\Api\AdminEmpleadoTechnicianPaymentController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CompanyController;
@@ -35,6 +36,9 @@ Route::get('/health', HealthController::class);
 
 Route::post('/auth/login', [AuthController::class, 'login'])
     ->middleware('throttle:15,1');
+
+Route::post('/auth/forgot-password', [AuthController::class, 'forgotPasswordRequest'])
+    ->middleware('throttle:8,60');
 
 Route::prefix('public')
     ->middleware('throttle:30,1')
@@ -99,7 +103,12 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::get('/admin/export/invoices', [AdminExportController::class, 'invoices']);
         Route::get('/admin/activity-logs', [AdminActivityLogController::class, 'index']);
 
+        Route::post('/admin/services/assign-to-technician', [ServiceController::class, 'assignToTechnician']);
+
         Route::get('/admin/invoices/available-services', [AdminInvoiceController::class, 'availableServices']);
+        Route::get('/admin/invoices/available-walk-in-services', [AdminInvoiceController::class, 'availableWalkInServices']);
+        Route::get('/admin/invoices/pending-walk-in-groups', [AdminInvoiceController::class, 'pendingWalkInGroups']);
+        Route::post('/admin/invoices/counter-final', [AdminInvoiceController::class, 'storeWalkInFinal']);
         Route::get('/admin/invoices', [AdminInvoiceController::class, 'index']);
         Route::post('/admin/invoices', [AdminInvoiceController::class, 'store']);
         Route::get('/admin/invoices/{invoice}/pdf', [AdminInvoiceController::class, 'pdf']);
@@ -114,6 +123,10 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
 
     Route::get('/empleados', [UserController::class, 'empleadosActivos'])->middleware('role:admin,super_admin');
     Route::get('/admin/empleados/{user}/historial', [EmployeeHistorialController::class, 'forUser'])
+        ->middleware('role:admin,super_admin');
+    Route::get('/admin/empleados/{user}/technician-pending-services', [AdminEmpleadoTechnicianPaymentController::class, 'pendingServices'])
+        ->middleware('role:admin,super_admin');
+    Route::post('/admin/empleados/{user}/technician-pay', [AdminEmpleadoTechnicianPaymentController::class, 'batchPay'])
         ->middleware('role:admin,super_admin');
 
     Route::get('/admin/dashboard', [AdminDashboardController::class, 'index'])->middleware('role:admin,super_admin');
@@ -137,4 +150,6 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::put('/services/{service}', [ServiceController::class, 'update']);
     Route::patch('/services/{service}/archive', [ServiceController::class, 'archive']);
     Route::patch('/services/{service}/technician-paid', [ServiceController::class, 'patchTechnicianPaid']);
+    Route::post('/services/{service}/complete-assignment', [ServiceController::class, 'completeAssignment']);
+    Route::post('/services/{service}/reject-assignment', [ServiceController::class, 'rejectAssignment']);
 });

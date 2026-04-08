@@ -33,6 +33,9 @@ class PanelNotification extends Model
     /** Técnico solicitó cambio de correo (pendiente de aprobación admin). */
     public const TYPE_EMAIL_CHANGE_REQUEST = 'email_change_request';
 
+    /** Solicitud «olvidé contraseña» desde login (cédula + correo verificados). */
+    public const TYPE_PASSWORD_RESET_REQUEST = 'password_reset_request';
+
     /** Notificaciones mostradas solo al técnico (panel empleado). */
     public const TYPE_EMP_CORREO_APROBADO = 'emp_correo_aprobado';
 
@@ -40,6 +43,9 @@ class PanelNotification extends Model
 
     /** Pago registrado en una factura donde el técnico tiene servicios. */
     public const TYPE_EMP_PAGO_FACTURA = 'emp_pago_factura';
+
+    /** Admin registró en sistema el abono de referencia al técnico por un servicio (`technician_paid_at`). */
+    public const TYPE_EMP_ABONO_TECNICO_REGISTRADO = 'emp_abono_tecnico_registrado';
 
     /** Admin borró datos de pago del técnico (p. ej. fallo al abonar). */
     public const TYPE_EMP_DATOS_PAGO_REQUIEREN_ACTUALIZACION = 'emp_datos_pago_actualizar';
@@ -59,6 +65,12 @@ class PanelNotification extends Model
     /** Servicio del técnico quitado del borrador de una factura. */
     public const TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR = 'emp_servicio_excluido_borrador';
 
+    /** Admin asignó un servicio al técnico; debe completarlo o rechazarlo. */
+    public const TYPE_EMP_SERVICIO_ASIGNADO_ADMIN = 'emp_servicio_asignado_admin';
+
+    /** Técnico rechazó una asignación (avisar a administración). */
+    public const TYPE_ADMIN_ASIGNACION_RECHAZADA = 'admin_asignacion_rechazada';
+
     protected $table = 'panel_notifications';
 
     /**
@@ -70,11 +82,13 @@ class PanelNotification extends Model
             self::TYPE_EMP_CORREO_APROBADO,
             self::TYPE_EMP_CORREO_RECHAZADO,
             self::TYPE_EMP_PAGO_FACTURA,
+            self::TYPE_EMP_ABONO_TECNICO_REGISTRADO,
             self::TYPE_EMP_DATOS_PAGO_REQUIEREN_ACTUALIZACION,
             self::TYPE_EMP_SERVICIO_MODIFICADO_ADMIN,
             self::TYPE_EMP_SERVICIO_ELIMINADO_ADMIN,
             self::TYPE_EMP_SERVICIO_FACTURA_APROBADA,
             self::TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR,
+            self::TYPE_EMP_SERVICIO_ASIGNADO_ADMIN,
         ];
     }
 
@@ -87,9 +101,13 @@ class PanelNotification extends Model
             self::TYPE_EMP_SERVICIO_MODIFICADO_ADMIN,
             self::TYPE_EMP_SERVICIO_ELIMINADO_ADMIN,
             self::TYPE_EMP_SERVICIO_FACTURA_APROBADA,
-            self::TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR => 'servicios',
+            self::TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR,
+            self::TYPE_EMP_SERVICIO_ASIGNADO_ADMIN,
+            self::TYPE_ADMIN_ASIGNACION_RECHAZADA,
+            self::TYPE_EMP_ABONO_TECNICO_REGISTRADO => 'servicios',
             self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
-            self::TYPE_EMAIL_CHANGE_REQUEST => 'empleados',
+            self::TYPE_EMAIL_CHANGE_REQUEST,
+            self::TYPE_PASSWORD_RESET_REQUEST => 'empleados',
             default => 'facturas',
         };
     }
@@ -111,6 +129,14 @@ class PanelNotification extends Model
         if ($type === self::TYPE_EMAIL_CHANGE_REQUEST) {
             if (isset($meta['empleado_id']) && is_numeric($meta['empleado_id'])) {
                 return '/admin/empleados/rendimiento?usuario_id='.(int) $meta['empleado_id'];
+            }
+
+            return '/admin/empleados/rendimiento';
+        }
+
+        if ($type === self::TYPE_PASSWORD_RESET_REQUEST) {
+            if (isset($meta['usuario_id']) && is_numeric($meta['usuario_id'])) {
+                return '/admin/empleados/rendimiento?usuario_id='.(int) $meta['usuario_id'];
             }
 
             return '/admin/empleados/rendimiento';
@@ -142,6 +168,9 @@ class PanelNotification extends Model
             self::TYPE_SERVICE_CREATED => $serviceId !== null
                 ? '/admin/servicios/'.$serviceId
                 : '/admin/servicios',
+            self::TYPE_ADMIN_ASIGNACION_RECHAZADA => $serviceId !== null
+                ? '/admin/servicios/'.$serviceId
+                : '/admin/servicios',
             self::TYPE_ALERT_SERVICES_ZERO => '/admin/servicios',
             self::TYPE_CATALOG_SUGGESTION_PENDING => '/admin/catalogo-servicios',
             self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
@@ -161,8 +190,13 @@ class PanelNotification extends Model
                 self::TYPE_SERVICE_CREATED,
                 self::TYPE_ALERT_SERVICES_ZERO,
                 self::TYPE_CATALOG_SUGGESTION_PENDING,
+                self::TYPE_ADMIN_ASIGNACION_RECHAZADA,
             ],
-            'empleados' => [self::TYPE_EMPLEADO_PERFIL_COMPLETADO, self::TYPE_EMAIL_CHANGE_REQUEST],
+            'empleados' => [
+                self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
+                self::TYPE_EMAIL_CHANGE_REQUEST,
+                self::TYPE_PASSWORD_RESET_REQUEST,
+            ],
             'facturas' => [
                 self::TYPE_INVOICE_DRAFT,
                 self::TYPE_INVOICE_PENDING_APPROVAL,

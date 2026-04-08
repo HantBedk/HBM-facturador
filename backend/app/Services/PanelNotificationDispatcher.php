@@ -43,6 +43,35 @@ class PanelNotificationDispatcher
     }
 
     /**
+     * Notificaciones a usuarios admin concretos (p. ej. solo super_admin o lista filtrada).
+     *
+     * @param  list<int>  $userIds
+     * @param  array<string, mixed>  $meta
+     */
+    public function notifyUserIds(array $userIds, string $type, string $message, array $meta = [], ?string $dedupeKey = null): void
+    {
+        foreach ($userIds as $userId) {
+            $userId = (int) $userId;
+            if ($userId < 1) {
+                continue;
+            }
+            $key = $dedupeKey !== null ? $dedupeKey.'_user_'.$userId : null;
+            if ($key !== null && PanelNotification::query()->where('dedupe_key', $key)->exists()) {
+                continue;
+            }
+
+            PanelNotification::query()->create([
+                'user_id' => $userId,
+                'type' => $type,
+                'message' => $message,
+                'read' => false,
+                'meta' => $meta !== [] ? $meta : null,
+                'dedupe_key' => $key,
+            ]);
+        }
+    }
+
+    /**
      * Notificación para un usuario concreto (p. ej. técnico: correo, pagos en facturas).
      *
      * @param  array<string, mixed>  $meta

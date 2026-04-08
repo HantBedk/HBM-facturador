@@ -15,7 +15,11 @@ class CompanyController extends Controller
     public function index(): AnonymousResourceCollection
     {
         return CompanyResource::collection(
-            Company::query()->activas()->orderBy('nombre')->get()
+            Company::query()
+                ->activas()
+                ->where('es_cliente_puntual', false)
+                ->orderBy('nombre')
+                ->get()
         );
     }
 }

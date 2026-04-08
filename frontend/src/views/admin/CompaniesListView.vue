@@ -138,6 +138,8 @@ const {
   { initialKey: 'nombre', initialDir: 'asc' }
 )
 
+const directoryPageTitle = 'Empresas registradas'
+
 const MONTH_NAMES = [
   'Enero',
   'Febrero',
@@ -622,9 +624,8 @@ async function load() {
   error.value = ''
   loading.value = true
   try {
-    rows.value = await fetchAdminCompanies({
-      q: search.value,
-    })
+    const params = { q: search.value, company_kind: 'registered' }
+    rows.value = await fetchAdminCompanies(params)
   } catch (e) {
     error.value = e.data?.message || e.message || 'No se pudieron cargar las empresas.'
     rows.value = []
@@ -789,16 +790,15 @@ async function submitDeleteCompanyModal() {
     <header class="head">
       <div class="head-main">
         <div class="head-title-row">
-          <h1>Empresas</h1>
+          <h1>{{ directoryPageTitle }}</h1>
           <button type="button" class="btn primary" @click="openCreate">+ Nueva empresa</button>
         </div>
         <p class="lede">
-          Clientes del sistema. Solo las activas aparecen al registrar servicios. Solo se puede eliminar una empresa si no
-          tiene servicios ni ítems de catálogo asociados (las facturas se eliminan en cascada si aplica). Para eliminar debe
-          confirmar escribiendo la sigla de factura.
-          Pulse el nombre para ver facturas, servicios fijos, servicios registrados y métricas. Los cargos fijos mensuales se
-          gestionan con el ícono de calendario en <strong>Acciones</strong> o con <strong>Gestionar todo</strong> dentro del
-          panel de la empresa (listado, alta, edición y baja en una sola ventana).
+          <strong>Empresas registradas</strong> son las que usted crea aquí (alta manual): cuentas B2B que controla la
+          administración. Las ventas ocasionales sin alta no generan filas en este directorio; el dato del comprador queda en el
+          servicio y en la factura emitida. Solo las empresas activas aparecen al registrar servicios para técnicos. Para
+          eliminar una empresa debe cumplir condiciones (sin dependencias); confirme escribiendo la sigla de factura. Pulse el
+          nombre para ver facturas, servicios fijos, servicios y métricas.
         </p>
       </div>
     </header>
@@ -1576,6 +1576,35 @@ h1 {
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: rgba(15, 23, 42, 0.55);
   margin-bottom: 1rem;
+}
+
+.list-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.list-tab {
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(2, 6, 23, 0.35);
+  color: #cbd5e1;
+  padding: 0.4rem 0.85rem;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.list-tab:hover {
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #e2e8f0;
+}
+
+.list-tab--on {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.12);
+  color: #e0f2fe;
 }
 
 .toolbar {

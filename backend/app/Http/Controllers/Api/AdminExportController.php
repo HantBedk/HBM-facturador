@@ -86,7 +86,7 @@ class AdminExportController extends Controller
                 }
                 fputcsv($out, [
                     $svc->service_date?->format('Y-m-d'),
-                    $svc->company?->nombre,
+                    $svc->company?->nombre ?? $svc->client_name,
                     $svc->company?->nit,
                     $svc->code,
                     $svc->service_type,
@@ -110,6 +110,7 @@ class AdminExportController extends Controller
     {
         $request->validate([
             'company_id' => ['sometimes', 'nullable', 'integer', 'exists:companies,id'],
+            'company_kind' => ['sometimes', 'nullable', 'string', 'in:registered,quick,counter'],
             'status' => ['sometimes', 'nullable', 'string', 'max:32'],
             'period_year' => ['sometimes', 'nullable', 'integer', 'min:2000', 'max:2100'],
             'period_month' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:12'],
@@ -119,6 +120,13 @@ class AdminExportController extends Controller
         $q = Invoice::query()
             ->with('company:id,nombre,nit')
             ->withSum('payments', 'amount');
+
+        $ck = $request->string('company_kind')->toString();
+        if ($ck === 'quick' || $ck === 'counter') {
+            $q->whereNull('company_id');
+        } elseif ($ck === 'registered') {
+            $q->whereNotNull('company_id');
+        }
 
         if ($request->filled('company_id')) {
             $q->where('company_id', $request->integer('company_id'));
@@ -166,8 +174,8 @@ class AdminExportController extends Controller
                 $period = $inv->period_month.'/'.$inv->period_year;
                 fputcsv($out, [
                     $inv->code,
-                    $inv->company?->nombre,
-                    $inv->company?->nit,
+                    $inv->company?->nombre ?? $inv->bill_to_nombre,
+                    $inv->company?->nit ?? $inv->bill_to_nit,
                     $period,
                     $inv->status,
                     number_format($total, 2, '.', ''),

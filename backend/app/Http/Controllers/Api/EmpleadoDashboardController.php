@@ -3,8 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Invoice;
 use App\Models\Service;
+use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -28,22 +31,23 @@ class EmpleadoDashboardController extends Controller
             ->whereMonth('service_date', $month);
 
         $servicesCountMonth = (clone $monthBase)->count();
-        $totalAmountMonth = (string) (clone $monthBase)->sum('amount');
+        $totalAmountMonth = $this->sumTechnicianReference(clone $monthBase);
 
         $historialBase = Service::query()
             ->where('user_id', $user->id)
             ->visibles();
 
         $servicesCountHistorial = (clone $historialBase)->count();
-        $totalAmountHistorial = (string) (clone $historialBase)->sum('amount');
-        $avgHistorial = $servicesCountHistorial > 0
-            ? (string) round(((float) $totalAmountHistorial) / $servicesCountHistorial, 2)
-            : '0';
+        $totalAmountHistorial = $this->sumTechnicianReference(clone $historialBase);
+
+        $companyOwes = $this->companyOwesPendingTechnicianPayment($user);
 
         $lastRegistered = Service::query()
             ->where('user_id', $user->id)
             ->visibles()
             ->with(['company:id,nombre'])
+            ->withSum('items', 'technician_line_amount')
+            ->withCount('items')
             ->orderByDesc('created_at')
             ->first();
 
@@ -51,6 +55,8 @@ class EmpleadoDashboardController extends Controller
             ->where('user_id', $user->id)
             ->visibles()
             ->with(['company:id,nombre'])
+            ->withSum('items', 'technician_line_amount')
+            ->withCount('items')
             ->orderByDesc('created_at')
             ->limit(10)
             ->get()
@@ -69,7 +75,7 @@ class EmpleadoDashboardController extends Controller
                 'total_amount_month' => $totalAmountMonth,
                 'services_count_historial' => $servicesCountHistorial,
                 'total_amount_historial' => $totalAmountHistorial,
-                'avg_per_service_historial' => $avgHistorial,
+                'company_owes' => $companyOwes,
                 'last_registered' => $lastRegistered ? $this->serviceRow($lastRegistered) : null,
             ],
             'recent_services' => $recent,
@@ -78,11 +84,74 @@ class EmpleadoDashboardController extends Controller
     }
 
     /**
+     * Saldo de referencia pendiente de abono (misma regla que administración «pendiente de abono»):
+     * servicios visibles del técnico sin `technician_paid_at` y con importe de referencia &gt; 0.
+     * Incluye servicios aún no ligados a factura o solo en borrador; no exige factura emitida para mostrar deuda.
+     *
+     * `pending_invoices_count`: facturas distintas (no borrador) vinculadas a esos servicios, solo informativo.
+     *
+     * @return array{pending_total: string, pending_services_count: int, pending_invoices_count: int}
+     */
+    private function companyOwesPendingTechnicianPayment(User $user): array
+    {
+        $rows = Service::query()
+            ->where('user_id', $user->id)
+            ->visibles()
+            ->whereNull('technician_paid_at')
+            ->withSum('items', 'technician_line_amount')
+            ->withCount('items')
+            ->with(['invoices' => function ($q) {
+                $q->select('invoices.id', 'invoices.status');
+            }])
+            ->get();
+
+        $sum = 0.0;
+        $svcCount = 0;
+        $invoiceIds = collect();
+        foreach ($rows as $s) {
+            $v = $s->technicianReferenceTotalValue();
+            if ($v <= 0.00001) {
+                continue;
+            }
+            $sum += $v;
+            $svcCount++;
+            foreach ($s->invoices as $inv) {
+                if ($inv->status !== Invoice::STATUS_BORRADOR) {
+                    $invoiceIds->push((int) $inv->id);
+                }
+            }
+        }
+
+        return [
+            'pending_total' => number_format($sum, 2, '.', ''),
+            'pending_services_count' => $svcCount,
+            'pending_invoices_count' => $invoiceIds->unique()->count(),
+        ];
+    }
+
+    /**
+     * Suma importes de referencia del técnico (sin margen/incremento de empresa), coherente con Service::technicianReferenceTotalValue().
+     */
+    private function sumTechnicianReference(Builder $base): string
+    {
+        $rows = (clone $base)->withSum('items', 'technician_line_amount')->withCount('items')->get();
+        $sum = 0.0;
+        foreach ($rows as $s) {
+            $sum += $s->technicianReferenceTotalValue();
+        }
+
+        return number_format($sum, 2, '.', '');
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function serviceRow(Service $s): array
     {
         $s->loadMissing('company:id,nombre');
+        if (! $s->relationLoaded('items_count')) {
+            $s->loadSum('items', 'technician_line_amount')->loadCount('items');
+        }
 
         return [
             'id' => $s->id,
@@ -90,7 +159,7 @@ class EmpleadoDashboardController extends Controller
             'service_date' => $s->service_date?->format('Y-m-d'),
             'company_name' => $s->company?->nombre,
             'description' => Str::limit((string) $s->description, 120),
-            'amount' => (string) $s->amount,
+            'amount' => number_format($s->technicianReferenceTotalValue(), 2, '.', ''),
             'created_at' => $s->created_at?->toIso8601String(),
         ];
     }

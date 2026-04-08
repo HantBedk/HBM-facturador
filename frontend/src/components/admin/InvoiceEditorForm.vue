@@ -1,12 +1,13 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
-import { fetchCompanies } from '@/services/servicesApi.js'
+import { fetchAdminCompanies } from '@/services/companiesApi.js'
 import {
   createInvoice,
   fetchAdminInvoice,
   fetchAvailableServicesForInvoice,
+  fetchAvailableWalkInServicesForInvoice,
   updateInvoice,
 } from '@/services/invoicesApi.js'
 
@@ -30,6 +31,8 @@ const resolvedId = computed(() => {
 const isEdit = computed(() => !!resolvedId.value)
 
 const companies = ref([])
+/** `registered` = empresa en directorio; `counter` = venta sin fila en empresas (solo teléfono en servicios). */
+const companyPickerTab = ref('registered')
 const loading = ref(true)
 const loadingServices = ref(false)
 const saving = ref(false)
@@ -37,11 +40,14 @@ const loadError = ref('')
 const saveError = ref('')
 
 const companyId = ref('')
+/** Teléfono tal como lo escribe el usuario (se normaliza a dígitos para la API). */
+const walkInPhoneInput = ref('')
 const periodYear = ref(new Date().getFullYear())
 const periodMonth = ref(new Date().getMonth() + 1)
 
 const available = ref([])
 const selectedIds = ref([])
+const selectAllCheckboxRef = ref(null)
 
 const {
   sortedRows: sortedAvailable,
@@ -60,6 +66,19 @@ const {
 )
 
 const invoice = ref(null)
+
+const companiesInPickerTab = computed(() => (companies.value || []).filter((c) => !c.es_cliente_puntual))
+
+function digitsOnly(s) {
+  return String(s || '').replace(/\D/g, '')
+}
+
+const walkInPhoneDigits = computed(() => digitsOnly(walkInPhoneInput.value))
+
+function companyOptionLabel(c) {
+  if (!c) return ''
+  return c.nombre
+}
 
 const skipWatch = ref(true)
 
@@ -91,12 +110,56 @@ function toggleId(id) {
   }
 }
 
+const allAvailableSelected = computed(() => {
+  const rows = sortedAvailable.value
+  if (!rows.length) return false
+  return rows.every((r) => selectedIds.value.includes(r.id))
+})
+
+const someAvailableSelected = computed(() => {
+  const rows = sortedAvailable.value
+  if (!rows.length) return false
+  const n = rows.filter((r) => selectedIds.value.includes(r.id)).length
+  return n > 0 && n < rows.length
+})
+
+function selectAllAvailableServices() {
+  selectedIds.value = sortedAvailable.value.map((r) => r.id)
+}
+
+function clearServiceSelection() {
+  selectedIds.value = []
+}
+
+function toggleSelectAllCheckbox() {
+  if (allAvailableSelected.value) {
+    clearServiceSelection()
+  } else {
+    selectAllAvailableServices()
+  }
+}
+
+watch([allAvailableSelected, someAvailableSelected, sortedAvailable], () => {
+  nextTick(() => {
+    const el = selectAllCheckboxRef.value
+    if (el && 'indeterminate' in el) {
+      el.indeterminate = someAvailableSelected.value
+    }
+  })
+}, { flush: 'post' })
+
 const totalPreview = computed(() => {
+  const rows = sortedAvailable.value.filter((row) => isSelected(row.id))
   let t = 0
-  for (const row of sortedAvailable.value) {
-    if (isSelected(row.id)) t += Number(row.amount) || 0
+  for (const row of rows) {
+    t += Number(row.amount) || 0
   }
   return t
+})
+
+const canSubmitInvoice = computed(() => {
+  if (companyPickerTab.value === 'registered') return !!companyId.value
+  return walkInPhoneDigits.value.length >= 7
 })
 
 function money(v) {
@@ -106,19 +169,33 @@ function money(v) {
 }
 
 async function loadAvailable() {
-  if (!companyId.value) {
+  loadError.value = ''
+  if (companyPickerTab.value === 'registered' && !companyId.value) {
     available.value = []
     return
   }
-  loadError.value = ''
+  if (companyPickerTab.value === 'counter' && walkInPhoneDigits.value.length < 7) {
+    available.value = []
+    return
+  }
   loadingServices.value = true
   try {
-    const data = await fetchAvailableServicesForInvoice({
-      company_id: companyId.value,
-      period_year: Number(periodYear.value),
-      period_month: Number(periodMonth.value),
-      invoice_id: isEdit.value ? resolvedId.value : undefined,
-    })
+    let data = []
+    if (companyPickerTab.value === 'registered') {
+      data = await fetchAvailableServicesForInvoice({
+        company_id: companyId.value,
+        period_year: Number(periodYear.value),
+        period_month: Number(periodMonth.value),
+        invoice_id: isEdit.value ? resolvedId.value : undefined,
+      })
+    } else {
+      data = await fetchAvailableWalkInServicesForInvoice({
+        contact_phone_key: walkInPhoneDigits.value,
+        period_year: Number(periodYear.value),
+        period_month: Number(periodMonth.value),
+        invoice_id: isEdit.value ? resolvedId.value : undefined,
+      })
+    }
     available.value = data
     const valid = new Set(data.map((r) => r.id))
     selectedIds.value = selectedIds.value.filter((id) => valid.has(id))
@@ -130,7 +207,7 @@ async function loadAvailable() {
   }
 }
 
-watch([companyId, periodYear, periodMonth], () => {
+watch([companyId, periodYear, periodMonth, walkInPhoneInput, companyPickerTab], () => {
   if (skipWatch.value) return
   loadAvailable()
 })
@@ -140,7 +217,7 @@ async function bootstrap() {
   loading.value = true
   skipWatch.value = true
   try {
-    companies.value = await fetchCompanies()
+    companies.value = await fetchAdminCompanies({ company_kind: 'registered' })
   } catch {
     companies.value = []
   }
@@ -154,7 +231,15 @@ async function bootstrap() {
         skipWatch.value = false
         return
       }
-      companyId.value = String(invoice.value.company_id)
+      if (invoice.value.company_id != null && invoice.value.company_id !== '') {
+        companyId.value = String(invoice.value.company_id)
+        companyPickerTab.value = 'registered'
+      } else {
+        companyPickerTab.value = 'counter'
+        const s0 = (invoice.value.services || [])[0]
+        walkInPhoneInput.value =
+          s0?.contact_phone_key || s0?.client_telefono || invoice.value.bill_to?.telefono || ''
+      }
       periodYear.value = invoice.value.period_year
       periodMonth.value = invoice.value.period_month
       selectedIds.value = (invoice.value.services || []).map((s) => s.id)
@@ -163,7 +248,9 @@ async function bootstrap() {
       loadError.value = e.data?.message || e.message || 'No se pudo cargar la factura.'
     }
   } else {
+    companyPickerTab.value = 'registered'
     companyId.value = ''
+    walkInPhoneInput.value = ''
     periodYear.value = new Date().getFullYear()
     periodMonth.value = new Date().getMonth() + 1
     invoice.value = null
@@ -185,10 +272,15 @@ watch(
 
 async function onSubmit() {
   saveError.value = ''
-  if (!companyId.value) {
+  if (companyPickerTab.value === 'registered' && !companyId.value) {
     saveError.value = 'Seleccione una empresa.'
     return
   }
+  if (companyPickerTab.value === 'counter' && walkInPhoneDigits.value.length < 7) {
+    saveError.value = 'Indique un teléfono con al menos 7 dígitos (venta sin alta).'
+    return
+  }
+
   const service_ids = [...selectedIds.value]
   if (service_ids.length === 0) {
     saveError.value = 'Seleccione al menos un servicio del periodo.'
@@ -197,12 +289,15 @@ async function onSubmit() {
 
   saving.value = true
   try {
-    const payload = {
-      company_id: Number(companyId.value),
+    const base = {
       period_year: Number(periodYear.value),
       period_month: Number(periodMonth.value),
       service_ids,
     }
+    const payload =
+      companyPickerTab.value === 'registered'
+        ? { ...base, company_id: Number(companyId.value) }
+        : { ...base, contact_phone_key: walkInPhoneDigits.value }
     let result
     if (isEdit.value) {
       result = await updateInvoice(resolvedId.value, payload)
@@ -236,16 +331,15 @@ async function onSubmit() {
           {{ isEdit ? (invoice?.code ? `Editar factura (${invoice.code})` : 'Editar factura') : 'Nueva factura' }}
         </h1>
         <p class="lede">
-          Elija empresa y periodo (mes de prestación), luego marque los servicios a incluir. El total se calcula de los
-          servicios seleccionados. Al crear el borrador se asigna
-          <strong>FAC-YYMMDD-SIGLA</strong> (fecha de creación; máximo 1 factura por empresa y día).
+          <strong>Nueva factura</strong>: empresa del directorio, borrador y luego aprobación; código <strong>FAC-YYMMDD-SIGLA</strong>.
+          La emisión directa de <strong>venta sin alta</strong> (aprobada al instante) está en el listado de facturas, pendientes o vista
+          «Solo ventas sin alta».
         </p>
       </div>
     </header>
 
     <p v-else class="lede lede--embedded">
-      Elija empresa y periodo, marque los servicios a incluir y cree el borrador
-      <strong>FAC-YYMMDD-SIGLA</strong>.
+      Empresa (borrador). Venta sin alta aprobada de una vez: desde el listado de facturas.
     </p>
 
     <p v-if="loadError && !loading" class="banner err">{{ loadError }}</p>
@@ -254,13 +348,31 @@ async function onSubmit() {
     <p v-if="loading" class="muted">Cargando…</p>
 
     <form v-else class="card form" @submit.prevent="onSubmit">
+      <p v-if="companyPickerTab === 'counter'" class="tab-hint">
+        Borrador <strong>venta sin alta</strong>: mismo teléfono que al registrar el servicio sin empresa. Marque las líneas a incluir;
+        al aprobar desde el listado se cerrará el flujo. Para emitir aprobada de una vez use pendientes en facturas.
+      </p>
+
       <div class="grid">
-        <label class="field">
+        <label v-if="companyPickerTab === 'registered'" class="field field--wide">
           <span>Empresa <abbr title="obligatorio">*</abbr></span>
           <select v-model="companyId" class="input" required :disabled="saving">
             <option value="" disabled>Seleccione…</option>
-            <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
+            <option v-for="c in companiesInPickerTab" :key="c.id" :value="String(c.id)">
+              {{ companyOptionLabel(c) }}
+            </option>
           </select>
+        </label>
+        <label v-else class="field field--wide">
+          <span>Teléfono del cliente <abbr title="obligatorio">*</abbr></span>
+          <input
+            v-model="walkInPhoneInput"
+            type="tel"
+            class="input"
+            autocomplete="tel"
+            placeholder="Ej. 300 123 4567"
+            :disabled="saving"
+          />
         </label>
         <label class="field">
           <span>Año del periodo <abbr title="obligatorio">*</abbr></span>
@@ -274,14 +386,23 @@ async function onSubmit() {
         </label>
       </div>
 
-      <div v-if="companyId" class="services-block">
+      <div v-if="canSubmitInvoice" class="services-block">
         <div class="services-head">
           <h2>Servicios del periodo</h2>
           <p class="hint">
-            Solo aparecen servicios visibles de la empresa en ese mes que no estén en otra factura. Al editar un borrador,
-            se incluyen los ya vinculados a esta factura.
+            Solo servicios visibles del periodo que aún no están en otra factura. Al editar un borrador, puede marcar líneas.
           </p>
           <p v-if="loadingServices" class="muted">Cargando servicios…</p>
+          <div
+            v-if="available.length && !loadingServices"
+            class="bulk-select-row"
+            role="group"
+            aria-label="Selección masiva de servicios"
+          >
+            <button type="button" class="bulk-link" @click="selectAllAvailableServices">Seleccionar todos</button>
+            <span class="bulk-sep" aria-hidden="true">·</span>
+            <button type="button" class="bulk-link" @click="clearServiceSelection">Quitar selección</button>
+          </div>
         </div>
 
         <div v-if="!loadingServices && available.length === 0" class="muted box-empty">
@@ -292,7 +413,20 @@ async function onSubmit() {
           <table class="table">
             <thead>
               <tr>
-                <th class="chk" />
+                <th class="chk">
+                  <input
+                    ref="selectAllCheckboxRef"
+                    type="checkbox"
+                    :checked="allAvailableSelected"
+                    :disabled="!sortedAvailable.length || loadingServices"
+                    :aria-label="
+                      allAvailableSelected
+                        ? 'Quitar selección de todos los servicios visibles'
+                        : 'Seleccionar todos los servicios visibles'
+                    "
+                    @change="toggleSelectAllCheckbox"
+                  />
+                </th>
                 <th scope="col" :aria-sort="availAriaSort('code')">
                   <button type="button" class="th-sort" @click="toggleAvailSort('code')">
                     Código<span class="sort-ind" aria-hidden="true">{{ availSortInd('code') }}</span>
@@ -338,8 +472,14 @@ async function onSubmit() {
       <div class="actions">
         <button v-if="embedded" type="button" class="btn secondary" @click="emit('cancel')">Cancelar</button>
         <RouterLink v-else class="btn secondary" to="/admin/facturas">Cancelar</RouterLink>
-        <button type="submit" class="btn primary" :disabled="saving || !companyId">
-          {{ saving ? 'Guardando…' : isEdit ? 'Guardar cambios' : 'Crear borrador' }}
+        <button
+          type="submit"
+          class="btn primary"
+          :disabled="saving || !canSubmitInvoice"
+        >
+          {{
+            saving ? 'Procesando…' : isEdit ? 'Guardar cambios' : 'Crear borrador'
+          }}
         </button>
       </div>
     </form>
@@ -405,11 +545,22 @@ h1 {
   background: rgba(15, 23, 42, 0.55);
 }
 
+.tab-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
   margin-bottom: 1.25rem;
+}
+
+.field--wide {
+  grid-column: 1 / -1;
 }
 
 .field span {
@@ -443,6 +594,42 @@ h1 {
   margin: 0 0 0.75rem;
   font-size: 0.82rem;
   color: #64748b;
+}
+
+.bulk-select-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin: 0 0 0.65rem;
+  font-size: 0.8rem;
+}
+
+.bulk-link {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: #38bdf8;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.bulk-link:hover {
+  color: #7dd3fc;
+}
+
+.bulk-link:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.bulk-sep {
+  color: #64748b;
+  user-select: none;
 }
 
 .box-empty {

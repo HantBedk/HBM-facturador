@@ -107,9 +107,18 @@ export function fetchService(id) {
 export function createService(payload, photoFiles = []) {
   const files = Array.isArray(photoFiles) ? photoFiles.filter((f) => f instanceof File) : []
   const hasItems = Array.isArray(payload.items) && payload.items.length > 0
+  const hasQuick =
+    payload.quick_client &&
+    typeof payload.quick_client === 'object' &&
+    String(payload.quick_client.nombre || '').trim() !== '' &&
+    String(payload.quick_client.telefono || '').trim() !== ''
   if (files.length > 0) {
     const fd = new FormData()
-    fd.append('company_id', String(payload.company_id))
+    if (hasQuick) {
+      fd.append('quick_client', JSON.stringify(payload.quick_client))
+    } else {
+      fd.append('company_id', String(payload.company_id))
+    }
     fd.append('client_name', String(payload.client_name ?? ''))
     fd.append('service_type', String(payload.service_type ?? ''))
     fd.append('description', String(payload.description ?? ''))
@@ -131,6 +140,11 @@ export function createService(payload, photoFiles = []) {
   delete body.service_date
   if (body.catalog_id === '' || body.catalog_id == null) delete body.catalog_id
   if (!hasItems) delete body.items
+  if (hasQuick) {
+    delete body.company_id
+  } else {
+    delete body.quick_client
+  }
   return api('/services', {
     method: 'POST',
     body: JSON.stringify(body),
@@ -153,6 +167,49 @@ export function patchServiceTechnicianPaid(id, payload) {
   return api(`/services/${id}/technician-paid`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
+  }).then((r) => r.data)
+}
+
+/** Solo admin: crea servicio mínimo para un técnico (pendiente de completar). */
+export function assignServiceToTechnician(payload) {
+  return api('/admin/services/assign-to-technician', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }).then((r) => r.data)
+}
+
+/**
+ * Técnico: sustituye líneas e importes y cierra la asignación (mismo cuerpo que alta con ítems).
+ * @param {number|string} id
+ * @param {Record<string, unknown>} payload
+ * @param {File[]} [photoFiles]
+ */
+export function completeServiceAssignment(id, payload, photoFiles = []) {
+  const files = Array.isArray(photoFiles) ? photoFiles.filter((f) => f instanceof File) : []
+  const hasItems = Array.isArray(payload.items) && payload.items.length > 0
+  if (files.length > 0) {
+    const fd = new FormData()
+    fd.append('client_name', String(payload.client_name ?? ''))
+    fd.append('service_type', String(payload.service_type ?? ''))
+    if (hasItems) fd.append('items', JSON.stringify(payload.items))
+    for (const f of files.slice(0, 4)) {
+      fd.append('photos[]', f)
+    }
+    return api(`/services/${id}/complete-assignment`, {
+      method: 'POST',
+      body: fd,
+    }).then((r) => r.data)
+  }
+  return api(`/services/${id}/complete-assignment`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }).then((r) => r.data)
+}
+
+/** Técnico: rechaza asignación pendiente. */
+export function rejectServiceAssignment(id) {
+  return api(`/services/${id}/reject-assignment`, {
+    method: 'POST',
   }).then((r) => r.data)
 }
 

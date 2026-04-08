@@ -308,10 +308,24 @@
                         <tr class="grand">
                             <td colspan="2">
                                 <div class="grand-bar">
-                                    TOTAL A PAGAR: {{ $fmtCop($data['financial']['total'] ?? 0) }}
+                                    TOTAL DE LA FACTURA: {{ $fmtCop($data['financial']['total'] ?? 0) }}
                                 </div>
                             </td>
                         </tr>
+                        @php
+                            $pubPaid = (float) ($data['financial']['total_paid'] ?? 0);
+                            $pubBal = (float) ($data['financial']['balance'] ?? 0);
+                        @endphp
+                        @if($pubPaid > 0.00001 || $pubBal > 0.00001)
+                        <tr>
+                            <td class="lbl">TOTAL ABONADO</td>
+                            <td class="val">{{ $fmtCop($pubPaid) }}</td>
+                        </tr>
+                        <tr>
+                            <td class="lbl">SALDO PENDIENTE</td>
+                            <td class="val" style="font-weight: 700; color: #0c4a6e;">{{ $fmtCop($pubBal) }}</td>
+                        </tr>
+                        @endif
                     </table>
                 </td>
             </tr>

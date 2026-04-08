@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, ref, computed, defineAsyncComponent } from 'vue'
+import { RouterLink } from 'vue-router'
 import { api } from '@/services/api.js'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import AdminDashboardPendingInvoicesPanel from '@/components/admin/AdminDashboardPendingInvoicesPanel.vue'
@@ -117,6 +118,12 @@ const pendingAttentionCount = computed(() => {
 })
 
 const metrics = computed(() => data.value?.metrics)
+
+/** @type {import('vue').ComputedRef<{ user_id: number, nombre: string, services_count: number, pending_total: string }[]>} */
+const technicianUnpaidByEmployee = computed(() => {
+  const rows = metrics.value?.technician_unpaid_by_employee
+  return Array.isArray(rows) ? rows : []
+})
 const recent = computed(() => data.value?.recent || { services: [], invoices: [] })
 
 const dashSvcTableSource = computed(() => {
@@ -502,18 +509,42 @@ const netAfterTechniciansClass = computed(() => {
           </div>
         </article>
 
-        <article class="bg-[#1e2532]/80 rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between min-h-[120px] border border-dashed border-slate-600/50">
+        <article
+          class="bg-[#1e2532] rounded-2xl p-6 shadow-lg shadow-black/20 flex flex-col justify-between min-h-[120px] border border-amber-900/30"
+        >
           <div class="flex items-center gap-3 mb-2">
-            <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-slate-600/20 text-slate-500">
+            <div class="flex-shrink-0 h-9 w-9 flex items-center justify-center rounded-lg bg-amber-500/10 text-amber-400">
               <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+                />
               </svg>
             </div>
-            <h3 class="text-[0.85rem] font-medium text-slate-500">En construcción</h3>
+            <h3 class="text-[0.85rem] font-medium text-slate-300">Ref. técnico pendiente por empleado</h3>
           </div>
-          <div>
-            <p class="text-[1.25rem] font-semibold text-slate-500 leading-snug">Próximamente</p>
-            <p class="text-[0.75rem] text-slate-600 mt-2">Reservado para otra métrica.</p>
+          <div class="min-h-[4.5rem]">
+            <ul v-if="technicianUnpaidByEmployee.length" class="space-y-2 text-[0.8rem] text-slate-300 max-h-[7rem] overflow-y-auto pr-1">
+              <li
+                v-for="row in technicianUnpaidByEmployee.slice(0, 5)"
+                :key="row.user_id"
+                class="flex items-center justify-between gap-2 border-b border-slate-700/50 pb-1.5 last:border-0"
+              >
+                <RouterLink
+                  class="truncate text-sky-300 hover:underline font-medium"
+                  :to="`/admin/empleados/rendimiento/${row.user_id}`"
+                >
+                  {{ row.nombre }}
+                </RouterLink>
+                <span class="shrink-0 text-amber-200/90 tabular-nums">{{ formatMoney(row.pending_total) }}</span>
+              </li>
+            </ul>
+            <p v-else class="text-[0.85rem] text-slate-500">Sin saldos ref. pendientes de registrar.</p>
+            <p v-if="technicianUnpaidByEmployee.length > 5" class="mt-2 text-[0.7rem] text-slate-500">
+              +{{ technicianUnpaidByEmployee.length - 5 }} más (historial por técnico o listado de servicios)
+            </p>
           </div>
         </article>
 

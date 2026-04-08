@@ -18,6 +18,7 @@ class CompanyResource extends JsonResource
             'estado' => $this->estado ?? 'activo',
             'telefono' => $this->telefono,
             'correo' => $this->correo,
+            'es_cliente_puntual' => (bool) ($this->es_cliente_puntual ?? false),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }
