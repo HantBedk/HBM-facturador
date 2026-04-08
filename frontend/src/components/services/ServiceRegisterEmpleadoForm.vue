@@ -150,6 +150,9 @@ function addCatalogLine(item) {
       amount: '',
       propose_catalog: false,
       isOtherLine: false,
+      /** Tope orientativo (precio base del catálogo): el importe no puede superarlo en este formulario. */
+      catalog_max_price:
+        hintPrice != null && Number.isFinite(hintPrice) && hintPrice > 0 ? hintPrice : null,
       catalog_hint_desc: hintDesc,
       catalog_hint_price: hintPrice,
       catalog_hint_dismissed: false,
@@ -209,6 +212,41 @@ function dismissCatalogHint(index) {
   if (!row || row.catalog_hint_dismissed) return
   if (!row.catalog_hint_desc && row.catalog_hint_price == null) return
   updateLine(index, { catalog_hint_dismissed: true })
+}
+
+/** Precio máximo (COP) para líneas de catálogo: `base_price` del ítem. */
+function catalogMaxPriceForRow(row) {
+  if (row == null || row.catalog_id == null || row.isOtherLine) return null
+  const stored = row.catalog_max_price
+  if (stored != null && stored !== '') {
+    const n = Number(stored)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  const c = props.catalogItems.find((x) => Number(x.id) === Number(row.catalog_id))
+  if (c != null && c.base_price != null) {
+    const n = Number(c.base_price)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return null
+}
+
+function onLineAmountInput(index, ev) {
+  const raw = ev.target.value
+  const row = lines.value[index]
+  const maxP = catalogMaxPriceForRow(row)
+  let next = raw
+  if (maxP != null && raw !== '' && String(raw).trim() !== '') {
+    const n = Number(raw)
+    if (!Number.isNaN(n) && n > maxP) {
+      next = Number.isInteger(maxP) ? String(maxP) : String(Number(maxP.toFixed(2)))
+    }
+  }
+  updateLine(index, { amount: next })
+}
+
+function amountInputMaxAttr(row) {
+  const m = catalogMaxPriceForRow(row)
+  return m != null ? m : undefined
 }
 
 /** Solo ítems que devuelve el servidor. Si el admin vació el catálogo, no se muestra lista orientativa local. */
@@ -640,13 +678,14 @@ function onCompanySelectChange(ev) {
             :value="row.amount"
             type="number"
             inputmode="decimal"
-            min="0"
-            step="1"
+            min="0.01"
+            step="0.01"
+            :max="amountInputMaxAttr(row)"
             :disabled="disabled"
             :placeholder="row.catalog_id != null ? 'Importe de referencia (obligatorio para validar)' : ''"
             class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] py-2.5 pl-8 pr-3 text-sm text-white tabular-nums outline-none focus:border-sky-400"
             @focus="dismissCatalogHint(idx)"
-            @input="updateLine(idx, { amount: $event.target.value })"
+            @input="onLineAmountInput(idx, $event)"
             @wheel.prevent
           />
         </div>

@@ -93,6 +93,19 @@ const taxEstimate = computed(() => {
   return d > 0 ? d : null
 })
 
+/** Montos de factura pública (strings del API → número). */
+const pubFinancialTotal = computed(() => Number(payload.value?.financial?.total))
+const pubFinancialPaid = computed(() => Number(payload.value?.financial?.total_paid))
+const pubFinancialBalance = computed(() => Number(payload.value?.financial?.balance))
+
+const showPublicPaymentBreakdown = computed(() => {
+  if (payload.value == null) return false
+  const paid = pubFinancialPaid.value
+  const bal = pubFinancialBalance.value
+  if (Number.isNaN(paid) || Number.isNaN(bal)) return false
+  return paid > 0.00001 || bal > 0.00001
+})
+
 function pillClass() {
   const label = (payload.value?.invoice?.status_label || '').toLowerCase()
   if (label.includes('pagad')) return 'pill pill--ok'
@@ -418,10 +431,23 @@ async function verPdfEnPestaña() {
               </div>
             </dl>
           </div>
-          <div class="panel panel--summary">
-            <h3 class="panel-kicker">Resumen general</h3>
-            <p class="summary-label">Total general</p>
-            <p class="summary-amount">{{ formatMoney(payload?.financial?.total) }}</p>
+          <div class="panel panel--summary panel--summary-balance">
+            <h3 class="panel-kicker">Saldo pendiente</h3>
+            <p
+              class="summary-balance-amount"
+              :class="{ 'summary-balance-amount--zero': pubFinancialBalance <= 0.00001 }"
+            >
+              {{ formatMoney(payload?.financial?.balance) }}
+            </p>
+            <p v-if="pubFinancialBalance > 0.00001" class="summary-pay-hint muted">
+              Monto que aún debe la empresa por esta factura, según los pagos registrados en el sistema.
+            </p>
+            <div v-else class="summary-thanks">
+              <p class="summary-thanks-lead">¡Gracias por tu pago!</p>
+              <p class="summary-thanks-sub">
+                Con los abonos registrados, esta factura ya está al día y no tiene saldo pendiente.
+              </p>
+            </div>
           </div>
         </div>
 
@@ -497,9 +523,19 @@ async function verPdfEnPestaña() {
                 <dd>{{ formatMoney(taxEstimate) }}</dd>
               </div>
               <div class="totals-box-total">
-                <dt>Total general</dt>
+                <dt>Total de la factura</dt>
                 <dd>{{ formatMoney(payload?.financial?.total) }}</dd>
               </div>
+              <template v-if="showPublicPaymentBreakdown">
+                <div class="totals-box-pay">
+                  <dt>Total abonado</dt>
+                  <dd>{{ formatMoney(payload?.financial?.total_paid) }}</dd>
+                </div>
+                <div class="totals-box-pay totals-box-pay--balance">
+                  <dt>Saldo pendiente</dt>
+                  <dd>{{ formatMoney(payload?.financial?.balance) }}</dd>
+                </div>
+              </template>
             </dl>
           </div>
         </div>
@@ -1040,18 +1076,54 @@ async function verPdfEnPestaña() {
   font-weight: 400 !important;
 }
 
-.summary-label {
-  margin: 0.75rem 0 0;
-  font-size: 0.75rem;
-  color: #94a3b8;
+.panel--summary-balance .panel-kicker {
+  margin-bottom: 0.35rem;
 }
 
-.summary-amount {
-  margin: 0.25rem 0 0;
-  font-size: 1.65rem;
+.summary-balance-amount {
+  margin: 0.15rem 0 0;
+  font-size: clamp(1.85rem, 5vw, 2.35rem);
   font-weight: 800;
-  color: #fff;
-  letter-spacing: -0.02em;
+  color: #fcd34d;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.summary-balance-amount--zero {
+  color: #6ee7b7;
+  font-size: clamp(1.5rem, 4vw, 1.85rem);
+}
+
+.summary-pay-hint {
+  margin: 0.85rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  max-width: 22rem;
+}
+
+.summary-thanks {
+  margin: 0.9rem 0 0;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(52, 211, 153, 0.28);
+  max-width: 22rem;
+}
+
+.summary-thanks-lead {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #6ee7b7;
+  letter-spacing: 0.01em;
+}
+
+.summary-thanks-sub {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  font-weight: 500;
+  color: #86efac;
 }
 
 .table-block {
@@ -1136,6 +1208,25 @@ async function verPdfEnPestaña() {
 .totals-box-total dd {
   color: #fff !important;
   font-size: 0.95rem;
+}
+
+.totals-box-pay {
+  border-top: 1px dashed rgba(71, 85, 105, 0.4);
+  margin-top: 0.35rem;
+  padding-top: 0.35rem !important;
+}
+
+.totals-box-pay dt {
+  color: #94a3b8 !important;
+}
+
+.totals-box-pay dd {
+  color: #cbd5e1 !important;
+}
+
+.totals-box-pay--balance dd {
+  color: #fcd34d !important;
+  font-weight: 800 !important;
 }
 
 .table-wrap {
@@ -1305,9 +1396,17 @@ async function verPdfEnPestaña() {
     color: #111 !important;
   }
   .invoice-title,
-  .summary-amount,
+  .summary-balance-amount,
   .panel-dl dd {
     color: #111 !important;
+  }
+  .summary-thanks {
+    background: #f0fdf4 !important;
+    border-color: #bbf7d0 !important;
+  }
+  .summary-thanks-lead,
+  .summary-thanks-sub {
+    color: #14532d !important;
   }
   .invoice-code {
     color: #0369a1 !important;
