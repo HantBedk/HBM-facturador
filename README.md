@@ -22,7 +22,18 @@ php artisan db:seed   # opcional: datos demo
 php artisan serve     # o usar Docker/nginx en :8080
 ```
 
+Sincronización manual alternativa (migraciones + seeders controlados por el comando interno):
+
+```bash
+php artisan hbm:sync              # migrate + EnsureDevLoginSeeder; DatabaseSeeder solo si no hay empresas o con --demo
+php artisan hbm:sync --migrate-only # solo migraciones, sin seeders
+```
+
+Evita en datos reales: `hbm:sync --fresh` (equivale a `migrate:fresh` y borra tablas).
+
 ### Frontend (Vue + Vite)
+
+En el host:
 
 ```bash
 cd frontend
@@ -32,13 +43,46 @@ npm run dev
 
 Por defecto Vite sirve en `http://localhost:5173` y proxifica `/api` al backend (variable `VITE_API_PROXY_TARGET`, p. ej. `http://127.0.0.1:8080`).
 
-### Docker (MySQL + PHP-FPM + Nginx)
+### Docker (MySQL + Laravel + Nginx + Vite + Adminer)
+
+El `docker-compose.yml` levanta:
+
+| Servicio | Rol |
+|----------|-----|
+| `mysql` | MySQL 8 (datos en volumen `mysql_data`) |
+| `laravel` | PHP-FPM; código en `./backend` |
+| `nginx` | HTTP; sirve el backend Laravel |
+| `frontend` | Node 22; `npm ci && npm run dev` (Vite en el contenedor) |
+| `adminer` | Consola web para MySQL |
+
+Puertos publicados en el **host** (ajustados para no chocar con MySQL local u otros stacks):
+
+| Puerto host | Destino | Uso |
+|-------------|---------|-----|
+| **13306** | mysql:3306 | Cliente MySQL desde el host (`127.0.0.1:13306`) |
+| **8080** | nginx:80 | API / backend: `http://localhost:8080/api` |
+| **5173** | frontend:5173 | SPA en desarrollo (Vite en contenedor; `VITE_API_PROXY_TARGET=http://nginx`) |
+| **8082** | adminer:8080 | Adminer: `http://localhost:8082` |
+
+**Primera vez con Docker** (hace falta `vendor/` antes de que arranque bien Laravel):
 
 ```bash
+docker compose build laravel
+docker compose run --rm laravel composer install --no-interaction
+cp backend/.env.example backend/.env   # si aún no existe
+docker compose run --rm laravel php artisan key:generate
 docker compose up -d
 ```
 
-Backend montado en `./backend`; API en `http://localhost:8080/api`. El frontend se compila aparte (`npm run build`) y puede servirse con Nginx estático o el mismo host cuando definas la vista de producción.
+Tras cambios en `docker/php/Dockerfile` o `docker/php/docker-entrypoint.sh`: `docker compose build laravel && docker compose up -d`.
+
+**Arranque automático del contenedor `laravel`:** el entrypoint ejecuta `php artisan migrate --force` (solo migraciones pendientes; no borra filas) y, si está definido, `db:seed --class=…` según variables de entorno (ver tabla siguiente). Reintenta la conexión a MySQL unos segundos si aún no está listo.
+
+**Adminer:** en el formulario de login, sistema **MySQL**, servidor **`mysql`** (nombre del servicio en la red de Compose), usuario/contraseña como en `docker-compose` (`hbm` / `hbm_secret` o root), base `hbm_facturador`. No expongas Adminer a Internet sin protección adicional.
+
+**Alternativa:** frontend solo en el host (`cd frontend && npm run dev`) y no levantar el servicio `frontend` en Compose si prefieres un solo proceso Vite.
+
+En la raíz del repo también puedes usar **`.\HBM`** / **`.\HBM.ps1`** / **`HBM.cmd`** (opcional `-Build`). Hay un script de apoyo: `scripts/docker-backend-setup.ps1`.
 
 ## Variables de entorno importantes
 
@@ -51,6 +95,10 @@ Ver `backend/.env.example`. En **producción** conviene:
 | `APP_KEY` | Generada una vez; no versionar |
 | `APP_URL` | URL pública con HTTPS |
 | `DB_*` | Credenciales reales |
+| `HBM_AUTO_DB_SYNC` | En Docker: `true` ejecuta `migrate --force` al arrancar; `false` lo desactiva |
+| `HBM_AUTO_DB_SYNC_RETRIES` | Reintentos si MySQL aún no acepta conexión (por defecto 20) |
+| `HBM_AUTO_DB_SYNC_DELAY` | Segundos entre reintentos (por defecto 3) |
+| `HBM_AUTO_SEED_CLASS` | Seeder opcional al arrancar (p. ej. `Database\Seeders\EnsureDevLoginSeeder` en dev; vacío o sin definir en producción si no quieres seed automático) |
 | `CORS_ALLOWED_ORIGINS` | Origen(es) del frontend |
 | `LOG_LEVEL=warning` | Reducir ruido |
 | `DB_BACKUP_ENABLED=true` | Activar respaldos automáticos |
@@ -107,7 +155,6 @@ Incluye flujos completos (servicio → factura → aprobación → envío → pa
 - Actualizar dependencias: `composer update` / `npm update` con revisión de changelog.
 - Tras cambios de esquema: `php artisan migrate` (solo aplica migraciones nuevas; **no borra** filas existentes).
 - **No uses** en una BD con datos reales: `migrate:fresh`, `migrate:refresh` ni `db:wipe` (recrean o vacían tablas). Con Docker, **no** uses `docker compose down -v` (el `-v` elimina el volumen de MySQL y pierdes todo).
-- Arranque local (PowerShell, carpeta raíz del repo): **`.\HBM`** (archivo sin extensión que llama a `HBM.ps1`). Alternativas: `.\HBM.ps1` o `HBM.cmd`. Opcional `-Build`.
 - Revisar logs (`storage/logs`) y espacio en disco de respaldos (`DB_BACKUP_RETAIN_DAYS`).
 
 ## Despliegue

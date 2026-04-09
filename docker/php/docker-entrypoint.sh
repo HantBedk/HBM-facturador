@@ -21,4 +21,40 @@ if [ -d /var/www/html/storage ]; then
     /var/www/html/storage/logs \
     /var/www/html/bootstrap/cache 2>/dev/null || true
 fi
+
+# Sincroniza esquema al iniciar (idempotente, no destructivo) y permite seeder opcional.
+# Variables:
+# - HBM_AUTO_DB_SYNC=true|false (default: true)
+# - HBM_AUTO_DB_SYNC_RETRIES=<int> (default: 20)
+# - HBM_AUTO_DB_SYNC_DELAY=<segundos> (default: 3)
+# - HBM_AUTO_SEED_CLASS=<FQCN Seeder> (default: vacío; no seed)
+if [ "${HBM_AUTO_DB_SYNC:-true}" = "true" ] && [ -f /var/www/html/artisan ]; then
+  retries="${HBM_AUTO_DB_SYNC_RETRIES:-20}"
+  delay="${HBM_AUTO_DB_SYNC_DELAY:-3}"
+  attempt=1
+  synced=0
+
+  while [ "$attempt" -le "$retries" ]; do
+    echo "[entrypoint] DB sync intento ${attempt}/${retries}..."
+    if php /var/www/html/artisan migrate --force; then
+      synced=1
+      break
+    fi
+
+    echo "[entrypoint] migrate falló; reintentando en ${delay}s..."
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
+
+  if [ "$synced" -ne 1 ]; then
+    echo "[entrypoint] ERROR: no se pudo aplicar migrate tras ${retries} intentos."
+    exit 1
+  fi
+
+  if [ -n "${HBM_AUTO_SEED_CLASS:-}" ]; then
+    echo "[entrypoint] Ejecutando seeder ${HBM_AUTO_SEED_CLASS}..."
+    php /var/www/html/artisan db:seed --class="${HBM_AUTO_SEED_CLASS}" --force
+  fi
+fi
+
 exec docker-php-entrypoint "$@"

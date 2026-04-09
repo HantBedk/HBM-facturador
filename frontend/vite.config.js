@@ -6,10 +6,10 @@ import { fileURLToPath, URL } from 'node:url'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   /**
-   * Desarrollo local: API en Docker o artisan en 8080 → proxy /api hacia aquí.
-   * Si en el futuro usas Vite dentro de Docker, define VITE_API_PROXY_TARGET=http://nginx
+   * Proxy /api: en el PC → 127.0.0.1:8080; con Vite en Docker Compose → http://nginx (variable de entorno).
    */
-  const apiProxyTarget = env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8080'
+  const apiProxyTarget =
+    process.env.VITE_API_PROXY_TARGET || env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8080'
 
   return {
     plugins: [vue(), tailwindcss()],
@@ -19,12 +19,15 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      /** Abre siempre http://localhost:5173 (HMR y mismo origen para /api) */
-      host: 'localhost',
+      /** true: accesible desde fuera del contenedor (Docker) y en localhost */
+      host: true,
       port: 5173,
       strictPort: true,
       headers: {
         'Cache-Control': 'no-store',
+      },
+      watch: {
+        usePolling: process.env.CHOKIDAR_USEPOLLING === 'true',
       },
       hmr: {
         protocol: 'ws',
