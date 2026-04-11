@@ -36,7 +36,7 @@ services:
       DB_USERNAME: hbm
       DB_PASSWORD: hbm_secret
       HBM_AUTO_DB_SYNC: "true"
-      # FQCN con barras simples (YAML); si se escapa como \\ duplica y Laravel no resuelve la clase.
+      # FQCN con barras simples (YAML). En producción suele omitirse (seeder vía `php artisan db:seed`).
       HBM_AUTO_SEED_CLASS: 'Database\Seeders\EnsureDevLoginSeeder'
 
   nginx:

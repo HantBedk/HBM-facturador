@@ -59,7 +59,9 @@ if [ "${HBM_AUTO_DB_SYNC:-true}" = "true" ] && [ -f /var/www/html/artisan ]; the
 
   if [ -n "${HBM_AUTO_SEED_CLASS:-}" ]; then
     echo "[entrypoint] Ejecutando seeder ${HBM_AUTO_SEED_CLASS}..."
-    php /var/www/html/artisan db:seed --class="${HBM_AUTO_SEED_CLASS}" --force
+    if ! php /var/www/html/artisan db:seed --class="${HBM_AUTO_SEED_CLASS}" --force; then
+      echo "[entrypoint] ADVERTENCIA: el seeder automático falló; php-fpm arranca igual. Ejecute db:seed manualmente si hace falta."
+    fi
   fi
 fi
 
