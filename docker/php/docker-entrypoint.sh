@@ -22,6 +22,12 @@ if [ -d /var/www/html/storage ]; then
     /var/www/html/bootstrap/cache 2>/dev/null || true
 fi
 
+# Sin vendor/ Laravel no arranca; el volumen montado puede ser un clone sin dependencias.
+if [ -f /var/www/html/composer.json ] && [ ! -f /var/www/html/vendor/autoload.php ]; then
+  echo "[entrypoint] vendor/ ausente; ejecutando composer install..."
+  composer install --no-interaction --prefer-dist --optimize-autoloader
+fi
+
 # Sincroniza esquema al iniciar (idempotente, no destructivo) y permite seeder opcional.
 # Variables:
 # - HBM_AUTO_DB_SYNC=true|false (default: true)

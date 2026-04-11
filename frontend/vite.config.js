@@ -11,6 +11,17 @@ export default defineConfig(({ mode }) => {
   const apiProxyTarget =
     process.env.VITE_API_PROXY_TARGET || env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8080'
 
+  const rawHmrHost = process.env.VITE_HMR_EXTERNAL_HOST
+  const hmrHost =
+    rawHmrHost && String(rawHmrHost).trim() !== '' ? String(rawHmrHost).trim() : 'localhost'
+  const rawHmrPort = process.env.VITE_HMR_CLIENT_PORT
+  const hmrClientPort =
+    rawHmrPort && String(rawHmrPort).trim() !== '' ? Number(rawHmrPort) : 5173
+  const hmrProtocol =
+    process.env.VITE_HMR_PROTOCOL && String(process.env.VITE_HMR_PROTOCOL).trim() === 'wss'
+      ? 'wss'
+      : 'ws'
+
   return {
     plugins: [vue(), tailwindcss()],
     resolve: {
@@ -21,6 +32,8 @@ export default defineConfig(({ mode }) => {
     server: {
       /** true: accesible desde fuera del contenedor (Docker) y en localhost */
       host: true,
+      /** Detrás de Nginx con otro Host (ej. hbm.dataguaviare.com.co) */
+      allowedHosts: true,
       port: 5173,
       strictPort: true,
       headers: {
@@ -30,10 +43,10 @@ export default defineConfig(({ mode }) => {
         usePolling: process.env.CHOKIDAR_USEPOLLING === 'true',
       },
       hmr: {
-        protocol: 'ws',
-        host: 'localhost',
+        protocol: hmrProtocol,
+        host: hmrHost,
         port: 5173,
-        clientPort: 5173,
+        clientPort: hmrClientPort,
       },
       proxy: {
         '/api': {

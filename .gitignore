@@ -1,3 +1,6 @@
+# Puertos / overrides de Docker Compose en la raíz (no subir preferencias por máquina)
+/.env
+
 /backend/vendor
 /backend/.env
 /backend/.env.backup

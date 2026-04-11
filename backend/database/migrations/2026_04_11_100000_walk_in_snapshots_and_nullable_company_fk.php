@@ -24,7 +24,10 @@ return new class extends Migration
             });
         }
 
-        $quickIds = DB::table('companies')->where('es_cliente_puntual', true)->pluck('id')->all();
+        // `es_cliente_puntual` se añade en una migración con timestamp posterior; sin esto falla el orden alfabético.
+        $quickIds = Schema::hasColumn('companies', 'es_cliente_puntual')
+            ? DB::table('companies')->where('es_cliente_puntual', true)->pluck('id')->all()
+            : [];
         foreach ($quickIds as $cid) {
             $c = DB::table('companies')->where('id', $cid)->first();
             if ($c === null) {
