@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ServiceResource;
+use App\Models\AppSetting;
 use App\Models\Company;
 use App\Models\PanelNotification;
 use App\Models\Service;
@@ -247,6 +248,10 @@ class ServiceController extends Controller
         }
 
         $normalized = $this->validateAndNormalizeServiceItems($itemsPayload);
+
+        if (! $user->isAdminEquipo()) {
+            $this->assertEmpleadoCommercialInventoryAllowed($normalized);
+        }
 
         if ($companyId !== null) {
             $company = Company::query()->findOrFail($companyId);
@@ -630,6 +635,8 @@ class ServiceController extends Controller
 
         $normalized = $this->validateAndNormalizeServiceItems($itemsPayload);
 
+        $this->assertEmpleadoCommercialInventoryAllowed($normalized);
+
         if ($companyId !== null) {
             $company = Company::query()->findOrFail((int) $companyId);
             if ($company->estado !== Company::ESTADO_ACTIVO) {
@@ -785,6 +792,13 @@ class ServiceController extends Controller
             'description' => ['required', 'string', 'min:8'],
             'amount' => ['required', 'numeric', 'min:0.01'],
         ]);
+
+        $hasDetailedItems = $service->items()->exists();
+        if ($hasDetailedItems && (float) $data['amount'] !== (float) $service->amount) {
+            throw ValidationException::withMessages([
+                'amount' => ['Este servicio tiene líneas detalladas; el valor se deriva de esas líneas y debe editarse desde el detalle por conceptos.'],
+            ]);
+        }
 
         if (isset($data['catalog_id'])) {
             $this->assertActiveCatalogItem((int) $data['catalog_id']);
@@ -1119,6 +1133,36 @@ class ServiceController extends Controller
         }
 
         return $q->exists();
+    }
+
+    /**
+     * Líneas generadas desde inventario (venta/alquiler) usan etiquetas fijas en el cliente.
+     * Sin este chequeo, un técnico podría enviarlas aunque administración las tenga deshabilitadas.
+     *
+     * @param  list<array<string, mixed>>  $normalized
+     */
+    private function assertEmpleadoCommercialInventoryAllowed(array $normalized): void
+    {
+        foreach ($normalized as $row) {
+            if (! ($row['is_custom'] ?? false)) {
+                continue;
+            }
+            $label = trim((string) ($row['label'] ?? ''));
+            if (str_starts_with($label, 'Venta equipo:')) {
+                if (! AppSetting::getBool(AppSetting::KEY_EMPLEADO_INVENTORY_VENTA_ENABLED, false)) {
+                    throw ValidationException::withMessages([
+                        'items' => ['No tiene permiso para registrar ventas de inventario. Contacte a administración.'],
+                    ]);
+                }
+            }
+            if (str_starts_with($label, 'Alquiler equipo:')) {
+                if (! AppSetting::getBool(AppSetting::KEY_EMPLEADO_INVENTORY_ALQUILER_ENABLED, false)) {
+                    throw ValidationException::withMessages([
+                        'items' => ['No tiene permiso para registrar alquileres de inventario. Contacte a administración.'],
+                    ]);
+                }
+            }
+        }
     }
 
     /** FormData envía `quick_client` como JSON string cuando hay fotos. */

@@ -866,6 +866,25 @@ async function submitDeleteCompanyModal() {
               <td class="muted">{{ formatDate(c.created_at) }}</td>
               <td class="actions-col">
                 <div class="actions-wrap">
+                  <RouterLink
+                    :to="{
+                      name: 'admin-empresa-inventario',
+                      params: { companyId: String(c.id) },
+                      state: { empresaNombre: c.nombre || '' },
+                    }"
+                    class="icon-act icon-act--inventory"
+                    title="Inventario y activos de esta empresa"
+                    @click.stop
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+                      />
+                    </svg>
+                  </RouterLink>
                   <button
                     type="button"
                     class="icon-act icon-act--recurring"
@@ -2217,6 +2236,15 @@ h1 {
 .icon-act--recurring:hover:not(:disabled) {
   background: rgba(56, 189, 248, 0.22);
   color: #7dd3fc;
+}
+
+a.icon-act--inventory {
+  text-decoration: none;
+}
+
+.icon-act--inventory:hover {
+  background: rgba(52, 211, 153, 0.2);
+  color: #6ee7b7;
 }
 
 .recurring-hint {

@@ -6,6 +6,8 @@ import { useServiceRegisterFlow } from '@/composables/useServiceRegisterFlow.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
+  registerKind: { type: String, default: 'servicio' },
+  isEmpleado: { type: Boolean, default: false },
   /** z-index sobre otros overlays */
   overlayZIndex: { type: Number, default: 95 },
 })
@@ -14,11 +16,43 @@ const emit = defineEmits(['close', 'created'])
 
 const router = useRouter()
 const panelOpenRef = toRef(props, 'open')
-const isEmpleadoRegistro = computed(() => false)
+const isEmpleadoRegistro = computed(() => props.isEmpleado)
+const registerKind = computed(() => String(props.registerKind || 'servicio'))
+const panelTitle = computed(() =>
+  registerKind.value === 'venta'
+    ? 'Registrar venta'
+    : registerKind.value === 'alquiler'
+      ? 'Registrar alquiler'
+      : 'Registrar servicio'
+)
+const panelKicker = computed(() =>
+  registerKind.value === 'venta'
+    ? 'Nueva venta'
+    : registerKind.value === 'alquiler'
+      ? 'Nuevo alquiler'
+      : 'Nuevo servicio'
+)
+const fullPageTo = computed(() =>
+  props.isEmpleado
+    ? registerKind.value === 'venta'
+      ? '/empleado/registro-venta'
+      : registerKind.value === 'alquiler'
+        ? '/empleado/registro-alquiler'
+        : '/empleado/registro-servicio'
+    : registerKind.value === 'venta'
+      ? '/admin/servicios/nuevo-venta'
+      : registerKind.value === 'alquiler'
+        ? '/admin/servicios/nuevo-alquiler'
+        : '/admin/servicios/nuevo'
+)
+const effectiveAllowInventoryCommercialOps = computed(() =>
+  registerKind.value === 'servicio' ? false : allowInventoryCommercialOps.value
+)
 
 const {
   companies,
   catalogItems,
+  inventoryLots,
   clientSuggestions,
   loading,
   fieldErrors,
@@ -27,13 +61,20 @@ const {
   photoFiles,
   form,
   onSubmit,
+  allowInventoryCommercialOps,
 } = useServiceRegisterFlow({
   isEmpleadoRegistro,
+  registerKind,
   panelOpenRef,
   async onAdminAfterCreate(created) {
     emit('created', created)
     emit('close')
     await router.push(`/admin/servicios/${created.id}`)
+  },
+  async onEmpleadoAfterCreate(created) {
+    emit('created', created)
+    emit('close')
+    await router.push(`/empleado/servicio/${created.id}`)
   },
 })
 
@@ -59,16 +100,13 @@ function onBackdropClick() {
       >
         <header class="drawer-header">
           <div class="drawer-header-text">
-            <p class="drawer-kicker">Nuevo servicio</p>
-            <h2 id="register-panel-title" class="drawer-title drawer-title--register">Registrar servicio</h2>
-            <p class="muted drawer-sub">
-              La fecha y el código (SERV-…) los asigna el servidor. Mismo formulario que en la página dedicada.
-            </p>
+            <p class="drawer-kicker">{{ panelKicker }}</p>
+            <h2 id="register-panel-title" class="drawer-title drawer-title--register">{{ panelTitle }}</h2>
           </div>
           <div class="drawer-header-actions">
             <RouterLink
               class="btn secondary btn-compact"
-              to="/admin/servicios/nuevo"
+              :to="fullPageTo"
               @click="emit('close')"
             >
               Pantalla completa
@@ -90,11 +128,14 @@ function onBackdropClick() {
               :key="formResetKey"
               v-model="form"
               v-model:photos="photoFiles"
+              :register-kind="registerKind"
               :companies="companies"
               :catalog-items="catalogItems"
+              :inventory-lots="inventoryLots"
               :client-suggestions="clientSuggestions"
               :field-errors="fieldErrors"
               :disabled="loading"
+              :allow-inventory-commercial-ops="effectiveAllowInventoryCommercialOps"
             />
           </form>
         </div>
@@ -189,7 +230,9 @@ function onBackdropClick() {
 
 .drawer-header-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
+  justify-content: flex-end;
   gap: 0.5rem;
   flex-shrink: 0;
 }

@@ -100,8 +100,13 @@ watch(id, () => {
   load()
 })
 
-const canEdit = computed(() => invoice.value?.status === 'borrador')
-const canApprove = computed(() => invoice.value?.status === 'borrador')
+const hasRegisteredCompany = computed(() => {
+  const cid = invoice.value?.company_id
+  return cid !== null && cid !== undefined && cid !== ''
+})
+
+const canEdit = computed(() => invoice.value?.status === 'borrador' && hasRegisteredCompany.value)
+const canApprove = computed(() => invoice.value?.status === 'borrador' && hasRegisteredCompany.value)
 const canSend = computed(() => invoice.value?.status === 'aprobada')
 
 /** Pagos solo tras ENVIADA (ETAPA 5); abonos hasta cubrir total. */
@@ -269,9 +274,22 @@ async function onDeleteInvoice() {
         <RouterLink class="back" to="/admin/facturas">← Volver al listado</RouterLink>
         <h1 v-if="invoice">Factura {{ invoice.code }}</h1>
         <h1 v-else-if="!loading">Factura</h1>
-        <p v-if="invoice" class="lede">{{ invoice.period_label }} · {{ invoice.company?.nombre }}</p>
+        <p v-if="invoice" class="lede">
+          {{ invoice.period_label }} · {{ invoice.company?.nombre || invoice.bill_to?.nombre || '—' }}
+        </p>
       </div>
       <div v-if="invoice" class="head-actions">
+        <RouterLink
+          v-if="invoice.company?.id"
+          class="btn secondary"
+          :to="{
+            name: 'admin-empresa-inventario',
+            params: { companyId: String(invoice.company.id) },
+            state: { empresaNombre: invoice.company?.nombre || '' },
+          }"
+        >
+          Ver inventario empresa
+        </RouterLink>
         <template v-if="invoice.status === 'borrador'">
           <button type="button" class="btn secondary" @click="onPdfPreviewView">Ver PDF</button>
           <button type="button" class="btn secondary" @click="onPdfPreviewDownload">Descargar PDF</button>
@@ -293,6 +311,16 @@ async function onDeleteInvoice() {
       <div class="card status-row" :data-phase="invoice.status">
         <span class="pill" :data-st="invoice.status">{{ invoice.status_label }}</span>
         <span v-if="invoice.sent_at" class="muted">Enviada: {{ new Date(invoice.sent_at).toLocaleString('es-CO') }}</span>
+      </div>
+
+      <div
+        v-if="invoice.status === 'borrador' && !hasRegisteredCompany"
+        class="card banner err"
+      >
+        <p class="muted small" style="margin: 0">
+          Este borrador no está vinculado a una empresa del directorio. Ya no se puede editar ni aprobar; elimínelo y cree una factura
+          nueva contra una empresa registrada.
+        </p>
       </div>
 
       <p v-if="canDeleteInvoice" class="delete-hint muted small">
@@ -402,6 +430,7 @@ async function onDeleteInvoice() {
         <div class="card">
           <h2>Totales</h2>
           <p>Subtotal: {{ money(invoice.subtotal) }}</p>
+          <p v-if="Number(invoice.iva_amount) > 0">IVA: {{ money(invoice.iva_amount) }}</p>
           <p class="strong">Total: {{ money(invoice.total) }}</p>
           <template v-if="invoice.financial">
             <p>Pagado: {{ money(invoice.financial.total_paid) }}</p>

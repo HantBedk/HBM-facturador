@@ -6,11 +6,9 @@ import {
   createServiceCatalogItem,
   deleteServiceCatalogItem,
   fetchAdminServiceCatalog,
-  fetchTechnicianCatalogDiscount,
   importServiceCatalogFromSpreadsheet,
   patchServiceCatalogEstado,
   updateServiceCatalogItem,
-  updateTechnicianCatalogDiscount,
 } from '@/services/servicesApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
 
@@ -22,18 +20,14 @@ const error = ref('')
 const saving = ref(false)
 const fieldErrors = ref({})
 
-/** % global de diferencia: precio lista (factura) vs importe de referencia que ve el técnico en /service-catalog/active */
-const technicianDiscountPercent = ref(10)
-const techDiscountSaving = ref(false)
-const techDiscountError = ref('')
-const techDiscountOk = ref('')
-
 const showModal = ref(false)
 const editingId = ref(null)
 const form = ref({
   name: '',
   description: '',
   base_price: '',
+  /** IVA del estado sobre el importe de línea al facturar (por categoría). */
+  iva_percent: '0',
   status: 'activo',
 })
 
@@ -91,35 +85,6 @@ async function load() {
   }
 }
 
-async function loadTechnicianDiscount() {
-  techDiscountError.value = ''
-  try {
-    const d = await fetchTechnicianCatalogDiscount()
-    technicianDiscountPercent.value = Number(d?.technician_catalog_discount_percent ?? 10)
-  } catch (e) {
-    techDiscountError.value = e.data?.message || e.message || 'No se pudo cargar el ajuste de precios.'
-  }
-}
-
-async function saveTechnicianDiscount() {
-  techDiscountOk.value = ''
-  techDiscountError.value = ''
-  techDiscountSaving.value = true
-  try {
-    await updateTechnicianCatalogDiscount(Number(technicianDiscountPercent.value))
-    techDiscountOk.value =
-      'Porcentaje guardado. Cada línea de catálogo usará esta diferencia salvo que el ítem tenga un % propio.'
-  } catch (e) {
-    techDiscountError.value = e.data?.message || e.message || 'No se pudo guardar.'
-    if (e.data?.errors) {
-      const first = Object.values(e.data.errors).flat()[0]
-      if (first) techDiscountError.value = first
-    }
-  } finally {
-    techDiscountSaving.value = false
-  }
-}
-
 const detailPanelOpen = ref(false)
 const detailCatalogId = ref(null)
 const detailPanelRef = ref(null)
@@ -143,7 +108,6 @@ function onGlobalEscape(ev) {
 
 onMounted(async () => {
   document.addEventListener('keydown', onGlobalEscape)
-  await loadTechnicianDiscount()
   await load()
 })
 
@@ -158,6 +122,7 @@ watch(showModal, (open) => {
       name: '',
       description: '',
       base_price: '',
+      iva_percent: '0',
       status: 'activo',
     }
   }
@@ -240,6 +205,7 @@ function openCreate() {
     name: '',
     description: '',
     base_price: '',
+    iva_percent: '0',
     status: 'activo',
   }
   showModal.value = true
@@ -251,27 +217,24 @@ function openEdit(row) {
     name: row.name,
     description: row.description || '',
     base_price: String(row.base_price),
+    iva_percent:
+      row.iva_percent != null && row.iva_percent !== '' ? String(row.iva_percent) : '0',
     status: row.status,
   }
   showModal.value = true
-}
-
-/** Etiqueta para columna: override por ítem o referencia al % global cargado. */
-function technicianMarginLabel(row) {
-  const ov = row.technician_discount_percent
-  if (ov != null && ov !== '') {
-    const n = Number(ov)
-    if (!Number.isNaN(n)) return `${n}% · ítem`
-  }
-  const g = Number(technicianDiscountPercent.value)
-  const pct = Number.isNaN(g) ? '—' : `${g}%`
-  return `Global (${pct})`
 }
 
 function money(v) {
   const n = Number(v)
   if (Number.isNaN(n)) return '—'
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
+}
+
+function formatIvaPercent(v) {
+  if (v == null || v === '') return '0'
+  const n = Number(v)
+  if (Number.isNaN(n)) return '—'
+  return n % 1 === 0 ? String(n) : n.toFixed(2).replace(/\.?0+$/, '')
 }
 
 async function onSave() {
@@ -284,6 +247,7 @@ async function onSave() {
       name: form.value.name.trim(),
       description: form.value.description.trim() || null,
       base_price: Number(form.value.base_price),
+      iva_percent: Number(form.value.iva_percent),
     }
     if (editingId.value) {
       // No enviar % técnico por ítem: se conserva el valor en servidor.
@@ -391,8 +355,9 @@ function onDetailDelete(catalogItem) {
       <div>
         <h1>Catálogo de servicios</h1>
         <p class="lede">
-          <strong>Precios orientativos</strong> por ítem (el importe facturable lo arma el técnico al cargar el servicio). Clic en el <strong>código</strong> (CAT-…) abre el panel lateral con el detalle;
-          en <strong>Importar y precios</strong> cargas Excel/CSV y el <strong>% global</strong> de margen técnico → factura a la empresa.
+          <strong>Precios orientativos</strong> por ítem (el importe facturable lo arma el técnico al cargar el servicio). Por categoría puede definir el <strong>% de IVA</strong> del estado: al facturar, el total suma ese impuesto sobre cada línea.
+          Clic en el <strong>código</strong> (CAT-…) abre el panel lateral con el detalle;
+          en <strong>Importar</strong> cargas Excel/CSV para mantener el catálogo.
         </p>
       </div>
       <div class="head-actions">
@@ -426,7 +391,7 @@ function onDetailDelete(catalogItem) {
         :aria-selected="catalogTab === 'herramientas'"
         @click="catalogTab = 'herramientas'"
       >
-        Importar y precios
+        Importar
       </button>
     </div>
 
@@ -470,7 +435,7 @@ function onDetailDelete(catalogItem) {
                 Orientativo<span class="sort-ind" aria-hidden="true">{{ catalogSortIndicator('base_price') }}</span>
               </button>
             </th>
-            <th scope="col" class="nowrap">Margen técnico</th>
+            <th scope="col" class="num nowrap">IVA %</th>
             <th
               scope="col"
               :aria-sort="catalogSortBy === 'status' ? (catalogSortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
@@ -503,7 +468,7 @@ function onDetailDelete(catalogItem) {
               <p v-if="r.description" class="muted tiny">{{ r.description }}</p>
             </td>
             <td class="num">{{ money(r.base_price) }}</td>
-            <td class="tiny muted">{{ technicianMarginLabel(r) }}</td>
+            <td class="num tiny">{{ formatIvaPercent(r.iva_percent) }}</td>
             <td>
               <span class="pill" :data-st="r.status">{{ r.status === 'activo' ? 'Activo' : 'Inactivo' }}</span>
             </td>
@@ -546,31 +511,6 @@ function onDetailDelete(catalogItem) {
         </div>
       </div>
 
-      <div class="card pricing-card">
-        <h2 class="pricing-title">Margen técnico → factura</h2>
-        <p class="pricing-lede">
-          El <strong>precio base</strong> del catálogo es <strong>solo orientativo</strong>. Al cargar el servicio, el técnico escribe el <strong>importe de referencia</strong> por línea; con el <strong>% global</strong> (por defecto 10&nbsp;%) se calcula lo <strong>facturable a la empresa</strong>, igual que en las líneas «Otro».
-          Puede definir un <strong>% distinto por ítem</strong> en el panel lateral del ítem (sustituye al global solo para esa línea al facturar).
-        </p>
-        <div class="pricing-row">
-          <label class="pricing-label">
-            <span>Porcentaje global (%)</span>
-            <input
-              v-model.number="technicianDiscountPercent"
-              type="number"
-              min="0"
-              max="95"
-              step="0.5"
-              class="input pricing-input"
-            />
-          </label>
-          <button type="button" class="btn primary" :disabled="techDiscountSaving" @click="saveTechnicianDiscount">
-            {{ techDiscountSaving ? 'Guardando…' : 'Guardar porcentaje' }}
-          </button>
-        </div>
-        <p v-if="techDiscountError" class="banner err inline">{{ techDiscountError }}</p>
-        <p v-else-if="techDiscountOk" class="banner ok inline">{{ techDiscountOk }}</p>
-      </div>
     </div>
 
     <AdminServiceCatalogDetailPanel
@@ -600,6 +540,18 @@ function onDetailDelete(catalogItem) {
               <span>Precio orientativo (COP)</span>
               <input v-model="form.base_price" type="number" min="0.01" step="0.01" required class="input" />
               <small class="hint">Importe de lista (factura). Los ítems nuevos son globales para todas las empresas.</small>
+            </label>
+            <label>
+              <span>IVA (%)</span>
+              <input
+                v-model="form.iva_percent"
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                class="input"
+              />
+              <small class="hint">Se aplica sobre el importe de cada servicio al generar la factura (subtotal + IVA = total).</small>
             </label>
             <label v-if="editingId">
               <span>Estado</span>
@@ -749,39 +701,6 @@ h1 {
 }
 .import-btn {
   flex-shrink: 0;
-}
-.pricing-card {
-  margin-bottom: 0;
-  border-color: rgba(45, 212, 191, 0.25);
-  background: rgba(6, 78, 59, 0.12);
-}
-
-.pricing-title {
-  margin: 0 0 0.35rem;
-  font-size: 1.05rem;
-  color: #ccfbf1;
-}
-.pricing-lede {
-  margin: 0 0 0.85rem;
-  font-size: 0.85rem;
-  color: #94a3b8;
-  max-width: 44rem;
-  line-height: 1.45;
-}
-.pricing-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.75rem;
-}
-.pricing-label span {
-  display: block;
-  font-size: 0.78rem;
-  color: #94a3b8;
-  margin-bottom: 0.25rem;
-}
-.pricing-input {
-  width: 7rem;
 }
 .banner.ok {
   padding: 0.55rem 0.75rem;

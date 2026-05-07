@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\Service;
+use App\Models\ServiceCatalog;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -304,5 +305,52 @@ class AdminInvoiceApiTest extends TestCase
         $r3->assertCreated()->assertJsonPath('data.code', 'FAC-260508-TST');
 
         Carbon::setTestNow();
+    }
+
+    public function test_store_invoice_applies_catalog_iva_to_total(): void
+    {
+        $company = Company::query()->create([
+            'nombre' => 'Empresa IVA',
+            'factura_sigla' => 'IVA',
+            'nit' => '900177766-1',
+            'estado' => Company::ESTADO_ACTIVO,
+        ]);
+
+        $cat = ServiceCatalog::query()->create([
+            'name' => 'Categoría con IVA test',
+            'description' => '—',
+            'base_price' => 100000,
+            'iva_percent' => 19,
+            'status' => ServiceCatalog::STATUS_ACTIVO,
+        ]);
+
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        $empleado = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
+
+        $service = Service::query()->create([
+            'code' => 'S-IVA-1',
+            'company_id' => $company->id,
+            'user_id' => $empleado->id,
+            'catalog_id' => $cat->id,
+            'client_name' => 'Cliente',
+            'service_type' => 'Servicio',
+            'description' => 'Trabajo',
+            'amount' => 100000.00,
+            'service_date' => '2026-06-15',
+            'status' => Service::STATUS_ACTIVO,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->postJson('/api/admin/invoices', [
+            'company_id' => $company->id,
+            'period_year' => 2026,
+            'period_month' => 6,
+            'service_ids' => [$service->id],
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.subtotal', '100000.00')
+            ->assertJsonPath('data.total', '119000.00')
+            ->assertJsonPath('data.iva_amount', '19000.00');
     }
 }

@@ -13,6 +13,7 @@ const AdminConfiguracionLayout = () => import('@/layouts/AdminConfiguracionLayou
 const AdminEmpleadoNotificacionesView = () => import('@/views/admin/AdminEmpleadoNotificacionesView.vue')
 const AdminHistorialMovimientosView = () => import('@/views/admin/AdminHistorialMovimientosView.vue')
 const AdminBillingAutomationView = () => import('@/views/admin/AdminBillingAutomationView.vue')
+const AdminInventoryConfigView = () => import('@/views/admin/AdminInventoryConfigView.vue')
 const AdminEmpleadoPerfilView = () => import('@/views/admin/AdminEmpleadoPerfilView.vue')
 const EmpleadosListView = () => import('@/views/admin/EmpleadosListView.vue')
 const EmpleadoDashboardView = () => import('@/views/empleado/EmpleadoDashboardView.vue')
@@ -24,7 +25,7 @@ const ServiceRegisterView = () => import('@/views/services/ServiceRegisterView.v
 const ServiceCompleteAssignmentView = () => import('@/views/services/ServiceCompleteAssignmentView.vue')
 const ServiceDetailView = () => import('@/views/services/ServiceDetailView.vue')
 const ServiceEditView = () => import('@/views/services/ServiceEditView.vue')
-const ServiceCatalogView = () => import('@/views/admin/ServiceCatalogView.vue')
+const InventoryView = () => import('@/views/inventory/InventoryView.vue')
 const PublicInvoiceConsultView = () => import('@/views/public/PublicInvoiceConsultView.vue')
 import { isAdminPanelRole } from '@/utils/roles.js'
 import { isEmpleadoPerfilIncomplete } from '@/utils/empleadoPerfil.js'
@@ -49,8 +50,15 @@ const routes = [
     children: [
       { path: '', name: 'admin-dashboard', component: AdminDashboardView },
       { path: 'servicios', name: 'admin-servicios', component: ServicesListView },
-      { path: 'catalogo-servicios', name: 'admin-catalogo-servicios', component: ServiceCatalogView },
+      {
+        path: 'catalogo-servicios',
+        name: 'admin-catalogo-servicios',
+        redirect: { name: 'admin-inventario' },
+      },
+      { path: 'inventario', name: 'admin-inventario', component: InventoryView },
       { path: 'servicios/nuevo', name: 'admin-servicios-nuevo', component: ServiceRegisterView },
+      { path: 'servicios/nuevo-venta', name: 'admin-servicios-nuevo-venta', component: ServiceRegisterView },
+      { path: 'servicios/nuevo-alquiler', name: 'admin-servicios-nuevo-alquiler', component: ServiceRegisterView },
       { path: 'servicios/:id', name: 'admin-servicio-detalle', component: ServiceDetailView, props: true },
       { path: 'servicios/:id/editar', name: 'admin-servicio-editar', component: ServiceEditView, props: true },
       { path: 'facturas/nueva', name: 'admin-facturas-nueva', component: InvoiceEditorView },
@@ -68,6 +76,12 @@ const routes = [
       },
       { path: 'facturas', name: 'admin-facturas', component: InvoicesListView },
       { path: 'empresas', name: 'admin-empresas', component: CompaniesListView },
+      {
+        path: 'empresas/:companyId(\\d+)/inventario',
+        name: 'admin-empresa-inventario',
+        component: InventoryView,
+        props: (route) => ({ companyId: route.params.companyId }),
+      },
       {
         path: 'configuracion',
         component: AdminConfiguracionLayout,
@@ -91,6 +105,19 @@ const routes = [
             path: 'facturacion-automatica',
             name: 'admin-config-billing-automation',
             component: AdminBillingAutomationView,
+          },
+          {
+            path: 'inventario',
+            name: 'admin-config-inventario',
+            component: AdminInventoryConfigView,
+          },
+          {
+            path: 'ubicaciones-inventario',
+            redirect: { name: 'admin-config-inventario' },
+          },
+          {
+            path: 'titulares-inventario',
+            redirect: { name: 'admin-config-inventario' },
           },
         ],
       },
@@ -136,7 +163,10 @@ const routes = [
       { path: '', name: 'empleado-dashboard', component: EmpleadoDashboardView },
       { path: 'historial', redirect: { name: 'empleado-dashboard' } },
       { path: 'registro-servicio', name: 'emp-registro-servicio', component: ServiceRegisterView },
+      { path: 'registro-venta', name: 'emp-registro-venta', component: ServiceRegisterView },
+      { path: 'registro-alquiler', name: 'emp-registro-alquiler', component: ServiceRegisterView },
       { path: 'listado-servicios', name: 'emp-listado-servicios', component: ServicesListView },
+      { path: 'inventario', name: 'empleado-inventario', component: InventoryView },
       { path: 'servicio/:id(\\d+)', name: 'emp-servicio-detalle', component: ServiceDetailView, props: true },
       {
         path: 'servicio/:id(\\d+)/completar-asignacion',

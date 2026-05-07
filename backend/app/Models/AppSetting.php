@@ -14,6 +14,23 @@ class AppSetting extends Model
 
     public const KEY_AUTOMATION_DRAFT_PERIOD = 'automation_draft_period';
 
+    public const KEY_INVENTORY_LOCATIONS = 'inventory_locations';
+
+    /** @var string Tipos de activo permitidos en altas (JSON array de strings). */
+    public const KEY_INVENTORY_ASSET_TYPES = 'inventory_asset_types';
+
+    /** @var string Estados físicos permitidos (JSON array de strings). */
+    public const KEY_INVENTORY_PHYSICAL_CONDITIONS = 'inventory_physical_conditions';
+
+    /** Lista explícita de IDs de usuario titulares de inventario interno (JSON array de enteros). */
+    public const KEY_INVENTORY_HOLDERS = 'inventory_holder_user_ids';
+
+    /** Técnicos pueden registrar venta de inventario como servicio (boolean en JSON). */
+    public const KEY_EMPLEADO_INVENTORY_VENTA_ENABLED = 'empleado_inventory_venta_enabled';
+
+    /** Técnicos pueden registrar alquiler de inventario como servicio (boolean en JSON). */
+    public const KEY_EMPLEADO_INVENTORY_ALQUILER_ENABLED = 'empleado_inventory_alquiler_enabled';
+
     protected $fillable = [
         'key',
         'value',

@@ -20,7 +20,7 @@ class AdminServiceCatalogController extends Controller
 
         $sortField = $request->query('sort', 'name');
         $sortField = is_string($sortField) ? $sortField : 'name';
-        if (! in_array($sortField, ['name', 'base_price', 'code', 'status'], true)) {
+        if (! in_array($sortField, ['name', 'base_price', 'iva_percent', 'code', 'status'], true)) {
             $sortField = 'name';
         }
         $direction = strtolower((string) $request->query('direction', 'asc')) === 'desc' ? 'desc' : 'asc';
@@ -60,6 +60,7 @@ class AdminServiceCatalogController extends Controller
             ],
             'description' => ['nullable', 'string', 'max:5000'],
             'base_price' => ['required', 'numeric', 'min:0.01'],
+            'iva_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'technician_discount_percent' => ['nullable', 'numeric', 'min:0', 'max:99.99'],
             'status' => ['sometimes', 'in:'.ServiceCatalog::STATUS_ACTIVO.','.ServiceCatalog::STATUS_INACTIVO],
         ]);
@@ -68,6 +69,7 @@ class AdminServiceCatalogController extends Controller
             'name' => trim($data['name']),
             'description' => isset($data['description']) ? trim((string) $data['description']) : null,
             'base_price' => $data['base_price'],
+            'iva_percent' => $data['iva_percent'] ?? 0,
             'technician_discount_percent' => $data['technician_discount_percent'] ?? null,
             'status' => $data['status'] ?? ServiceCatalog::STATUS_ACTIVO,
         ]);
@@ -90,6 +92,7 @@ class AdminServiceCatalogController extends Controller
             ],
             'description' => ['nullable', 'string', 'max:5000'],
             'base_price' => ['required', 'numeric', 'min:0.01'],
+            'iva_percent' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'technician_discount_percent' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99.99'],
             'status' => ['required', 'in:'.ServiceCatalog::STATUS_ACTIVO.','.ServiceCatalog::STATUS_INACTIVO],
         ]);
@@ -97,6 +100,9 @@ class AdminServiceCatalogController extends Controller
         $service_catalog->name = trim($data['name']);
         $service_catalog->description = isset($data['description']) ? trim((string) $data['description']) : null;
         $service_catalog->base_price = $data['base_price'];
+        if (array_key_exists('iva_percent', $data)) {
+            $service_catalog->iva_percent = $data['iva_percent'] ?? 0;
+        }
         if (array_key_exists('technician_discount_percent', $data)) {
             $service_catalog->technician_discount_percent = $data['technician_discount_percent'];
         }

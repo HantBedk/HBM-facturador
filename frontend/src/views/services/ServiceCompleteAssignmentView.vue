@@ -23,6 +23,7 @@ const serviceId = computed(() => Number(route.params.id))
 
 const companies = ref([])
 const catalogItems = ref([])
+const inventoryLots = ref([])
 const clientSuggestions = ref([])
 const loading = ref(true)
 const loadError = ref('')
@@ -44,6 +45,10 @@ const form = ref({
   description: '',
   amount: '',
   lines: [],
+  inventory_operation_type: 'servicio',
+  inventory_lot_id: '',
+  inventory_quantity: 1,
+  inventory_days: 1,
 })
 
 let toastTimer = null
@@ -135,6 +140,55 @@ function buildPayloadItemsFromLines(rawLines) {
   })
 }
 
+function parseDescriptionField(description, key) {
+  const line = String(description || '')
+    .split('\n')
+    .map((item) => item.trim())
+    .find((item) => item.toLowerCase().startsWith(`${key.toLowerCase()}:`) || item.toLowerCase().includes(key.toLowerCase()))
+  if (!line) return ''
+  const idx = line.indexOf(':')
+  if (idx >= 0) return line.slice(idx + 1).trim()
+  return line.trim()
+}
+
+function flagFromDescription(description, key, fallback = false) {
+  const lines = String(description || '')
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean)
+  const target = String(key).toLowerCase()
+  const lineRaw = lines.find((ln) => ln.toLowerCase().includes(target))
+  if (!lineRaw) return fallback
+  const idx = lineRaw.indexOf(':')
+  const value = (idx >= 0 ? lineRaw.slice(idx + 1) : lineRaw).trim().toLowerCase()
+  if (!value) return true
+  if (value.includes('no') || value === 'false' || value === '0') return false
+  if (value.includes('si') || value.includes('sí') || value.includes('true') || value === '1') return true
+  return true
+}
+
+function lotAllowsSale(lot) {
+  if (!lot) return false
+  if (typeof lot.allow_sale === 'boolean') return lot.allow_sale
+  const desc = String(lot.description || '')
+  if (!/(disponible|etiqueta).*venta/i.test(desc)) return true
+  return (
+    flagFromDescription(desc, 'Disponible para venta', false) ||
+    flagFromDescription(desc, 'Etiqueta para venta', false)
+  )
+}
+
+function lotAllowsRental(lot) {
+  if (!lot) return false
+  if (typeof lot.allow_rental === 'boolean') return lot.allow_rental
+  const desc = String(lot.description || '')
+  if (!/(disponible|etiqueta).*alquiler/i.test(desc)) return false
+  return (
+    flagFromDescription(desc, 'Disponible para alquiler', false) ||
+    flagFromDescription(desc, 'Etiqueta para alquiler', false)
+  )
+}
+
 function validateBeforeSubmit() {
   fieldErrors.value = {}
   const e = {}
@@ -153,8 +207,26 @@ function validateBeforeSubmit() {
   }
 
   const ls = Array.isArray(form.value.lines) ? form.value.lines : []
-  if (!ls.length) {
+  const opType = String(form.value.inventory_operation_type || 'servicio')
+  const hasInventoryOperation = opType === 'venta' || opType === 'alquiler'
+  if (!ls.length && !hasInventoryOperation) {
     e.items = ['Añade al menos un ítem del catálogo o «Otro».']
+  }
+  if (hasInventoryOperation) {
+    const lotId = Number(form.value.inventory_lot_id)
+    const qty = Number(form.value.inventory_quantity)
+    if (!Number.isInteger(lotId) || lotId <= 0) {
+      e.inventory_lot_id = ['Selecciona un equipo de inventario para la operación comercial.']
+    }
+    if (!Number.isFinite(qty) || qty < 1) {
+      e.inventory_quantity = ['Indica una cantidad válida (mínimo 1).']
+    }
+    if (opType === 'alquiler') {
+      const days = Number(form.value.inventory_days)
+      if (!Number.isFinite(days) || days < 1) {
+        e.inventory_days = ['Indica los días de alquiler (mínimo 1).']
+      }
+    }
   }
   for (let i = 0; i < ls.length; i++) {
     const row = ls[i]
@@ -183,7 +255,8 @@ function validateBeforeSubmit() {
     }
   }
   const built = buildServiceDescriptionFromLines(ls)
-  if (built.length < 8) {
+  const skipLineDescriptionAggregate = hasInventoryOperation && ls.length === 0
+  if (!skipLineDescriptionAggregate && built.length < 8) {
     e.items = e.items || [
       'Falta detalle en las líneas para armar la descripción del servicio (mín. 8 caracteres en conjunto).',
     ]
@@ -205,6 +278,7 @@ onMounted(async () => {
     ])
     companies.value = Array.isArray(co) ? co : []
     catalogItems.value = Array.isArray(cat) ? cat : []
+    inventoryLots.value = []
     if (svc.assignment_status !== 'awaiting_completion') {
       loadError.value = 'Este servicio no está pendiente de completar o ya fue procesado.'
       return
@@ -220,6 +294,10 @@ onMounted(async () => {
       description: '',
       amount: '',
       lines: Array.isArray(svc.items) ? svc.items.map(mapItemToLine) : [],
+      inventory_operation_type: 'servicio',
+      inventory_lot_id: '',
+      inventory_quantity: 1,
+      inventory_days: 1,
     }
     formResetKey.value += 1
   } catch (e) {
@@ -278,10 +356,41 @@ async function onSubmit() {
   try {
     const baseClient = form.value.client_name.trim()
     const ls = Array.isArray(form.value.lines) ? form.value.lines : []
+    const opType = String(form.value.inventory_operation_type || 'servicio')
+    const opItems = []
+    if (opType === 'venta' || opType === 'alquiler') {
+      const lotId = Number(form.value.inventory_lot_id)
+      const qty = Number(form.value.inventory_quantity || 1)
+      const days = Number(form.value.inventory_days || 1)
+      const lot = inventoryLots.value.find((x) => Number(x.id) === lotId)
+      if (lot) {
+        const canSale = lotAllowsSale(lot)
+        const canRental = lotAllowsRental(lot)
+        if (opType === 'venta' && !canSale) {
+          throw new Error('El equipo seleccionado no está habilitado para venta.')
+        }
+        if (opType === 'alquiler' && !canRental) {
+          throw new Error('El equipo seleccionado no está habilitado para alquiler.')
+        }
+        const unit = Number(lot.unit_price || 0)
+        const total = opType === 'alquiler' ? unit * qty * days : unit * qty
+        const label = opType === 'alquiler' ? `Alquiler equipo: ${lot.name}` : `Venta equipo: ${lot.name}`
+        const lineDesc =
+          opType === 'alquiler'
+            ? `Equipo ${lot.name} (${lot.sku || 'sin SKU'}), cantidad ${qty}, días ${days}, tarifa diaria fija ${unit.toFixed(2)}.`
+            : `Equipo ${lot.name} (${lot.sku || 'sin SKU'}), cantidad ${qty}, precio unitario fijo ${unit.toFixed(2)}.`
+        opItems.push({
+          custom_name: label,
+          amount: Number(total.toFixed(2)),
+          custom_description: lineDesc,
+          line_description: lineDesc,
+        })
+      }
+    }
     const payload = {
       client_name: baseClient,
       service_type: form.value.service_type.trim(),
-      items: buildPayloadItemsFromLines(ls),
+      items: [...buildPayloadItemsFromLines(ls), ...opItems],
     }
 
     await completeServiceAssignment(serviceId.value, payload, photoFiles.value)
@@ -323,8 +432,10 @@ async function onSubmit() {
           v-model:photos="photoFiles"
           billing-locked
           hide-submit-button
+          :allow-inventory-commercial-ops="false"
           :companies="companies"
           :catalog-items="catalogItems"
+          :inventory-lots="inventoryLots"
           :client-suggestions="clientSuggestions"
           :field-errors="fieldErrors"
           :disabled="saving || rejecting"

@@ -6,6 +6,7 @@ import AdminServiceRegisterPanel from '@/components/admin/AdminServiceRegisterPa
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
 import { downloadAdminExportCsv } from '@/services/invoicesApi.js'
+import { fetchEmpleadoCommercialInventorySettings } from '@/services/inventoryApi.js'
 import { archiveService, fetchCompanies, fetchEmpleados, fetchServices } from '@/services/servicesApi.js'
 
 const auth = useAuthStore()
@@ -31,6 +32,12 @@ const deleteInputRef = ref(null)
 const detailPanelOpen = ref(false)
 const detailServiceId = ref(null)
 const registerPanelOpen = ref(false)
+const registerPanelKind = ref('servicio')
+
+function openRegisterPanel(kind) {
+  registerPanelKind.value = kind
+  registerPanelOpen.value = true
+}
 
 function openDetailPanel(row) {
   detailServiceId.value = row.id
@@ -87,9 +94,7 @@ const sortDir = ref('desc')
 
 const listTitle = computed(() => (isAdmin.value ? 'Listado de servicios' : 'Mis servicios'))
 
-const nuevoServicioTo = computed(() =>
-  isAdmin.value ? '/admin/servicios/nuevo' : '/empleado/registro-servicio'
-)
+const empleadoCommercial = ref({ venta: false, alquiler: false })
 
 function detailPath(id) {
   return isAdmin.value ? `/admin/servicios/${id}` : `/empleado/servicio/${id}`
@@ -229,6 +234,16 @@ onMounted(async () => {
   if (!isAdmin.value) {
     sortKey.value = 'code'
     sortDir.value = 'desc'
+    try {
+      const r = await fetchEmpleadoCommercialInventorySettings()
+      const d = r?.data || {}
+      empleadoCommercial.value = {
+        venta: Boolean(d.venta_enabled),
+        alquiler: Boolean(d.alquiler_enabled),
+      }
+    } catch {
+      empleadoCommercial.value = { venta: false, alquiler: false }
+    }
   }
   await load()
 })
@@ -368,10 +383,32 @@ async function exportServicesCsv() {
         >
           {{ exportBusy ? 'Exportando…' : 'Exportar CSV (Excel)' }}
         </button>
-        <button v-if="isAdmin" type="button" class="btn primary" @click="registerPanelOpen = true">
-          + Nuevo servicio
-        </button>
-        <RouterLink v-else class="btn primary" :to="nuevoServicioTo">+ Nuevo servicio</RouterLink>
+        <template v-if="isAdmin">
+          <button type="button" class="btn primary register-btn" @click="openRegisterPanel('servicio')">+ Servicio</button>
+          <button type="button" class="btn secondary register-btn" @click="openRegisterPanel('venta')">+ Venta</button>
+          <button type="button" class="btn secondary register-btn" @click="openRegisterPanel('alquiler')">+ Alquiler</button>
+        </template>
+        <template v-else>
+          <button type="button" class="btn primary register-btn" @click="openRegisterPanel('servicio')">+ Servicio</button>
+          <button
+            type="button"
+            class="btn secondary register-btn"
+            :disabled="!empleadoCommercial.venta"
+            :title="empleadoCommercial.venta ? 'Registrar venta' : 'Venta no habilitada por administración'"
+            @click="openRegisterPanel('venta')"
+          >
+            + Venta
+          </button>
+          <button
+            type="button"
+            class="btn secondary register-btn"
+            :disabled="!empleadoCommercial.alquiler"
+            :title="empleadoCommercial.alquiler ? 'Registrar alquiler' : 'Alquiler no habilitado por administración'"
+            @click="openRegisterPanel('alquiler')"
+          >
+            + Alquiler
+          </button>
+        </template>
       </div>
     </header>
 
@@ -671,8 +708,9 @@ async function exportServicesCsv() {
     </Teleport>
 
     <AdminServiceRegisterPanel
-      v-if="isAdmin"
       :open="registerPanelOpen"
+      :register-kind="registerPanelKind"
+      :is-empleado="!isAdmin"
       :overlay-z-index="96"
       @close="registerPanelOpen = false"
       @created="load"
@@ -710,6 +748,10 @@ async function exportServicesCsv() {
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
+}
+
+.register-btn {
+  min-width: 9.5rem;
 }
 
 .head h1 {

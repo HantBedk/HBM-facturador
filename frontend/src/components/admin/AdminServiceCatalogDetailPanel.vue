@@ -109,6 +109,14 @@ defineExpose({ reload })
               <p v-else class="muted">Sin descripción.</p>
               <p class="mt"><span class="label">Precio orientativo</span> {{ money(item.base_price) }}</p>
               <p>
+                <span class="label">IVA (%)</span>
+                {{
+                  item.iva_percent != null && String(item.iva_percent).trim() !== ''
+                    ? `${item.iva_percent}% (sobre el importe de línea al facturar)`
+                    : '0%'
+                }}
+              </p>
+              <p>
                 <span class="label">Margen al facturar</span>
                 <template
                   v-if="item.technician_discount_percent != null && String(item.technician_discount_percent).trim() !== ''"

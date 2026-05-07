@@ -15,3 +15,6 @@ Thumbs.db
 
 # Volcados locales de MySQL (pueden contener datos sensibles)
 /backups/
+
+# Seeder de datos ficticios solo para máquinas locales (no versionar)
+/backend/database/seeders/DevFakeDataLocalSeeder.php

@@ -1,5 +1,10 @@
 # Arranque del proyecto HBM.
 #
+# En Windows: NO hagas doble clic en este .ps1 (sale "Abrir con"). Usa:
+#   - Terminal:  .\HBM.ps1 -Levantar
+#   - O:         HBM.cmd -Levantar
+#   - O doble clic: HBM-Levantar.cmd
+#
 # RECOMENDADO día a día (no toca la BD, no seeders, no migraciones):
 #   .\HBM.ps1 -Levantar     → Docker + Vite solamente
 #

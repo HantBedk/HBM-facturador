@@ -74,6 +74,16 @@ class User extends Authenticatable
         return $this->hasMany(PanelNotification::class);
     }
 
+    public function ownedInventoryLots(): HasMany
+    {
+        return $this->hasMany(InventoryLot::class, 'owner_user_id');
+    }
+
+    public function inventorySalesRegistered(): HasMany
+    {
+        return $this->hasMany(InventorySale::class, 'sold_by_user_id');
+    }
+
     public function isAdminEquipo(): bool
     {
         return in_array($this->rol, [self::ROL_ADMIN, self::ROL_SUPER_ADMIN], true);

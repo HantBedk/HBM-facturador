@@ -5,11 +5,28 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class AdminActivityLogController extends Controller
 {
+    private static function activityLogVisibleTo(?User $actor, ActivityLog $l): bool
+    {
+        if ($actor === null || $actor->rol !== User::ROL_ADMIN) {
+            return true;
+        }
+        $u = $l->user;
+        if ($u === null) {
+            return true;
+        }
+        if (! $u->isAdminEquipo()) {
+            return true;
+        }
+
+        return $u->id === $actor->id;
+    }
+
     /**
      * Acciones del filtro «Solo facturas y pagos»: facturación, cobros a cliente y abonos de referencia a técnicos.
      */
@@ -28,7 +45,9 @@ class AdminActivityLogController extends Controller
 
     /**
      * Movimientos agrupados por usuario (admin, super_admin, técnico).
-     * Query: scope=all|facturas, limit (20–300, default 150).
+     * Query: scope=all|facturas, date=Y-m-d (día calendario en APP_TIMEZONE; omiso = hoy).
+     * Opcional: calendar_month=Y-m para devolver `calendar.dates_with_activity` de ese mes (mismo scope y visibilidad que el listado).
+     * Tope interno de filas por petición para un día (evita respuestas enormes).
      */
     public function index(Request $request): JsonResponse
     {
@@ -37,10 +56,25 @@ class AdminActivityLogController extends Controller
             $scope = 'all';
         }
 
-        $limit = min(300, max(20, (int) $request->query('limit', 150)));
+        $tz = (string) config('app.timezone');
+        $dateRaw = $request->query('date');
+        $dateRaw = is_string($dateRaw) ? trim($dateRaw) : '';
+        try {
+            $day = ($dateRaw !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateRaw) === 1)
+                ? Carbon::createFromFormat('Y-m-d', $dateRaw, $tz)->startOfDay()
+                : now($tz)->startOfDay();
+        } catch (\Throwable) {
+            $day = now($tz)->startOfDay();
+        }
+
+        $startUtc = $day->copy()->utc();
+        $endUtc = $day->copy()->endOfDay()->utc();
+
+        $limit = min(3000, max(100, (int) $request->query('limit', 2500)));
 
         $q = ActivityLog::query()
             ->with(['user:id,nombre,correo,rol'])
+            ->whereBetween('created_at', [$startUtc, $endUtc])
             ->orderByDesc('created_at');
 
         if ($scope === 'facturas') {
@@ -51,17 +85,7 @@ class AdminActivityLogController extends Controller
 
         $actor = $request->user();
         if ($actor !== null && $actor->rol === User::ROL_ADMIN) {
-            $logs = $logs->filter(function (ActivityLog $l) use ($actor) {
-                $u = $l->user;
-                if ($u === null) {
-                    return true;
-                }
-                if (! $u->isAdminEquipo()) {
-                    return true;
-                }
-
-                return $u->id === $actor->id;
-            })->values();
+            $logs = $logs->filter(fn (ActivityLog $l) => self::activityLogVisibleTo($actor, $l))->values();
         }
 
         $groups = $logs->groupBy(fn (ActivityLog $l) => (string) ($l->user_id ?? '0'));
@@ -97,10 +121,56 @@ class AdminActivityLogController extends Controller
             return strcmp((string) $tb, (string) $ta);
         });
 
+        $calMonthRaw = $request->query('calendar_month');
+        $calMonthRaw = is_string($calMonthRaw) ? trim($calMonthRaw) : '';
+        $calMonthStart = $day->copy()->startOfMonth();
+        if ($calMonthRaw !== '' && preg_match('/^\d{4}-\d{2}$/', $calMonthRaw) === 1) {
+            try {
+                $calMonthStart = Carbon::createFromFormat('Y-m', $calMonthRaw, $tz)->startOfMonth();
+            } catch (\Throwable) {
+                $calMonthStart = $day->copy()->startOfMonth();
+            }
+        }
+        $calMonthEnd = $calMonthStart->copy()->endOfMonth();
+        $calStartUtc = $calMonthStart->copy()->startOfDay()->utc();
+        $calEndUtc = $calMonthEnd->copy()->endOfDay()->utc();
+
+        $calQ = ActivityLog::query()
+            ->with(['user:id,nombre,correo,rol'])
+            ->whereBetween('created_at', [$calStartUtc, $calEndUtc]);
+
+        if ($scope === 'facturas') {
+            $calQ->whereIn('action', self::INVOICE_ACTIONS);
+        }
+
+        $calLogs = $calQ->get(['id', 'user_id', 'created_at']);
+        if ($actor !== null && $actor->rol === User::ROL_ADMIN) {
+            $calLogs = $calLogs->filter(fn (ActivityLog $l) => self::activityLogVisibleTo($actor, $l))->values();
+        }
+
+        $datesWithActivity = [];
+        foreach ($calLogs as $log) {
+            $d = $log->created_at?->timezone($tz)->toDateString();
+            if ($d !== null && $d !== '') {
+                $datesWithActivity[$d] = true;
+            }
+        }
+        $datesWithActivityList = array_keys($datesWithActivity);
+        sort($datesWithActivityList);
+
+        $todayStr = now($tz)->toDateString();
+
         return response()->json([
             'scope' => $scope,
+            'date' => $day->toDateString(),
+            'timezone' => $tz,
             'limit' => $limit,
             'groups' => array_values($out),
+            'calendar' => [
+                'month' => $calMonthStart->format('Y-m'),
+                'today' => $todayStr,
+                'dates_with_activity' => $datesWithActivityList,
+            ],
         ]);
     }
 }

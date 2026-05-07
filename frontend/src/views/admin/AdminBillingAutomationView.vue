@@ -5,6 +5,10 @@ import {
   fetchBillingAutomationSettings,
   updateBillingAutomationSettings,
 } from '@/services/adminBillingAutomationApi.js'
+import {
+  fetchTechnicianCatalogDiscount,
+  updateTechnicianCatalogDiscount,
+} from '@/services/servicesApi.js'
 
 const loading = ref(true)
 const saving = ref(false)
@@ -17,6 +21,10 @@ const draftGenerationDay = ref(18)
 const draftGenerationPeriod = ref('current')
 /** @type {import('vue').Ref<Record<string, boolean>>} */
 const storedInDatabase = ref({})
+const technicianDiscountPercent = ref(10)
+const techDiscountSaving = ref(false)
+const techDiscountError = ref('')
+const techDiscountOk = ref('')
 
 const passwordModalOpen = ref(false)
 const modalPassword = ref('')
@@ -46,6 +54,34 @@ async function load() {
     error.value = e.data?.message || e.message || 'No se pudo cargar la configuración.'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadTechnicianDiscount() {
+  techDiscountError.value = ''
+  try {
+    const d = await fetchTechnicianCatalogDiscount()
+    technicianDiscountPercent.value = Number(d?.technician_catalog_discount_percent ?? 10)
+  } catch (e) {
+    techDiscountError.value = e.data?.message || e.message || 'No se pudo cargar el margen técnico global.'
+  }
+}
+
+async function saveTechnicianDiscount() {
+  techDiscountOk.value = ''
+  techDiscountError.value = ''
+  techDiscountSaving.value = true
+  try {
+    await updateTechnicianCatalogDiscount(Number(technicianDiscountPercent.value))
+    techDiscountOk.value = 'Porcentaje guardado para facturación.'
+  } catch (e) {
+    techDiscountError.value = e.data?.message || e.message || 'No se pudo guardar.'
+    if (e.data?.errors) {
+      const first = Object.values(e.data.errors).flat()[0]
+      if (first) techDiscountError.value = first
+    }
+  } finally {
+    techDiscountSaving.value = false
   }
 }
 
@@ -117,7 +153,9 @@ watch(passwordModalOpen, (open) => {
   else document.removeEventListener('keydown', onDocumentEscape)
 })
 
-onMounted(load)
+onMounted(async () => {
+  await Promise.all([load(), loadTechnicianDiscount()])
+})
 onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
 </script>
 
@@ -187,6 +225,30 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
           Guardar en el sistema
         </button>
       </div>
+    </div>
+
+    <div v-if="!loading" class="card margin-card">
+      <h2 class="margin-title">Margen técnico → factura</h2>
+      <p class="field-hint margin-hint">
+        Este porcentaje global se aplica sobre el importe de referencia que registra el técnico para calcular el valor facturable.
+      </p>
+      <div class="row-day margin-row">
+        <label class="lab margin-label" for="tech-margin">Porcentaje global (%)</label>
+        <input
+          id="tech-margin"
+          v-model.number="technicianDiscountPercent"
+          type="number"
+          min="0"
+          max="95"
+          step="0.5"
+          class="select margin-input"
+        />
+        <button type="button" class="btn primary" :disabled="techDiscountSaving" @click="saveTechnicianDiscount">
+          {{ techDiscountSaving ? 'Guardando…' : 'Guardar margen' }}
+        </button>
+      </div>
+      <p v-if="techDiscountError" class="banner err">{{ techDiscountError }}</p>
+      <p v-else-if="techDiscountOk" class="banner ok">{{ techDiscountOk }}</p>
     </div>
 
     <Teleport to="body">
@@ -411,6 +473,33 @@ h1 {
   margin-top: 1.25rem;
   padding-top: 1rem;
   border-top: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.margin-card {
+  margin-top: 1rem;
+}
+
+.margin-title {
+  margin: 0 0 0.4rem;
+  font-size: 1.02rem;
+  color: #ccfbf1;
+}
+
+.margin-hint {
+  margin-bottom: 0.8rem;
+}
+
+.margin-row {
+  align-items: flex-end;
+}
+
+.margin-label {
+  margin-bottom: 0.25rem;
+}
+
+.margin-input {
+  width: 8rem;
+  min-width: 0;
 }
 
 .btn {

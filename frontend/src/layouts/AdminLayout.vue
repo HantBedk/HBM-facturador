@@ -17,6 +17,7 @@ const firstName = computed(() => {
 
 const menuOpen = ref(false)
 const menuWrap = ref(null)
+const mobileNavOpen = ref(false)
 
 const initials = computed(() => {
   const n = (auth.user?.nombre || '').trim()
@@ -60,7 +61,9 @@ function onDocClick(e) {
 }
 
 function onMenuEscape(e) {
-  if (e.key === 'Escape') menuOpen.value = false
+  if (e.key !== 'Escape') return
+  menuOpen.value = false
+  mobileNavOpen.value = false
 }
 
 const now = ref(new Date())
@@ -89,10 +92,27 @@ watch(menuOpen, (open) => {
   else document.removeEventListener('keydown', onMenuEscape)
 })
 
+watch(mobileNavOpen, (open) => {
+  if (open) {
+    document.addEventListener('keydown', onMenuEscape)
+    document.body.style.overflow = 'hidden'
+  } else {
+    document.body.style.overflow = ''
+  }
+})
+
+watch(
+  () => route.fullPath,
+  () => {
+    mobileNavOpen.value = false
+  }
+)
+
 onUnmounted(() => {
   if (timeInterval) clearInterval(timeInterval)
   document.removeEventListener('click', onDocClick)
   document.removeEventListener('keydown', onMenuEscape)
+  document.body.style.overflow = ''
 })
 
 async function salir() {
@@ -144,13 +164,15 @@ async function salir() {
         </RouterLink>
 
         <RouterLink
-          to="/admin/catalogo-servicios"
-          :class="['group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors', route.path.startsWith('/admin/catalogo-servicios') ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20' : 'text-slate-300 hover:bg-slate-800/50 hover:text-white']"
+          to="/admin/inventario"
+          :class="['group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors', route.path.startsWith('/admin/inventario') ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20' : 'text-slate-300 hover:bg-slate-800/50 hover:text-white']"
         >
-          <div :class="['flex items-center justify-center p-1', route.path.startsWith('/admin/catalogo-servicios') ? 'text-white' : 'text-teal-400 group-hover:text-teal-300']">
-            <svg class="h-[1.15rem] w-[1.15rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+          <div :class="['flex items-center justify-center p-1', route.path.startsWith('/admin/inventario') ? 'text-white' : 'text-violet-400 group-hover:text-violet-300']">
+            <svg class="h-[1.15rem] w-[1.15rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+            </svg>
           </div>
-          <span>Catálogo</span>
+          <span>Inventario interno</span>
         </RouterLink>
 
         <!-- Facturas (Cyan) -->
@@ -207,6 +229,59 @@ async function salir() {
 
       </nav>
     </aside>
+    <Teleport to="body">
+      <div
+        v-if="mobileNavOpen"
+        class="fixed inset-0 z-[70] bg-slate-950/65 lg:hidden"
+        @click="mobileNavOpen = false"
+      />
+      <aside
+        class="fixed inset-y-0 left-0 z-[80] w-[86vw] max-w-[18rem] bg-[#1c212c] border-r border-slate-700/50 flex flex-col shadow-2xl transition-transform duration-200 ease-out lg:hidden"
+        :class="mobileNavOpen ? 'translate-x-0' : '-translate-x-full'"
+        aria-label="Navegación móvil de administrador"
+      >
+        <div class="h-[76px] px-5 flex items-center justify-between gap-3 border-b border-slate-700/30">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-500/20">
+              <svg class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+              </svg>
+            </div>
+            <span class="text-[1.05rem] font-bold text-white tracking-wide truncate">HBM Admin</span>
+          </div>
+          <button
+            type="button"
+            class="rounded-md p-1.5 text-slate-300 hover:bg-slate-800/60 hover:text-white"
+            aria-label="Cerrar menú"
+            @click="mobileNavOpen = false"
+          >
+            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <nav class="flex-1 px-4 py-3 space-y-1.5 overflow-y-auto">
+          <RouterLink to="/admin" :class="['group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors', route.path === '/admin' ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20' : 'text-slate-300 hover:bg-slate-800/50 hover:text-white']">
+            <span>Dashboard</span>
+          </RouterLink>
+          <RouterLink to="/admin/servicios" :class="['group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors', route.path.startsWith('/admin/servicios') ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20' : 'text-slate-300 hover:bg-slate-800/50 hover:text-white']">
+            <span>Servicios</span>
+          </RouterLink>
+          <RouterLink to="/admin/inventario" :class="['group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors', route.path.startsWith('/admin/inventario') ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20' : 'text-slate-300 hover:bg-slate-800/50 hover:text-white']">
+            <span>Inventario interno</span>
+          </RouterLink>
+          <RouterLink to="/admin/facturas" :class="['group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors', route.path.startsWith('/admin/facturas') ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20' : 'text-slate-300 hover:bg-slate-800/50 hover:text-white']">
+            <span>Facturas</span>
+          </RouterLink>
+          <RouterLink to="/admin/empresas" :class="['group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors', route.path.startsWith('/admin/empresas') ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20' : 'text-slate-300 hover:bg-slate-800/50 hover:text-white']">
+            <span>Empresas</span>
+          </RouterLink>
+          <RouterLink to="/admin/empleados/rendimiento" :class="['group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors', route.path.startsWith('/admin/empleados/rendimiento') ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20' : 'text-slate-300 hover:bg-slate-800/50 hover:text-white']">
+            <span>Empleados</span>
+          </RouterLink>
+        </nav>
+      </aside>
+    </Teleport>
 
     <!-- ÁREA PRINCIPAL CONTENT -->
     <div class="flex-1 flex flex-col min-w-0 bg-[#13161f]">
@@ -218,7 +293,7 @@ async function salir() {
         <!-- Izquierda: móvil + saludo -->
         <div class="flex items-center gap-3 sm:gap-4 min-w-0 flex-1 lg:flex-none lg:max-w-[min(100%,28rem)]">
           <div class="flex items-center gap-3 shrink-0 lg:hidden">
-            <button type="button" class="text-slate-400 hover:text-white transition-colors" aria-label="Abrir menú">
+            <button type="button" class="text-slate-400 hover:text-white transition-colors" aria-label="Abrir menú" @click="mobileNavOpen = true">
               <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
               </svg>

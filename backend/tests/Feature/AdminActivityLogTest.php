@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\ActivityLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -40,7 +41,14 @@ class AdminActivityLogTest extends TestCase
 
         $this->getJson('/api/admin/activity-logs?scope=all')
             ->assertOk()
-            ->assertJsonStructure(['scope', 'limit', 'groups'])
+            ->assertJsonStructure([
+                'scope',
+                'date',
+                'timezone',
+                'limit',
+                'groups',
+                'calendar' => ['month', 'today', 'dates_with_activity'],
+            ])
             ->assertJsonPath('scope', 'all');
 
         $this->getJson('/api/admin/activity-logs?scope=facturas')
@@ -50,5 +58,36 @@ class AdminActivityLogTest extends TestCase
         $data = $this->getJson('/api/admin/activity-logs?scope=facturas')->json('groups');
         $this->assertCount(1, $data);
         $this->assertSame('factura_creada', $data[0]['movimientos'][0]['action'] ?? null);
+    }
+
+    public function test_filters_logs_by_calendar_date_in_app_timezone(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        // 2026-03-29 04:00 UTC → 2026-03-28 23:00 America/Bogota (día 28)
+        DB::table('activity_logs')->insert([
+            'user_id' => $admin->id,
+            'action' => 'servicio_creado',
+            'description' => 'Día 28 en Bogotá',
+            'created_at' => '2026-03-29 04:00:00',
+            'updated_at' => '2026-03-29 04:00:00',
+        ]);
+        // 2026-03-29 06:00 UTC → 2026-03-29 01:00 America/Bogota (día 29)
+        DB::table('activity_logs')->insert([
+            'user_id' => $admin->id,
+            'action' => 'servicio_editado',
+            'description' => 'Día 29 en Bogotá',
+            'created_at' => '2026-03-29 06:00:00',
+            'updated_at' => '2026-03-29 06:00:00',
+        ]);
+
+        $g28 = $this->getJson('/api/admin/activity-logs?date=2026-03-28&scope=all')->assertOk()->json('groups');
+        $this->assertCount(1, $g28);
+        $this->assertSame('servicio_creado', $g28[0]['movimientos'][0]['action'] ?? null);
+
+        $g29 = $this->getJson('/api/admin/activity-logs?date=2026-03-29&scope=all')->assertOk()->json('groups');
+        $this->assertCount(1, $g29);
+        $this->assertSame('servicio_editado', $g29[0]['movimientos'][0]['action'] ?? null);
     }
 }

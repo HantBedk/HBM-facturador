@@ -121,8 +121,13 @@ watch(
 
 const idRef = computed(() => props.invoiceId)
 
-const canEdit = computed(() => invoice.value?.status === 'borrador')
-const canApprove = computed(() => invoice.value?.status === 'borrador')
+const hasRegisteredCompany = computed(() => {
+  const id = invoice.value?.company_id
+  return id !== null && id !== undefined && id !== ''
+})
+
+const canEdit = computed(() => invoice.value?.status === 'borrador' && hasRegisteredCompany.value)
+const canApprove = computed(() => invoice.value?.status === 'borrador' && hasRegisteredCompany.value)
 const canSend = computed(() => invoice.value?.status === 'aprobada')
 
 const balanceNum = computed(() => {
@@ -334,6 +339,16 @@ defineExpose({ reload })
               <span v-if="invoice.sent_at" class="muted">Enviada: {{ new Date(invoice.sent_at).toLocaleString('es-CO') }}</span>
             </div>
 
+            <div
+              v-if="invoice.status === 'borrador' && !hasRegisteredCompany"
+              class="card banner err"
+            >
+              <p class="muted small" style="margin: 0">
+                Este borrador no está vinculado a una empresa del directorio. Ya no se puede editar ni aprobar; elimínelo y cree una
+                factura nueva contra una empresa registrada.
+              </p>
+            </div>
+
             <div v-if="reviewMode && invoice.status === 'borrador'" class="card review-hint-card">
               <p class="muted small review-hint-text">
                 Revise el detalle y la vista previa PDF. Use <strong>Editar borrador</strong> si debe corregir algo. Si no aprueba,
@@ -450,6 +465,7 @@ defineExpose({ reload })
               <div class="card">
                 <h2>Totales</h2>
                 <p>Subtotal: {{ money(invoice.subtotal) }}</p>
+                <p v-if="Number(invoice.iva_amount) > 0">IVA: {{ money(invoice.iva_amount) }}</p>
                 <p class="strong">Total: {{ money(invoice.total) }}</p>
                 <template v-if="invoice.financial">
                   <p>Pagado: {{ money(invoice.financial.total_paid) }}</p>

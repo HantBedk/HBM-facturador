@@ -12,6 +12,8 @@ const props = defineProps({
   readonly: { type: Boolean, default: false },
   /** Oculta el bloque de descripción global (p. ej. empleado con líneas: el detalle va por concepto). */
   hideDescription: { type: Boolean, default: false },
+  /** Cuando el valor depende de líneas detalladas se bloquea edición directa. */
+  lockAmount: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -112,13 +114,16 @@ function onCatalogChange(ev) {
       <span>Valor (COP) <abbr title="obligatorio">*</abbr></span>
       <input
         :value="inner.amount"
-        :disabled="disabled || readonly"
+        :disabled="disabled || readonly || lockAmount"
         type="number"
         min="0.01"
         step="0.01"
         required
         @input="patch({ amount: $event.target.value })"
       />
+      <small v-if="lockAmount" class="hint">
+        Este valor se calcula desde las líneas del servicio. Edítelo desde el detalle por conceptos.
+      </small>
       <small v-if="fieldErrors.amount" class="err">{{ fieldErrors.amount[0] }}</small>
     </label>
   </div>
@@ -170,5 +175,12 @@ textarea:disabled {
   color: #fecaca;
   display: block;
   margin-top: 0.25rem;
+}
+
+.hint {
+  color: #94a3b8;
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
 }
 </style>

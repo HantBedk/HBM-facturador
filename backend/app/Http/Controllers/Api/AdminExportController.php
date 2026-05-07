@@ -110,7 +110,7 @@ class AdminExportController extends Controller
     {
         $request->validate([
             'company_id' => ['sometimes', 'nullable', 'integer', 'exists:companies,id'],
-            'company_kind' => ['sometimes', 'nullable', 'string', 'in:registered,quick,counter'],
+            'company_kind' => ['sometimes', 'nullable', 'string', 'in:registered'],
             'status' => ['sometimes', 'nullable', 'string', 'max:32'],
             'period_year' => ['sometimes', 'nullable', 'integer', 'min:2000', 'max:2100'],
             'period_month' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:12'],
@@ -122,9 +122,7 @@ class AdminExportController extends Controller
             ->withSum('payments', 'amount');
 
         $ck = $request->string('company_kind')->toString();
-        if ($ck === 'quick' || $ck === 'counter') {
-            $q->whereNull('company_id');
-        } elseif ($ck === 'registered') {
+        if ($ck === 'registered') {
             $q->whereNotNull('company_id');
         }
 
