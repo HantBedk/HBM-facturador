@@ -230,7 +230,7 @@ class ServiceController extends Controller
                 // Compatibilidad: registro único sin `items` ni catálogo → una línea «Otro».
                 // El `amount` histórico es el total facturable; normalizeServiceItems interpreta `amount` como técnico.
                 $billed = (float) $data['amount'];
-                $p = CatalogPricing::globalTechnicianDiscountPercent();
+                $p = CatalogPricing::globalServiceDiscountPercent();
                 if ($p <= 0 || $p >= 100) {
                     $techAmount = $billed;
                 } else {
@@ -282,8 +282,9 @@ class ServiceController extends Controller
             ]);
         }
 
+        $codeKind = $this->serviceCodeKindFromNormalized($normalized);
         try {
-            $code = $codes->nextForDate($serviceDate);
+            $code = $codes->nextForDate($serviceDate, $codeKind);
         } catch (\RuntimeException $e) {
             throw ValidationException::withMessages([
                 'service_date' => [$e->getMessage()],
@@ -1064,8 +1065,8 @@ class ServiceController extends Controller
                         'items' => ['Línea «Otro» '.($i + 1).': describe el trabajo realizado (mín. 8 caracteres).'],
                     ]);
                 }
-                $pGlobal = CatalogPricing::globalTechnicianDiscountPercent();
-                $billedStr = CatalogPricing::billedAmountFromTechnicianEntry((float) $amtStr, $pGlobal);
+                $pLine = CatalogPricing::technicianDiscountPercentForCustomLine($cname);
+                $billedStr = CatalogPricing::billedAmountFromTechnicianEntry((float) $amtStr, $pLine);
                 $out[] = [
                     'catalog_id' => null,
                     'custom_name' => $cname,
@@ -1133,6 +1134,40 @@ class ServiceController extends Controller
         }
 
         return $q->exists();
+    }
+
+    /**
+     * Prefijo de código: VENT- / ALQ- / SERV- según líneas (inventario comercial vs servicio estándar).
+     *
+     * @param  list<array<string, mixed>>  $normalized
+     */
+    private function serviceCodeKindFromNormalized(array $normalized): string
+    {
+        if ($normalized === []) {
+            return ServiceCodeGenerator::KIND_SERVICIO;
+        }
+        $allVenta = true;
+        $allAlquiler = true;
+        foreach ($normalized as $row) {
+            if (! ($row['is_custom'] ?? false)) {
+                return ServiceCodeGenerator::KIND_SERVICIO;
+            }
+            $label = trim((string) ($row['label'] ?? ''));
+            if (! str_starts_with($label, 'Venta equipo:')) {
+                $allVenta = false;
+            }
+            if (! str_starts_with($label, 'Alquiler equipo:')) {
+                $allAlquiler = false;
+            }
+        }
+        if ($allVenta) {
+            return ServiceCodeGenerator::KIND_VENTA;
+        }
+        if ($allAlquiler) {
+            return ServiceCodeGenerator::KIND_ALQUILER;
+        }
+
+        return ServiceCodeGenerator::KIND_SERVICIO;
     }
 
     /**

@@ -18,6 +18,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class InventoryLotController extends Controller
@@ -29,10 +30,13 @@ class InventoryLotController extends Controller
         $tenantCompanyId = $this->tenantCompanyIdFromRequest($request);
 
         if (! $user->isAdminEquipo()) {
-            $q->where('is_active', true);
+            $q->where('lifecycle_status', InventoryLot::LIFECYCLE_ACTIVO);
             $q->where('owner_user_id', $user->id);
         } elseif ($request->boolean('active_only')) {
-            $q->where('is_active', true);
+            $q->where('lifecycle_status', InventoryLot::LIFECYCLE_ACTIVO);
+        }
+        if ($request->filled('lifecycle_status')) {
+            $q->where('lifecycle_status', (string) $request->input('lifecycle_status'));
         }
 
         if ($request->filled('owner_user_id') && $user->isAdminEquipo()) {
@@ -66,6 +70,8 @@ class InventoryLotController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'sku' => ['nullable', 'string', 'max:64'],
+            'serial_number' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'mac_address' => ['sometimes', 'nullable', 'string', 'max:120'],
             'description' => ['nullable', 'string', 'max:2000'],
             'quantity_available' => ['required', 'integer', 'min:1', 'max:999999'],
             'unit_price' => ['required', 'numeric', 'min:0'],
@@ -87,17 +93,26 @@ class InventoryLotController extends Controller
             ? trim((string) $validated['sku'])
             : '';
         $skuAtCreate = $requestedSku !== '' ? $requestedSku : null;
+        $serialAtCreate = trim((string) ($validated['serial_number'] ?? ''));
+        $macAtCreate = trim((string) ($validated['mac_address'] ?? ''));
+        $fingerprintHash = $this->fingerprintHashFrom($serialAtCreate, $macAtCreate);
+        $this->assertFingerprintNotBlocked($fingerprintHash);
 
-        $lot = DB::transaction(function () use ($validated, $ownerId, $actor, $tenantCompanyId, $request, $skuAtCreate) {
+        $lot = DB::transaction(function () use ($validated, $ownerId, $actor, $tenantCompanyId, $request, $skuAtCreate, $serialAtCreate, $macAtCreate, $fingerprintHash) {
             $lot = InventoryLot::query()->create([
                 'owner_user_id' => $ownerId,
                 'tenant_company_id' => $tenantCompanyId,
                 'sku' => $skuAtCreate,
+                'serial_number' => $serialAtCreate !== '' ? $serialAtCreate : null,
+                'mac_address' => $macAtCreate !== '' ? $this->normalizeMacAddress($macAtCreate) : null,
+                'fingerprint_hash' => $fingerprintHash,
                 'name' => $validated['name'],
                 'description' => $validated['description'] ?? null,
                 'quantity_available' => (int) $validated['quantity_available'],
                 'unit_price' => $validated['unit_price'],
                 'is_active' => true,
+                'lifecycle_status' => InventoryLot::LIFECYCLE_ACTIVO,
+                'lifecycle_status_changed_at' => now(),
                 'allow_sale' => array_key_exists('allow_sale', $validated) ? (bool) $validated['allow_sale'] : true,
                 'allow_rental' => array_key_exists('allow_rental', $validated) ? (bool) $validated['allow_rental'] : false,
             ]);
@@ -119,6 +134,9 @@ class InventoryLotController extends Controller
             $this->audit($request, $tenantCompanyId, 'inventory_lot', (int) $lot->id, 'create', null, [
                 'name' => $lot->name,
                 'sku' => $lot->sku,
+                'serial_number' => $lot->serial_number,
+                'mac_address' => $lot->mac_address,
+                'lifecycle_status' => $lot->lifecycle_status,
                 'quantity_available' => $lot->quantity_available,
                 'unit_price' => (string) $lot->unit_price,
             ]);
@@ -149,6 +167,8 @@ class InventoryLotController extends Controller
         $validated = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
             'sku' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'serial_number' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'mac_address' => ['sometimes', 'nullable', 'string', 'max:120'],
             'description' => ['sometimes', 'nullable', 'string', 'max:2000'],
             'unit_price' => ['sometimes', 'numeric', 'min:0'],
             'is_active' => ['sometimes', 'boolean'],
@@ -168,7 +188,8 @@ class InventoryLotController extends Controller
 
         DB::transaction(function () use ($inventoryLot, $validated, $actor) {
             $before = $inventoryLot->only([
-                'name', 'sku', 'description', 'unit_price', 'is_active', 'quantity_available',
+                'name', 'sku', 'serial_number', 'mac_address', 'description', 'unit_price', 'is_active', 'lifecycle_status',
+                'allow_sale', 'allow_rental', 'quantity_available',
             ]);
             if (array_key_exists('quantity_available', $validated)) {
                 $newQty = (int) $validated['quantity_available'];
@@ -193,14 +214,44 @@ class InventoryLotController extends Controller
                     $inventoryLot->{$field} = $validated[$field];
                 }
             }
+            if (array_key_exists('serial_number', $validated)) {
+                $serial = trim((string) ($validated['serial_number'] ?? ''));
+                $inventoryLot->serial_number = $serial !== '' ? $serial : null;
+            }
+            if (array_key_exists('mac_address', $validated)) {
+                $macRaw = trim((string) ($validated['mac_address'] ?? ''));
+                $inventoryLot->mac_address = $macRaw !== '' ? $this->normalizeMacAddress($macRaw) : null;
+            }
+            if ($inventoryLot->lifecycle_status === InventoryLot::LIFECYCLE_BAJA) {
+                $inventoryLot->is_active = false;
+                $inventoryLot->allow_sale = false;
+                $inventoryLot->allow_rental = false;
+            } elseif (! $inventoryLot->is_active) {
+                $inventoryLot->lifecycle_status = InventoryLot::LIFECYCLE_BAJA;
+            }
+            if ($inventoryLot->is_active && $inventoryLot->lifecycle_status === InventoryLot::LIFECYCLE_BAJA) {
+                throw ValidationException::withMessages([
+                    'lifecycle_status' => ['Un equipo dado de baja no puede reactivarse desde esta operación.'],
+                ]);
+            }
+            $inventoryLot->fingerprint_hash = $this->fingerprintHashFrom(
+                (string) ($inventoryLot->serial_number ?? ''),
+                (string) ($inventoryLot->mac_address ?? '')
+            );
+            $this->assertFingerprintNotBlocked($inventoryLot->fingerprint_hash, (int) $inventoryLot->id);
 
             $inventoryLot->save();
             $this->audit(request(), $inventoryLot->tenant_company_id, 'inventory_lot', (int) $inventoryLot->id, 'update', $before, [
                 'name' => $inventoryLot->name,
                 'sku' => $inventoryLot->sku,
+                'serial_number' => $inventoryLot->serial_number,
+                'mac_address' => $inventoryLot->mac_address,
                 'description' => $inventoryLot->description,
                 'unit_price' => (string) $inventoryLot->unit_price,
                 'is_active' => $inventoryLot->is_active,
+                'lifecycle_status' => $inventoryLot->lifecycle_status,
+                'allow_sale' => $inventoryLot->allow_sale,
+                'allow_rental' => $inventoryLot->allow_rental,
                 'quantity_available' => $inventoryLot->quantity_available,
             ]);
         });
@@ -343,5 +394,44 @@ class InventoryLotController extends Controller
             'after' => $after,
             'occurred_at' => now(),
         ]);
+    }
+
+    private function normalizeMacAddress(?string $raw): ?string
+    {
+        $value = Str::upper(preg_replace('/[^a-fA-F0-9]/', '', (string) $raw) ?? '');
+        if ($value === '') {
+            return null;
+        }
+
+        return implode(':', str_split(substr($value, 0, 12), 2));
+    }
+
+    private function fingerprintHashFrom(?string $serial, ?string $mac): ?string
+    {
+        $serialNorm = Str::upper(trim((string) $serial));
+        $macNorm = $this->normalizeMacAddress($mac);
+        if ($serialNorm === '' && ($macNorm === null || $macNorm === '')) {
+            return null;
+        }
+
+        return hash('sha256', $serialNorm.'|'.($macNorm ?? ''));
+    }
+
+    private function assertFingerprintNotBlocked(?string $fingerprintHash, ?int $exceptLotId = null): void
+    {
+        if ($fingerprintHash === null || $fingerprintHash === '') {
+            return;
+        }
+        $q = InventoryLot::query()
+            ->where('lifecycle_status', InventoryLot::LIFECYCLE_BAJA)
+            ->where('fingerprint_hash', $fingerprintHash);
+        if ($exceptLotId !== null) {
+            $q->where('id', '!=', $exceptLotId);
+        }
+        if ($q->exists()) {
+            throw ValidationException::withMessages([
+                'serial_number' => ['La huella técnica del equipo pertenece a un activo dado de baja y no puede reutilizarse.'],
+            ]);
+        }
     }
 }

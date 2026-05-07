@@ -71,6 +71,11 @@ class DatabaseSeeder extends Seeder
         );
 
         AppSetting::setValue(AppSetting::KEY_TECHNICIAN_CATALOG_DISCOUNT_PERCENT, '10');
+        AppSetting::setValue(AppSetting::KEY_TECHNICIAN_INVENTORY_SALE_DISCOUNT_PERCENT, '10');
+        AppSetting::setValue(AppSetting::KEY_TECHNICIAN_INVENTORY_RENTAL_DISCOUNT_PERCENT, '10');
+        AppSetting::setValue(AppSetting::KEY_TECHNICIAN_CATALOG_DISCOUNT_FLOOR_PERCENT, '5');
+        AppSetting::setValue(AppSetting::KEY_TECHNICIAN_INVENTORY_SALE_DISCOUNT_FLOOR_PERCENT, '10');
+        AppSetting::setValue(AppSetting::KEY_TECHNICIAN_INVENTORY_RENTAL_DISCOUNT_FLOOR_PERCENT, '8');
 
         $catalogSeeds = [
             ['name' => 'Revisión de equipo', 'description' => 'Inspección y diagnóstico inicial del equipo o instalación.', 'base_price' => 75000],

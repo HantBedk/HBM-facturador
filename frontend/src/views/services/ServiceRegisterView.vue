@@ -113,9 +113,9 @@ const effectiveAllowInventoryCommercialOps = computed(() =>
 
 <template>
 
-  <section class="mx-auto max-w-md px-3 pb-8 sm:px-0">
+  <section class="mx-auto w-full max-w-7xl px-4 pb-8 sm:px-6 lg:px-8">
 
-    <header class="mb-6 text-center">
+    <header class="mb-6 text-center lg:text-left">
 
       <h1 class="text-xl font-bold tracking-tight text-white sm:text-2xl">{{ pageTitle }}</h1>
 
@@ -142,6 +142,8 @@ const effectiveAllowInventoryCommercialOps = computed(() =>
         v-model="form"
 
         v-model:photos="photoFiles"
+
+        wide-layout
 
         :register-kind="registerKind"
 

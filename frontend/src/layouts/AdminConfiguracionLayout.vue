@@ -66,7 +66,7 @@ const isInventoryConfig = computed(() => route.name === 'admin-config-inventario
             "
             :aria-current="isBillingAuto ? 'page' : undefined"
           >
-            Facturación automática
+            Facturación y Margen
           </RouterLink>
         </div>
       </nav>

@@ -31,6 +31,25 @@ export function deleteInventoryLot(id, params = {}) {
   return api(`/inventory/lots/${id}${qs(params)}`, { method: 'DELETE' })
 }
 
+export function reportInventoryLifecycle(id, body) {
+  return api(`/inventory/lots/${id}/lifecycle/report`, { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function fetchInventoryLifecycleRequests(params = {}) {
+  return api(`/inventory/lifecycle/requests${qs(params)}`)
+}
+
+export function approveInventoryLifecycleRequest(requestId, body) {
+  return api(`/inventory/lifecycle/requests/${requestId}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export function fetchInventoryAuditEvents(params = {}) {
+  return api(`/inventory/audit-events${qs(params)}`)
+}
+
 export function fetchInventorySales(params = {}) {
   return api(`/inventory/sales${qs(params)}`)
 }

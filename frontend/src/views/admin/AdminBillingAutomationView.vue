@@ -21,7 +21,16 @@ const draftGenerationDay = ref(18)
 const draftGenerationPeriod = ref('current')
 /** @type {import('vue').Ref<Record<string, boolean>>} */
 const storedInDatabase = ref({})
-const technicianDiscountPercent = ref(10)
+const MARGIN_PERCENT_MAX = 95
+
+const technicianServiceDiscountPercent = ref(10)
+const technicianInventorySaleDiscountPercent = ref(10)
+const technicianInventoryRentalDiscountPercent = ref(10)
+
+const marginFloorService = ref(5)
+const marginFloorSale = ref(10)
+const marginFloorRental = ref(8)
+
 const techDiscountSaving = ref(false)
 const techDiscountError = ref('')
 const techDiscountOk = ref('')
@@ -57,23 +66,74 @@ async function load() {
   }
 }
 
+function clampPct(n, min, max = MARGIN_PERCENT_MAX) {
+  const x = Number(n)
+  if (!Number.isFinite(x)) return min
+  return Math.min(max, Math.max(min, Math.round(x * 100) / 100))
+}
+
 async function loadTechnicianDiscount() {
   techDiscountError.value = ''
   try {
     const d = await fetchTechnicianCatalogDiscount()
-    technicianDiscountPercent.value = Number(d?.technician_catalog_discount_percent ?? 10)
+    const fSvc = Number(d?.technician_service_margin_floor_percent ?? 5)
+    const fSale = Number(d?.technician_inventory_sale_margin_floor_percent ?? 10)
+    const fRent = Number(d?.technician_inventory_rental_margin_floor_percent ?? 8)
+    marginFloorService.value = clampPct(fSvc, 0, MARGIN_PERCENT_MAX)
+    marginFloorSale.value = clampPct(fSale, 0, MARGIN_PERCENT_MAX)
+    marginFloorRental.value = clampPct(fRent, 0, MARGIN_PERCENT_MAX)
+
+    const svc = Number(d?.technician_service_discount_percent ?? d?.technician_catalog_discount_percent ?? 10)
+    const sale = Number(d?.technician_inventory_sale_discount_percent ?? 10)
+    const rental = Number(d?.technician_inventory_rental_discount_percent ?? 10)
+    technicianServiceDiscountPercent.value = clampPct(svc, marginFloorService.value)
+    technicianInventorySaleDiscountPercent.value = clampPct(sale, marginFloorSale.value)
+    technicianInventoryRentalDiscountPercent.value = clampPct(rental, marginFloorRental.value)
   } catch (e) {
-    techDiscountError.value = e.data?.message || e.message || 'No se pudo cargar el margen técnico global.'
+    techDiscountError.value = e.data?.message || e.message || 'No se pudo cargar la configuración de márgenes.'
   }
+}
+
+function clampMarginFieldsToFloors() {
+  technicianServiceDiscountPercent.value = clampPct(
+    technicianServiceDiscountPercent.value,
+    marginFloorService.value,
+  )
+  technicianInventorySaleDiscountPercent.value = clampPct(
+    technicianInventorySaleDiscountPercent.value,
+    marginFloorSale.value,
+  )
+  technicianInventoryRentalDiscountPercent.value = clampPct(
+    technicianInventoryRentalDiscountPercent.value,
+    marginFloorRental.value,
+  )
 }
 
 async function saveTechnicianDiscount() {
   techDiscountOk.value = ''
   techDiscountError.value = ''
+  clampMarginFieldsToFloors()
   techDiscountSaving.value = true
   try {
-    await updateTechnicianCatalogDiscount(Number(technicianDiscountPercent.value))
-    techDiscountOk.value = 'Porcentaje guardado para facturación.'
+    await updateTechnicianCatalogDiscount({
+      technician_service_discount_percent: clampPct(
+        technicianServiceDiscountPercent.value,
+        marginFloorService.value,
+      ),
+      technician_inventory_sale_discount_percent: clampPct(
+        technicianInventorySaleDiscountPercent.value,
+        marginFloorSale.value,
+      ),
+      technician_inventory_rental_discount_percent: clampPct(
+        technicianInventoryRentalDiscountPercent.value,
+        marginFloorRental.value,
+      ),
+      technician_service_margin_floor_percent: clampPct(marginFloorService.value, 0, MARGIN_PERCENT_MAX),
+      technician_inventory_sale_margin_floor_percent: clampPct(marginFloorSale.value, 0, MARGIN_PERCENT_MAX),
+      technician_inventory_rental_margin_floor_percent: clampPct(marginFloorRental.value, 0, MARGIN_PERCENT_MAX),
+    })
+    await loadTechnicianDiscount()
+    techDiscountOk.value = 'Pisos y márgenes guardados. Quedan aplicados al facturar.'
   } catch (e) {
     techDiscountError.value = e.data?.message || e.message || 'No se pudo guardar.'
     if (e.data?.errors) {
@@ -83,6 +143,30 @@ async function saveTechnicianDiscount() {
   } finally {
     techDiscountSaving.value = false
   }
+}
+
+watch(marginFloorService, (f) => {
+  const fl = clampPct(f, 0, MARGIN_PERCENT_MAX)
+  if (Number(technicianServiceDiscountPercent.value) < fl) technicianServiceDiscountPercent.value = fl
+})
+watch(marginFloorSale, (f) => {
+  const fl = clampPct(f, 0, MARGIN_PERCENT_MAX)
+  if (Number(technicianInventorySaleDiscountPercent.value) < fl) technicianInventorySaleDiscountPercent.value = fl
+})
+watch(marginFloorRental, (f) => {
+  const fl = clampPct(f, 0, MARGIN_PERCENT_MAX)
+  if (Number(technicianInventoryRentalDiscountPercent.value) < fl) technicianInventoryRentalDiscountPercent.value = fl
+})
+
+function onFloorBlur() {
+  marginFloorService.value = clampPct(marginFloorService.value, 0, MARGIN_PERCENT_MAX)
+  marginFloorSale.value = clampPct(marginFloorSale.value, 0, MARGIN_PERCENT_MAX)
+  marginFloorRental.value = clampPct(marginFloorRental.value, 0, MARGIN_PERCENT_MAX)
+  clampMarginFieldsToFloors()
+}
+
+function onMarginBlur() {
+  clampMarginFieldsToFloors()
 }
 
 function openSavePasswordModal() {
@@ -160,18 +244,18 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
 </script>
 
 <template>
-  <section class="page">
+  <section class="billing-page">
     <header class="head">
       <div>
         <p class="crumb">
           <RouterLink :to="{ name: 'admin-facturas' }">Facturas</RouterLink>
         </p>
-        <h1>Facturación automática (borradores)</h1>
+        <h1>Facturación y Margen</h1>
         <p class="lede">
-          Aquí solo se programa la <strong>creación automática de borradores</strong> (agrupa servicios sin facturar). El
-          envío automático de facturas ya aprobadas sigue en el servidor (<code class="inline">AUTOMATION_CUTOFF_*</code>).
-          Al pulsar <strong>Guardar en el sistema</strong> se pedirá su contraseña; el cambio queda en
-          <strong>Configuración → Historial</strong>.
+          Configure la <strong>programación de borradores</strong> (agrupa servicios sin facturar) y los
+          <strong>márgenes globales</strong> referencia → factura. El envío automático de facturas ya aprobadas sigue en el
+          servidor (<code class="inline">AUTOMATION_CUTOFF_*</code>). Al pulsar <strong>Guardar en el sistema</strong> (solo
+          borradores) se pedirá su contraseña; el cambio queda en <strong>Configuración → Historial</strong>.
         </p>
       </div>
     </header>
@@ -182,73 +266,194 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
 
     <div v-if="loading" class="muted pad">Cargando…</div>
 
-    <div v-else class="card">
-      <label class="toggle-row">
-        <input v-model="draftGenerationEnabled" type="checkbox" class="chk" />
-        <span class="toggle-txt">
-          <strong>Generar borradores automáticamente</strong>
-          <span class="sub">Si está desactivado, no se crearán borradores por el programador diario.</span>
-        </span>
-      </label>
+    <div v-else class="billing-stack">
+      <section class="card margin-board" aria-labelledby="margins-heading">
+        <header class="margin-board-head">
+          <h2 id="margins-heading" class="margin-title">Márgenes globales</h2>
+          <p class="margin-board-lede field-hint">
+            El <strong>piso mínimo</strong> es el porcentaje que no se puede rebajar al guardar (cada tipo es
+            independiente). El <strong>margen aplicado</strong> debe estar entre ese piso y
+            {{ MARGIN_PERCENT_MAX }}&nbsp;%. Al facturar: facturable = referencia ÷ ((100 − <em>p</em>) / 100).
+          </p>
+        </header>
 
-      <div class="field">
-        <label class="lab" for="draft-day">Día del mes para crear borradores</label>
-        <div class="row-day">
-          <select id="draft-day" v-model.number="draftGenerationDay" class="select">
-            <option v-for="opt in dayOptions" :key="opt.value" :value="opt.value">
-              Día {{ opt.label }}
-            </option>
-          </select>
-          <span v-if="!usingDb('draft_generation_day')" class="badge badge-muted">valor por defecto (.env) hasta guardar</span>
-          <span v-else class="badge badge-ok">guardado en panel</span>
+        <div class="margin-table-panel">
+          <div class="margin-table-wrap">
+            <div class="margin-table" role="table" aria-label="Márgenes por tipo; porcentaje máximo 95">
+            <div class="margin-row margin-row-head" role="row">
+              <div class="margin-cell margin-cell-type" role="columnheader">Tipo</div>
+              <div class="margin-cell margin-cell-num" role="columnheader">Piso mínimo (%)</div>
+              <div class="margin-cell margin-cell-num" role="columnheader">Margen aplicado (%)</div>
+            </div>
+
+            <div class="margin-row margin-data" role="row">
+              <div class="margin-cell margin-cell-type" role="cell">
+                <span class="mg-name">Servicio</span>
+                <span class="mg-desc">Catálogo sin override, «Otro», trabajos estándar.</span>
+              </div>
+              <div class="margin-cell margin-cell-num" role="cell">
+                <label class="mg-label" for="floor-svc">
+                  <span class="mg-label-text">Piso</span>
+                  <input
+                    id="floor-svc"
+                    v-model.number="marginFloorService"
+                    type="number"
+                    min="0"
+                    :max="MARGIN_PERCENT_MAX"
+                    step="0.5"
+                    class="select mg-input"
+                    @blur="onFloorBlur"
+                  />
+                </label>
+              </div>
+              <div class="margin-cell margin-cell-num" role="cell">
+                <label class="mg-label" for="pct-svc">
+                  <span class="mg-label-text">Margen</span>
+                  <input
+                    id="pct-svc"
+                    v-model.number="technicianServiceDiscountPercent"
+                    type="number"
+                    :min="marginFloorService"
+                    :max="MARGIN_PERCENT_MAX"
+                    step="0.5"
+                    class="select mg-input"
+                    @blur="onMarginBlur"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div class="margin-row margin-data" role="row">
+              <div class="margin-cell margin-cell-type" role="cell">
+                <span class="mg-name">Venta inventario</span>
+                <span class="mg-desc">Registros y líneas de venta de equipo.</span>
+              </div>
+              <div class="margin-cell margin-cell-num" role="cell">
+                <label class="mg-label" for="floor-sale">
+                  <span class="mg-label-text">Piso</span>
+                  <input
+                    id="floor-sale"
+                    v-model.number="marginFloorSale"
+                    type="number"
+                    min="0"
+                    :max="MARGIN_PERCENT_MAX"
+                    step="0.5"
+                    class="select mg-input"
+                    @blur="onFloorBlur"
+                  />
+                </label>
+              </div>
+              <div class="margin-cell margin-cell-num" role="cell">
+                <label class="mg-label" for="pct-sale">
+                  <span class="mg-label-text">Margen</span>
+                  <input
+                    id="pct-sale"
+                    v-model.number="technicianInventorySaleDiscountPercent"
+                    type="number"
+                    :min="marginFloorSale"
+                    :max="MARGIN_PERCENT_MAX"
+                    step="0.5"
+                    class="select mg-input"
+                    @blur="onMarginBlur"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div class="margin-row margin-data" role="row">
+              <div class="margin-cell margin-cell-type" role="cell">
+                <span class="mg-name">Alquiler inventario</span>
+                <span class="mg-desc">Registros y líneas de alquiler de equipo.</span>
+              </div>
+              <div class="margin-cell margin-cell-num" role="cell">
+                <label class="mg-label" for="floor-rent">
+                  <span class="mg-label-text">Piso</span>
+                  <input
+                    id="floor-rent"
+                    v-model.number="marginFloorRental"
+                    type="number"
+                    min="0"
+                    :max="MARGIN_PERCENT_MAX"
+                    step="0.5"
+                    class="select mg-input"
+                    @blur="onFloorBlur"
+                  />
+                </label>
+              </div>
+              <div class="margin-cell margin-cell-num" role="cell">
+                <label class="mg-label" for="pct-rent">
+                  <span class="mg-label-text">Margen</span>
+                  <input
+                    id="pct-rent"
+                    v-model.number="technicianInventoryRentalDiscountPercent"
+                    type="number"
+                    :min="marginFloorRental"
+                    :max="MARGIN_PERCENT_MAX"
+                    step="0.5"
+                    class="select mg-input"
+                    @blur="onMarginBlur"
+                  />
+                </label>
+              </div>
+            </div>
+            </div>
+          </div>
         </div>
-        <p class="field-hint">Ejemplo: día 18 → cada mes, en la fecha 18 (o el último día del mes si fuera menor), a las ~05:00.</p>
-      </div>
 
-      <div class="field">
-        <label class="lab" for="draft-period">¿Qué servicios entran en el borrador automático?</label>
-        <select id="draft-period" v-model="draftGenerationPeriod" class="select wide">
-          <option value="current">
-            Recomendado: fecha de servicio en el mes calendario en curso (mismo mes que «hoy»)
-          </option>
-          <option value="previous">Fecha de servicio en el mes calendario anterior (cierre del mes pasado)</option>
-        </select>
-        <p class="field-hint">
-          El sistema usa la <strong>fecha del servicio</strong> (no la fecha de hoy al crear el borrador) para decidir si
-          entra en ese mes de facturación. Lo habitual es dejar
-          <strong>mes en curso</strong> para facturar lo trabajado en el mes que corre.
-        </p>
-      </div>
+        <div class="margin-footer-actions">
+          <button type="button" class="btn primary" :disabled="techDiscountSaving" @click="saveTechnicianDiscount">
+            {{ techDiscountSaving ? 'Guardando…' : 'Guardar pisos y márgenes' }}
+          </button>
+        </div>
+        <p v-if="techDiscountError" class="banner err banner-tight">{{ techDiscountError }}</p>
+        <p v-else-if="techDiscountOk" class="banner ok banner-tight">{{ techDiscountOk }}</p>
+      </section>
 
-      <div class="actions">
-        <button type="button" class="btn primary" :disabled="saving" @click="openSavePasswordModal">
-          Guardar en el sistema
-        </button>
-      </div>
-    </div>
+      <div class="card billing-primary billing-side-card">
+        <h2 class="card-section-title">Programación de borradores</h2>
+        <label class="toggle-row">
+          <input v-model="draftGenerationEnabled" type="checkbox" class="chk" />
+          <span class="toggle-txt">
+            <strong>Generar borradores automáticamente</strong>
+            <span class="sub">Si está desactivado, no se crearán borradores por el programador diario.</span>
+          </span>
+        </label>
 
-    <div v-if="!loading" class="card margin-card">
-      <h2 class="margin-title">Margen técnico → factura</h2>
-      <p class="field-hint margin-hint">
-        Este porcentaje global se aplica sobre el importe de referencia que registra el técnico para calcular el valor facturable.
-      </p>
-      <div class="row-day margin-row">
-        <label class="lab margin-label" for="tech-margin">Porcentaje global (%)</label>
-        <input
-          id="tech-margin"
-          v-model.number="technicianDiscountPercent"
-          type="number"
-          min="0"
-          max="95"
-          step="0.5"
-          class="select margin-input"
-        />
-        <button type="button" class="btn primary" :disabled="techDiscountSaving" @click="saveTechnicianDiscount">
-          {{ techDiscountSaving ? 'Guardando…' : 'Guardar margen' }}
-        </button>
+        <div class="field">
+          <label class="lab" for="draft-day">Día del mes para crear borradores</label>
+          <div class="row-day">
+            <select id="draft-day" v-model.number="draftGenerationDay" class="select">
+              <option v-for="opt in dayOptions" :key="opt.value" :value="opt.value">
+                Día {{ opt.label }}
+              </option>
+            </select>
+            <span v-if="!usingDb('draft_generation_day')" class="badge badge-muted">valor por defecto (.env) hasta guardar</span>
+            <span v-else class="badge badge-ok">guardado en panel</span>
+          </div>
+          <p class="field-hint">Ejemplo: día 18 → cada mes, en la fecha 18 (o el último día del mes si fuera menor), a las ~05:00.</p>
+        </div>
+
+        <div class="field field-last">
+          <label class="lab" for="draft-period">¿Qué servicios entran en el borrador automático?</label>
+          <select id="draft-period" v-model="draftGenerationPeriod" class="select wide">
+            <option value="current">
+              Recomendado: fecha de servicio en el mes calendario en curso (mismo mes que «hoy»)
+            </option>
+            <option value="previous">Fecha de servicio en el mes calendario anterior (cierre del mes pasado)</option>
+          </select>
+          <p class="field-hint">
+            El sistema usa la <strong>fecha del servicio</strong> (no la fecha de hoy al crear el borrador) para decidir si
+            entra en ese mes de facturación. Lo habitual es dejar
+            <strong>mes en curso</strong> para facturar lo trabajado en el mes que corre.
+          </p>
+        </div>
+
+        <div class="actions">
+          <button type="button" class="btn primary" :disabled="saving" @click="openSavePasswordModal">
+            Guardar en el sistema
+          </button>
+        </div>
       </div>
-      <p v-if="techDiscountError" class="banner err">{{ techDiscountError }}</p>
-      <p v-else-if="techDiscountOk" class="banner ok">{{ techDiscountOk }}</p>
     </div>
 
     <Teleport to="body">
@@ -261,7 +466,7 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
         <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="billing-save-pw-title">
           <h2 id="billing-save-pw-title" class="modal-title">Confirmar guardado</h2>
           <p class="modal-lede">
-            Introduzca la contraseña de su usuario administrador para aplicar los cambios en la facturación automática.
+            Introduzca la contraseña de su usuario administrador para guardar la programación de borradores automáticos.
           </p>
           <label class="lab" for="billing-modal-pw">Contraseña</label>
           <input
@@ -290,9 +495,11 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
 </template>
 
 <style scoped>
-.page {
-  max-width: 720px;
+.billing-page {
+  width: 100%;
+  max-width: 96rem;
   margin: 0 auto;
+  padding: 0 0 2rem;
 }
 
 .head {
@@ -321,8 +528,10 @@ h1 {
 
 .lede {
   margin: 0;
-  max-width: 42rem;
+  width: 100%;
+  max-width: none;
   font-size: 0.88rem;
+  line-height: 1.55;
   color: #94a3b8;
 }
 
@@ -336,9 +545,11 @@ h1 {
 
 .hint {
   font-size: 0.82rem;
+  line-height: 1.55;
   color: #94a3b8;
   margin: 0 0 1rem;
-  max-width: 42rem;
+  width: 100%;
+  max-width: none;
 }
 
 .banner.err {
@@ -359,11 +570,77 @@ h1 {
   margin-bottom: 1rem;
 }
 
+.banner.warn {
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: #fde68a;
+  margin-bottom: 0.85rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.banner-tight {
+  margin-bottom: 0;
+  margin-top: 0.75rem;
+}
+
 .card {
-  padding: 1rem 1.15rem;
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.55);
+  padding: 1.35rem 1.4rem 1.4rem;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(160deg, rgba(24, 32, 48, 0.92) 0%, rgba(15, 23, 42, 0.72) 100%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 8px 32px rgba(0, 0, 0, 0.22);
+}
+
+.card.margin-board {
+  padding: 1.1rem 1.15rem 1.2rem;
+}
+
+.billing-stack {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.35rem;
+  align-items: start;
+}
+
+/*
+  Dos columnas solo cuando cabe sidebar (260px) + márgenes (≥36rem) + borradores + paddings.
+  Por debajo: una columna → la tabla de márgenes recupera todo el ancho y no se comprime.
+*/
+@media (min-width: 1280px) {
+  .billing-stack {
+    grid-template-columns: auto minmax(20rem, 32rem);
+    /* row-gap si el grid pasa a dos filas; column-gap mínimo entre márgenes y borradores */
+    gap: 1.35rem 0.3rem;
+    align-items: start;
+  }
+}
+
+.card-section-title {
+  margin: 0 0 1rem;
+  padding-bottom: 0.85rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #ccfbf1;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.field-last {
+  margin-bottom: 0;
+}
+
+.billing-side-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.billing-side-card .actions {
+  margin-top: auto;
 }
 
 .toggle-row {
@@ -371,8 +648,8 @@ h1 {
   align-items: flex-start;
   gap: 0.65rem;
   padding-bottom: 1rem;
-  margin-bottom: 1rem;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  margin-bottom: 1.1rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
   cursor: pointer;
 }
 
@@ -429,11 +706,20 @@ h1 {
   max-width: 22rem;
 }
 
+.billing-primary .select.wide {
+  max-width: none;
+}
+
 .field-hint {
   margin: 0.45rem 0 0;
   font-size: 0.78rem;
   color: #64748b;
-  max-width: 36rem;
+  max-width: none;
+  line-height: 1.5;
+}
+
+.billing-primary .field-hint {
+  max-width: 100%;
 }
 
 .input-pw {
@@ -475,31 +761,191 @@ h1 {
   border-top: 1px solid rgba(148, 163, 184, 0.15);
 }
 
-.margin-card {
-  margin-top: 1rem;
+.margin-board {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  max-width: min(44rem, 100%);
+  justify-self: center;
+}
+
+@media (min-width: 1280px) {
+  .margin-board {
+    justify-self: start;
+    width: auto;
+    max-width: min(44rem, 100%);
+  }
+}
+
+.margin-board-head {
+  margin-bottom: 1rem;
+  padding: 0 0.05rem;
 }
 
 .margin-title {
-  margin: 0 0 0.4rem;
-  font-size: 1.02rem;
+  margin: 0 0 0.5rem;
+  padding-bottom: 0.65rem;
+  font-size: 1rem;
+  font-weight: 600;
   color: #ccfbf1;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
 
-.margin-hint {
-  margin-bottom: 0.8rem;
+.margin-board-lede {
+  margin: 0;
+  max-width: none;
+  line-height: 1.5;
+  font-size: 0.78rem;
+}
+
+.margin-table-panel {
+  border-radius: 12px;
+  border: 1px solid rgba(100, 116, 139, 0.2);
+  background: rgba(2, 6, 23, 0.45);
+  padding: 0.65rem 0.85rem 0.85rem;
+  flex: 0 0 auto;
+}
+
+.margin-table-wrap {
+  overflow-x: auto;
+  margin: 0;
+  padding: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.margin-table {
+  display: table;
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .margin-row {
-  align-items: flex-end;
+  display: table-row;
 }
 
-.margin-label {
-  margin-bottom: 0.25rem;
+.margin-row-head .margin-cell {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+  padding: 0.4rem 0.45rem 0.55rem 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.65);
 }
 
-.margin-input {
-  width: 8rem;
+.margin-row-head .margin-cell:first-child {
+  border-radius: 8px 0 0 0;
+  padding-left: 0.65rem;
+}
+
+.margin-row-head .margin-cell:last-child {
+  border-radius: 0 8px 0 0;
+  padding-right: 0.35rem;
+}
+
+.margin-row.margin-data .margin-cell {
+  padding: 0.75rem 0.45rem 0.75rem 0;
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  transition: background 0.15s ease;
+}
+
+.margin-row.margin-data .margin-cell:first-child {
+  padding-left: 0.65rem;
+}
+
+.margin-row.margin-data:last-child .margin-cell {
+  border-bottom: none;
+}
+
+.margin-table .margin-data:nth-child(2) .margin-cell,
+.margin-table .margin-data:nth-child(4) .margin-cell {
+  background: rgba(30, 41, 59, 0.32);
+}
+
+.margin-table .margin-data:nth-child(3) .margin-cell {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.margin-row.margin-data:hover .margin-cell {
+  background: rgba(51, 65, 85, 0.35);
+}
+
+.margin-cell {
+  display: table-cell;
+}
+
+.margin-cell-type {
+  width: 46%;
   min-width: 0;
+  padding-right: 0.85rem;
+}
+
+.margin-cell-num {
+  width: 27%;
+  min-width: 0;
+  padding-right: 0.35rem;
+  text-align: right;
+}
+
+.margin-row-head .margin-cell-num {
+  text-align: right;
+}
+
+.mg-name {
+  display: block;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 0.2rem;
+}
+
+.mg-desc {
+  display: block;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: #64748b;
+  max-width: none;
+}
+
+.mg-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  align-items: flex-end;
+  margin: 0 0 0 auto;
+  width: 100%;
+  max-width: 5.75rem;
+}
+
+.mg-label-text {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #94a3b8;
+  width: 100%;
+  text-align: right;
+}
+
+.mg-input {
+  width: 100%;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-height: 2.1rem;
+}
+
+.margin-footer-actions {
+  margin-top: 1.1rem;
+  padding-top: 0.95rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  padding-left: 0.05rem;
+  padding-right: 0.05rem;
 }
 
 .btn {

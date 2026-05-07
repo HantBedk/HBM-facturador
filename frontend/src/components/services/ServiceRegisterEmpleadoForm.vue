@@ -25,6 +25,8 @@ const props = defineProps({
   allowInventoryCommercialOps: { type: Boolean, default: true },
   /** servicio | venta | alquiler — rutas dedicadas evitan el selector triple. */
   registerKind: { type: String, default: 'servicio' },
+  /** Vista ancha: pasos 1 y 2 en dos columnas desde `lg`. */
+  wideLayout: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue', 'update:photos'])
@@ -269,9 +271,15 @@ function isEnabledForRental(row) {
 }
 
 const operationType = computed(() => String(props.modelValue.inventory_operation_type || 'servicio'))
+
+function lotHasStock(row, minQty = 1) {
+  return Number(row?.quantity_available || 0) >= minQty
+}
+
 const operationLots = computed(() => {
-  if (operationType.value === 'venta') return props.inventoryLots.filter((x) => isEnabledForSale(x))
-  if (operationType.value === 'alquiler') return props.inventoryLots.filter((x) => isEnabledForRental(x))
+  const withStock = props.inventoryLots.filter((x) => lotHasStock(x, 1))
+  if (operationType.value === 'venta') return withStock.filter((x) => isEnabledForSale(x))
+  if (operationType.value === 'alquiler') return withStock.filter((x) => isEnabledForRental(x))
   return []
 })
 const selectedOperationLot = computed(() =>
@@ -287,11 +295,21 @@ const operationPreview = computed(() => {
   return { unit, total, qty, days }
 })
 
+watch([selectedOperationLot, operationType], () => {
+  const lot = selectedOperationLot.value
+  if (!lot || operationType.value !== 'alquiler') return
+  const maxQ = Math.max(1, Number(lot.quantity_available || 0))
+  const q = Math.max(1, Number(props.modelValue.inventory_quantity || 1))
+  if (q > maxQ) patch({ inventory_quantity: maxQ })
+})
+
 const lotPickSearchQ = ref('')
+const selectedSaleLotId = ref('')
 watch(
   () => props.modelValue.inventory_operation_type,
   () => {
     lotPickSearchQ.value = ''
+    selectedSaleLotId.value = ''
   }
 )
 const filteredOperationLots = computed(() => {
@@ -304,6 +322,43 @@ const filteredOperationLots = computed(() => {
   })
 })
 
+const saleItems = computed(() =>
+  Array.isArray(props.modelValue.inventory_sale_items) ? props.modelValue.inventory_sale_items : []
+)
+
+const selectedSaleItemsDetailed = computed(() =>
+  saleItems.value
+    .map((item) => {
+      const lotId = Number(item?.lot_id)
+      const lot = operationLots.value.find((x) => Number(x.id) === lotId)
+      if (!lot) return null
+      const quantity = Math.max(1, Number(item?.quantity || 1))
+      return {
+        lot,
+        lot_id: lotId,
+        quantity,
+        lineTotal: Number(lot.unit_price || 0) * quantity,
+      }
+    })
+    .filter(Boolean)
+)
+
+const availableSaleLotsForPick = computed(() => {
+  const used = new Set(saleItems.value.map((item) => Number(item?.lot_id)))
+  return filteredOperationLots.value.filter((lot) => !used.has(Number(lot.id)))
+})
+
+const saleGrandTotal = computed(() =>
+  selectedSaleItemsDetailed.value.reduce((acc, item) => acc + Number(item.lineTotal || 0), 0)
+)
+
+const submitButtonLabel = computed(() => {
+  if (props.disabled) return 'Guardando…'
+  if (operationType.value === 'venta') return 'Realizar venta'
+  if (operationType.value === 'alquiler') return 'Registrar alquiler'
+  return 'Cargar servicio'
+})
+
 function setInventoryOperationType(t) {
   if (props.disabled) return
   patch({
@@ -311,12 +366,54 @@ function setInventoryOperationType(t) {
     inventory_lot_id: '',
     inventory_quantity: 1,
     inventory_days: 1,
+    inventory_sale_items: [],
   })
 }
 
 function pickInventoryLotRow(lot) {
   if (props.disabled) return
   patch({ inventory_lot_id: String(lot.id) })
+}
+
+function addSaleItem() {
+  if (props.disabled) return
+  if (operationType.value !== 'venta') return
+  const lotId = Number(selectedSaleLotId.value)
+  if (!lotId) return
+  if (saleItems.value.some((item) => Number(item?.lot_id) === lotId)) return
+  patch({
+    inventory_sale_items: [...saleItems.value, { lot_id: lotId, quantity: 1 }],
+  })
+  selectedSaleLotId.value = ''
+}
+
+function removeSaleItem(lotId) {
+  if (props.disabled) return
+  patch({
+    inventory_sale_items: saleItems.value.filter((item) => Number(item?.lot_id) !== Number(lotId)),
+  })
+}
+
+function updateSaleItemQty(lotId, qtyRaw) {
+  if (props.disabled) return
+  const lot = props.inventoryLots.find((x) => Number(x.id) === Number(lotId))
+  const maxQ = lot != null ? Math.max(1, Number(lot.quantity_available || 0)) : 999999
+  let qty = Math.max(1, Number(qtyRaw || 1))
+  if (qty > maxQ) qty = maxQ
+  patch({
+    inventory_sale_items: saleItems.value.map((item) =>
+      Number(item?.lot_id) === Number(lotId) ? { ...item, quantity: qty } : item
+    ),
+  })
+}
+
+function onRentalQtyInput(ev) {
+  if (props.disabled) return
+  const lot = selectedOperationLot.value
+  const maxQ = lot != null ? Math.max(1, Number(lot.quantity_available || 0)) : 1
+  let q = Math.max(1, Number(ev.target?.value || 1))
+  if (q > maxQ) q = maxQ
+  patch({ inventory_quantity: q })
 }
 
 watch(
@@ -328,6 +425,7 @@ watch(
         inventory_lot_id: '',
         inventory_quantity: 1,
         inventory_days: 1,
+        inventory_sale_items: [],
       })
     }
   },
@@ -343,6 +441,7 @@ watch(
         inventory_lot_id: '',
         inventory_quantity: 1,
         inventory_days: 1,
+        inventory_sale_items: [],
       })
     }
   },
@@ -401,7 +500,14 @@ watch(
 </script>
 
 <template>
-  <div class="flex flex-col gap-8">
+  <div class="flex flex-col gap-8" :class="{ 'lg:gap-10': wideLayout }">
+    <div
+      :class="
+        wideLayout
+          ? 'grid grid-cols-1 gap-8 lg:grid-cols-2 lg:gap-10 lg:items-start'
+          : 'contents'
+      "
+    >
     <!-- Paso 1 -->
     <section class="step-section" aria-labelledby="reg-svc-step1">
       <h2 id="reg-svc-step1" class="step-title">
@@ -606,48 +712,121 @@ watch(
         </div>
       </template>
       <div v-if="operationType !== 'servicio'" class="mt-3 space-y-2">
-        <input
-          v-model="lotPickSearchQ"
-          type="search"
-          autocomplete="off"
-          placeholder="Buscar equipo por nombre…"
-          :disabled="disabled"
-          class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-sky-500 disabled:opacity-50"
-        />
-        <p v-if="selectedOperationLot" class="text-xs text-emerald-400/95">
-          Seleccionado: {{ selectedOperationLot.name }}
-        </p>
-        <ul
-          class="max-h-44 divide-y divide-slate-700/50 overflow-y-auto rounded-xl border border-slate-700/80 bg-[#141a22]"
-          role="listbox"
-        >
-          <li
-            v-for="lot in filteredOperationLots"
-            :key="lot.id"
-            role="option"
-            class="cursor-pointer px-3 py-2.5 text-sm transition hover:bg-slate-800/80"
-            :class="
-              Number(inner.inventory_lot_id) === Number(lot.id) ? 'bg-sky-900/35 text-sky-100' : 'text-slate-200'
-            "
-            @click="pickInventoryLotRow(lot)"
+        <template v-if="operationType === 'venta'">
+          <input
+            v-model="lotPickSearchQ"
+            type="search"
+            autocomplete="off"
+            placeholder="Buscar producto por nombre o código…"
+            :disabled="disabled"
+            class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-sky-500 disabled:opacity-50"
+          />
+          <div class="flex gap-2">
+            <select
+              v-model="selectedSaleLotId"
+              :disabled="disabled"
+              class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white outline-none focus:border-sky-500 disabled:opacity-50"
+            >
+              <option value="" disabled>Seleccionar producto…</option>
+              <option v-for="lot in availableSaleLotsForPick" :key="lot.id" :value="String(lot.id)">
+                {{ lot.name }} · Stock {{ lot.quantity_available }} · {{ formatHintMoneyCop(lot.unit_price) }}
+              </option>
+            </select>
+            <button
+              type="button"
+              :disabled="disabled || !selectedSaleLotId"
+              class="shrink-0 rounded-xl border border-slate-600 px-3 py-2.5 text-xs font-semibold text-slate-200 transition hover:border-sky-500 hover:text-sky-300 disabled:opacity-50"
+              @click="addSaleItem"
+            >
+              Agregar
+            </button>
+          </div>
+          <p class="text-xs text-slate-400">
+            Productos seleccionados: {{ selectedSaleItemsDetailed.length }}
+          </p>
+          <ul
+            v-if="selectedSaleItemsDetailed.length"
+            class="max-h-56 divide-y divide-slate-700/50 overflow-y-auto rounded-xl border border-slate-700/80 bg-[#141a22]"
           >
-            {{ lot.name }} · Stock {{ lot.quantity_available }} · {{ formatHintMoneyCop(lot.unit_price) }}
-          </li>
-        </ul>
+            <li
+              v-for="item in selectedSaleItemsDetailed"
+              :key="item.lot_id"
+              class="flex flex-col gap-2 px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div class="text-slate-200">
+                {{ item.lot.name }} · {{ formatHintMoneyCop(item.lot.unit_price) }}
+              </div>
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-slate-400">
+                  Cantidad
+                  <input
+                    :value="item.quantity"
+                    type="number"
+                    min="1"
+                    :disabled="disabled"
+                    class="ml-1 w-16 rounded-lg border border-slate-700/90 bg-[#0f1419] px-2 py-1 text-sm text-white outline-none focus:border-sky-500"
+                    @input="updateSaleItemQty(item.lot_id, $event.target.value)"
+                  />
+                </label>
+                <span class="text-xs text-emerald-400">{{ formatHintMoneyCop(item.lineTotal) }}</span>
+                <button
+                  type="button"
+                  :disabled="disabled"
+                  class="rounded-lg px-2 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+                  @click="removeSaleItem(item.lot_id)"
+                >
+                  Quitar
+                </button>
+              </div>
+            </li>
+          </ul>
+          <p v-else class="text-xs text-slate-500">No hay productos agregados.</p>
+        </template>
+        <template v-else>
+          <input
+            v-model="lotPickSearchQ"
+            type="search"
+            autocomplete="off"
+            placeholder="Buscar equipo por nombre…"
+            :disabled="disabled"
+            class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-sky-500 disabled:opacity-50"
+          />
+          <p v-if="selectedOperationLot" class="text-xs text-emerald-400/95">
+            Seleccionado: {{ selectedOperationLot.name }}
+          </p>
+          <ul
+            class="max-h-44 divide-y divide-slate-700/50 overflow-y-auto rounded-xl border border-slate-700/80 bg-[#141a22]"
+            role="listbox"
+          >
+            <li
+              v-for="lot in filteredOperationLots"
+              :key="lot.id"
+              role="option"
+              class="cursor-pointer px-3 py-2.5 text-sm transition hover:bg-slate-800/80"
+              :class="
+                Number(inner.inventory_lot_id) === Number(lot.id) ? 'bg-sky-900/35 text-sky-100' : 'text-slate-200'
+              "
+              @click="pickInventoryLotRow(lot)"
+            >
+              {{ lot.name }} · Stock {{ lot.quantity_available }} · {{ formatHintMoneyCop(lot.unit_price) }}
+            </li>
+          </ul>
+        </template>
       </div>
-      <div v-if="operationType !== 'servicio'" class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div v-if="operationType === 'alquiler'" class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <label class="block text-xs text-slate-400">
           Cantidad
           <input
             :value="inner.inventory_quantity || 1"
             type="number"
             min="1"
+            :max="selectedOperationLot ? Math.max(1, Number(selectedOperationLot.quantity_available || 0)) : undefined"
             :disabled="disabled"
             class="mt-1 w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
-            @input="patch({ inventory_quantity: Number($event.target.value || 1) })"
+            @input="onRentalQtyInput($event)"
           />
         </label>
-        <label v-if="operationType === 'alquiler'" class="block text-xs text-slate-400">
+        <label class="block text-xs text-slate-400">
           Días de alquiler
           <input
             :value="inner.inventory_days || 1"
@@ -852,9 +1031,10 @@ watch(
       <p v-if="fieldErrors.service_type" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.service_type[0] }}</p>
     </div>
     </section>
+    </div>
 
     <!-- Paso 3 -->
-    <section class="step-section" aria-labelledby="reg-svc-step3">
+    <section v-if="operationType !== 'venta'" class="step-section" aria-labelledby="reg-svc-step3">
       <h2 id="reg-svc-step3" class="step-title">
         <span class="step-badge" aria-hidden="true">3</span>
         Evidencias
@@ -912,13 +1092,20 @@ watch(
     </div>
     </section>
 
+    <p
+      v-if="operationType === 'venta'"
+      class="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-center text-sm font-semibold text-emerald-100"
+    >
+      Total de la venta: {{ formatHintMoneyCop(saleGrandTotal) }}
+    </p>
+
     <button
       v-if="!hideSubmitButton"
       type="submit"
       class="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 py-4 text-base font-bold text-white shadow-lg shadow-sky-500/25 transition hover:brightness-110 active:scale-[0.99] disabled:opacity-50"
       :disabled="disabled"
     >
-      {{ disabled ? 'Guardando…' : 'Cargar servicio' }}
+      {{ submitButtonLabel }}
     </button>
   </div>
 </template>

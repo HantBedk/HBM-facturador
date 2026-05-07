@@ -71,15 +71,25 @@ export function importServiceCatalogFromSpreadsheet(file) {
   })
 }
 
-/** % global de diferencia factura vs referencia técnico en catálogo (solo admin). */
+/** Márgenes globales servicio / venta inventario / alquiler inventario (solo admin). */
 export function fetchTechnicianCatalogDiscount() {
   return api('/admin/service-catalog/technician-pricing').then((r) => r.data)
 }
 
-export function updateTechnicianCatalogDiscount(technician_catalog_discount_percent) {
+/**
+ * @param {{
+ *   technician_service_discount_percent: number,
+ *   technician_inventory_sale_discount_percent: number,
+ *   technician_inventory_rental_discount_percent: number,
+ *   technician_service_margin_floor_percent: number,
+ *   technician_inventory_sale_margin_floor_percent: number,
+ *   technician_inventory_rental_margin_floor_percent: number,
+ * }} body
+ */
+export function updateTechnicianCatalogDiscount(body) {
   return api('/admin/service-catalog/technician-pricing', {
     method: 'PUT',
-    body: JSON.stringify({ technician_catalog_discount_percent }),
+    body: JSON.stringify(body),
   }).then((r) => r.data)
 }
 

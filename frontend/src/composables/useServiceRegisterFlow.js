@@ -70,6 +70,7 @@ export function useServiceRegisterFlow({
     inventory_lot_id: '',
     inventory_quantity: 1,
     inventory_days: 1,
+    inventory_sale_items: [],
   })
 
   let toastTimer = null
@@ -101,6 +102,7 @@ export function useServiceRegisterFlow({
       inventory_lot_id: '',
       inventory_quantity: 1,
       inventory_days: 1,
+      inventory_sale_items: [],
     }
     photoFiles.value = []
     formResetKey.value += 1
@@ -173,13 +175,29 @@ export function useServiceRegisterFlow({
       e.items = ['Añade al menos un ítem del catálogo o «Otro».']
     }
     if (hasInventoryOperation) {
-      const lotId = Number(form.value.inventory_lot_id)
-      const qty = Number(form.value.inventory_quantity)
-      if (!Number.isInteger(lotId) || lotId <= 0) {
-        e.inventory_lot_id = ['Selecciona un equipo de inventario para la operación comercial.']
-      }
-      if (!Number.isFinite(qty) || qty < 1) {
-        e.inventory_quantity = ['Indica una cantidad válida (mínimo 1).']
+      if (opType === 'venta') {
+        const saleItems = Array.isArray(form.value.inventory_sale_items) ? form.value.inventory_sale_items : []
+        if (!saleItems.length) {
+          e.inventory_lot_id = ['Agrega al menos un producto para registrar la venta.']
+        } else {
+          const invalidQty = saleItems.some((item) => !Number.isFinite(Number(item?.quantity)) || Number(item?.quantity) < 1)
+          const invalidLot = saleItems.some((item) => !Number.isInteger(Number(item?.lot_id)) || Number(item?.lot_id) <= 0)
+          if (invalidLot) {
+            e.inventory_lot_id = ['Hay productos inválidos en la lista seleccionada.']
+          }
+          if (invalidQty) {
+            e.inventory_quantity = ['Cada producto debe tener una cantidad válida (mínimo 1).']
+          }
+        }
+      } else {
+        const lotId = Number(form.value.inventory_lot_id)
+        const qty = Number(form.value.inventory_quantity)
+        if (!Number.isInteger(lotId) || lotId <= 0) {
+          e.inventory_lot_id = ['Selecciona un equipo de inventario para la operación comercial.']
+        }
+        if (!Number.isFinite(qty) || qty < 1) {
+          e.inventory_quantity = ['Indica una cantidad válida (mínimo 1).']
+        }
       }
       if (opType === 'alquiler') {
         const days = Number(form.value.inventory_days)
@@ -451,32 +469,45 @@ export function useServiceRegisterFlow({
       }
       const opItems = []
       if (opType === 'venta' || opType === 'alquiler') {
-        const lotId = Number(form.value.inventory_lot_id)
-        const qty = Number(form.value.inventory_quantity || 1)
-        const days = Number(form.value.inventory_days || 1)
-        const lot = inventoryLots.value.find((x) => Number(x.id) === lotId)
-        if (lot) {
-          const canSale = lotAllowsSale(lot)
-          const canRental = lotAllowsRental(lot)
-          if (opType === 'venta' && !canSale) {
-            throw new Error('El equipo seleccionado no está habilitado para venta.')
+        if (opType === 'venta') {
+          const saleItems = Array.isArray(form.value.inventory_sale_items) ? form.value.inventory_sale_items : []
+          for (const saleItem of saleItems) {
+            const lotId = Number(saleItem?.lot_id)
+            const qty = Number(saleItem?.quantity || 1)
+            const lot = inventoryLots.value.find((x) => Number(x.id) === lotId)
+            if (!lot) continue
+            if (!lotAllowsSale(lot)) {
+              throw new Error(`El equipo «${lot.name}» no está habilitado para venta.`)
+            }
+            const unit = Number(lot.unit_price || 0)
+            const total = unit * qty
+            const lineDesc = `Equipo ${lot.name} (${lot.sku || 'sin SKU'}), cantidad ${qty}, precio unitario fijo ${unit.toFixed(2)}.`
+            opItems.push({
+              custom_name: `Venta equipo: ${lot.name}`,
+              amount: Number(total.toFixed(2)),
+              custom_description: lineDesc,
+              line_description: lineDesc,
+            })
           }
-          if (opType === 'alquiler' && !canRental) {
-            throw new Error('El equipo seleccionado no está habilitado para alquiler.')
+        } else {
+          const lotId = Number(form.value.inventory_lot_id)
+          const qty = Number(form.value.inventory_quantity || 1)
+          const days = Number(form.value.inventory_days || 1)
+          const lot = inventoryLots.value.find((x) => Number(x.id) === lotId)
+          if (lot) {
+            if (!lotAllowsRental(lot)) {
+              throw new Error('El equipo seleccionado no está habilitado para alquiler.')
+            }
+            const unit = Number(lot.unit_price || 0)
+            const total = unit * qty * days
+            const lineDesc = `Equipo ${lot.name} (${lot.sku || 'sin SKU'}), cantidad ${qty}, días ${days}, tarifa diaria fija ${unit.toFixed(2)}.`
+            opItems.push({
+              custom_name: `Alquiler equipo: ${lot.name}`,
+              amount: Number(total.toFixed(2)),
+              custom_description: lineDesc,
+              line_description: lineDesc,
+            })
           }
-          const unit = Number(lot.unit_price || 0)
-          const total = opType === 'alquiler' ? unit * qty * days : unit * qty
-          const label = opType === 'alquiler' ? `Alquiler equipo: ${lot.name}` : `Venta equipo: ${lot.name}`
-          const lineDesc =
-            opType === 'alquiler'
-              ? `Equipo ${lot.name} (${lot.sku || 'sin SKU'}), cantidad ${qty}, días ${days}, tarifa diaria fija ${unit.toFixed(2)}.`
-              : `Equipo ${lot.name} (${lot.sku || 'sin SKU'}), cantidad ${qty}, precio unitario fijo ${unit.toFixed(2)}.`
-          opItems.push({
-            custom_name: label,
-            amount: Number(total.toFixed(2)),
-            custom_description: lineDesc,
-            line_description: lineDesc,
-          })
         }
       }
 

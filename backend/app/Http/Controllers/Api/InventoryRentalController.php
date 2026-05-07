@@ -92,6 +92,21 @@ class InventoryRentalController extends Controller
                 if (! $lot->is_active) {
                     throw ValidationException::withMessages(['lines' => ["El producto «{$lot->name}» está inactivo."]]);
                 }
+                if (($lot->lifecycle_status ?? InventoryLot::LIFECYCLE_ACTIVO) !== InventoryLot::LIFECYCLE_ACTIVO) {
+                    throw ValidationException::withMessages([
+                        'lines' => ["El producto «{$lot->name}» no está disponible para alquiler (estado ciclo de vida)."],
+                    ]);
+                }
+                if (! (bool) ($lot->allow_rental ?? false)) {
+                    throw ValidationException::withMessages([
+                        'lines' => ["El producto «{$lot->name}» no está habilitado para alquiler."],
+                    ]);
+                }
+                if ($lot->quantity_available < 1) {
+                    throw ValidationException::withMessages([
+                        'lines' => ["El producto «{$lot->name}» no tiene unidades disponibles para alquiler."],
+                    ]);
+                }
                 if ($lot->quantity_available < $qty) {
                     throw ValidationException::withMessages([
                         'lines' => ["Stock insuficiente para «{$lot->name}» (disponible: {$lot->quantity_available})."],
@@ -182,6 +197,7 @@ class InventoryRentalController extends Controller
                 if (! $lot) {
                     continue;
                 }
+                // Devuelve unidades al disponible; el ciclo de vida del lote sigue siendo «activo» (no es baja por venta).
                 $lot->quantity_available = $lot->quantity_available + (int) $line->quantity;
                 $lot->save();
 

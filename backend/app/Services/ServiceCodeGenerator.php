@@ -8,11 +8,25 @@ use Illuminate\Support\Facades\DB;
 
 class ServiceCodeGenerator
 {
+    public const KIND_SERVICIO = 'servicio';
+
+    public const KIND_VENTA = 'venta';
+
+    public const KIND_ALQUILER = 'alquiler';
+
     /**
-     * Formato SERV-YYMMDDNN: prefijo, fecha del servicio (2 dígitos año), consecutivo global del día (01-99).
+     * @param  self::KIND_*  $kind
+     *
+     * Formato {SERV|VENT|ALQ}-YYMMDDNN: fecha (2 dígitos año), consecutivo por prefijo y día (01-99).
      */
-    public function nextForDate(Carbon $serviceDate): string
+    public function nextForDate(Carbon $serviceDate, string $kind = self::KIND_SERVICIO): string
     {
+        $slug = match ($kind) {
+            self::KIND_VENTA => 'VENT',
+            self::KIND_ALQUILER => 'ALQ',
+            default => 'SERV',
+        };
+
         $local = $serviceDate->copy()->timezone(config('app.timezone'))->startOfDay();
         $datePart = sprintf(
             '%02d%02d%02d',
@@ -20,10 +34,11 @@ class ServiceCodeGenerator
             (int) $local->format('n'),
             (int) $local->format('j')
         );
-        $prefix = 'SERV-'.$datePart;
+        $prefix = $slug.'-'.$datePart;
         $expectedLen = strlen($prefix) + 2;
+        $pattern = '/^'.preg_quote($slug, '/').'-\d{6}(\d{2})$/';
 
-        return DB::transaction(function () use ($prefix, $expectedLen) {
+        return DB::transaction(function () use ($prefix, $expectedLen, $pattern, $slug) {
             $lastCode = Service::query()
                 ->where('code', 'like', $prefix.'%')
                 ->whereRaw('LENGTH(code) = ?', [$expectedLen])
@@ -32,12 +47,12 @@ class ServiceCodeGenerator
                 ->value('code');
 
             $next = 1;
-            if ($lastCode !== null && preg_match('/^SERV-\d{6}(\d{2})$/', $lastCode, $m)) {
+            if ($lastCode !== null && preg_match($pattern, $lastCode, $m)) {
                 $next = (int) $m[1] + 1;
             }
 
             if ($next > 99) {
-                throw new \RuntimeException('Consecutivo de servicios agotado para esta fecha (máx. 99).');
+                throw new \RuntimeException('Consecutivo '.$slug.' agotado para esta fecha (máx. 99).');
             }
 
             return $prefix.str_pad((string) $next, 2, '0', STR_PAD_LEFT);

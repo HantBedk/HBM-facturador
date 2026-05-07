@@ -105,6 +105,21 @@ class InventorySaleController extends Controller
                         'lines' => ["El producto «{$lot->name}» está inactivo."],
                     ]);
                 }
+                if (($lot->lifecycle_status ?? InventoryLot::LIFECYCLE_ACTIVO) !== InventoryLot::LIFECYCLE_ACTIVO) {
+                    throw ValidationException::withMessages([
+                        'lines' => ["El producto «{$lot->name}» no está disponible para venta (estado ciclo de vida)."],
+                    ]);
+                }
+                if (! (bool) ($lot->allow_sale ?? true)) {
+                    throw ValidationException::withMessages([
+                        'lines' => ["El producto «{$lot->name}» no está habilitado para venta."],
+                    ]);
+                }
+                if ($lot->quantity_available < 1) {
+                    throw ValidationException::withMessages([
+                        'lines' => ["El producto «{$lot->name}» no tiene stock disponible para venta."],
+                    ]);
+                }
                 if ($lot->quantity_available < $qty) {
                     throw ValidationException::withMessages([
                         'lines' => ["Stock insuficiente para «{$lot->name}» (disponible: {$lot->quantity_available})."],
@@ -127,6 +142,10 @@ class InventorySaleController extends Controller
 
                 $lot->quantity_available = $lot->quantity_available - $qty;
                 $lot->save();
+
+                if ((int) $lot->quantity_available === 0) {
+                    $lot->markExhaustedAfterFullSale((int) $actor->id);
+                }
 
                 InventoryMovement::query()->create([
                     'inventory_lot_id' => $lot->id,

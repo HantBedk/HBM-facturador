@@ -526,4 +526,58 @@ class ServiceCatalogTest extends TestCase
         $this->assertSame('1500.75', (string) $row->base_price);
         $this->assertSame('Texto auxiliar', $row->description);
     }
+
+    public function test_venta_de_equipo_usa_prefijo_vent_en_codigo(): void
+    {
+        $company = Company::query()->create([
+            'nombre' => 'Emp VENT',
+            'factura_sigla' => 'EVN',
+            'nit' => '903-VENT',
+            'estado' => Company::ESTADO_ACTIVO,
+        ]);
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        $lineDesc = 'Equipo Router (SKU-1), cantidad 1, precio unitario fijo 50000.00.';
+        $r = $this->postJson('/api/services', [
+            'company_id' => $company->id,
+            'client_name' => 'Cliente venta',
+            'service_type' => 'Venta de equipo',
+            'description' => $lineDesc,
+            'items' => [[
+                'custom_name' => 'Venta equipo: Router',
+                'amount' => 50000,
+                'line_description' => $lineDesc,
+            ]],
+        ])->assertCreated();
+
+        $this->assertMatchesRegularExpression('/^VENT-260415\d{2}$/', (string) $r->json('data.code'));
+    }
+
+    public function test_alquiler_de_equipo_usa_prefijo_alq_en_codigo(): void
+    {
+        $company = Company::query()->create([
+            'nombre' => 'Emp ALQ',
+            'factura_sigla' => 'EAQ',
+            'nit' => '904-ALQ',
+            'estado' => Company::ESTADO_ACTIVO,
+        ]);
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        $lineDesc = 'Equipo Proyector (PRY-1), cantidad 1, días 2, tarifa diaria fijo 10000.00.';
+        $r = $this->postJson('/api/services', [
+            'company_id' => $company->id,
+            'client_name' => 'Cliente alquiler',
+            'service_type' => 'Alquiler de equipo',
+            'description' => $lineDesc,
+            'items' => [[
+                'custom_name' => 'Alquiler equipo: Proyector',
+                'amount' => 20000,
+                'line_description' => $lineDesc,
+            ]],
+        ])->assertCreated();
+
+        $this->assertMatchesRegularExpression('/^ALQ-260415\d{2}$/', (string) $r->json('data.code'));
+    }
 }

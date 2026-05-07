@@ -408,8 +408,8 @@ async function onSubmit() {
 </script>
 
 <template>
-  <section class="mx-auto max-w-md px-3 pb-8 sm:px-0">
-    <header class="mb-6 text-center">
+  <section class="mx-auto w-full max-w-7xl px-4 pb-8 sm:px-6 lg:px-8">
+    <header class="mb-6 text-center lg:text-left">
       <h1 class="text-xl font-bold tracking-tight text-white sm:text-2xl">Completar asignación</h1>
       <p class="mt-2 text-[0.8rem] leading-snug text-slate-500">
         Sustituya las líneas provisionales por el detalle real del trabajo e importes de referencia.
@@ -430,6 +430,7 @@ async function onSubmit() {
           :key="formResetKey"
           v-model="form"
           v-model:photos="photoFiles"
+          wide-layout
           billing-locked
           hide-submit-button
           :allow-inventory-commercial-ops="false"

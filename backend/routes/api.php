@@ -33,6 +33,7 @@ use App\Http\Controllers\Api\InventoryHolderOptionController;
 use App\Http\Controllers\Api\InventoryLocationOptionController;
 use App\Http\Controllers\Api\InventoryOwnerAccrualController;
 use App\Http\Controllers\Api\InventoryAuditEventController;
+use App\Http\Controllers\Api\InventoryLifecycleController;
 use App\Http\Controllers\Api\InventoryEmpleadoCommercialSettingsController;
 use App\Http\Controllers\Api\InventoryRentalController;
 use App\Http\Controllers\Api\InventorySaleController;
@@ -69,12 +70,15 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::post('/inventory/sales', [InventorySaleController::class, 'store']);
     Route::get('/inventory/rentals', [InventoryRentalController::class, 'index']);
     Route::post('/inventory/rentals', [InventoryRentalController::class, 'store']);
+    Route::post('/inventory/lots/{inventory_lot}/lifecycle/report', [InventoryLifecycleController::class, 'report']);
     Route::middleware('role:admin,super_admin')->group(function () {
         Route::post('/inventory/lots', [InventoryLotController::class, 'store']);
         Route::patch('/inventory/lots/{inventory_lot}', [InventoryLotController::class, 'update']);
         Route::delete('/inventory/lots/{inventory_lot}', [InventoryLotController::class, 'destroy']);
         Route::get('/inventory/owner-accruals', InventoryOwnerAccrualController::class);
         Route::get('/inventory/audit-events', InventoryAuditEventController::class);
+        Route::get('/inventory/lifecycle/requests', [InventoryLifecycleController::class, 'index']);
+        Route::post('/inventory/lifecycle/requests/{transitionRequest}/approve', [InventoryLifecycleController::class, 'approve']);
         Route::post('/inventory/rentals/{inventory_rental}/close', [InventoryRentalController::class, 'close']);
     });
 

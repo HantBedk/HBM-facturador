@@ -172,7 +172,7 @@ function accionEtiqueta(code) {
     factura_eliminada: 'Factura eliminada',
     factura_token_publico_regenerado: 'Código consulta pública',
     factura_auto_borrador: 'Borradores automáticos (sistema)',
-    automation_facturacion_actualizada: 'Facturación automática (borradores)',
+    automation_facturacion_actualizada: 'Facturación y Margen (programación de borradores)',
     pago_registrado: 'Pago registrado',
     pago_eliminado: 'Pago eliminado',
     servicio_creado: 'Servicio creado',

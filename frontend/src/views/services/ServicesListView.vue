@@ -61,6 +61,7 @@ const deleteUsesInvoiceCode = computed(() => Boolean(deleteTarget.value?.invoice
 const filters = ref({
   company_id: '',
   user_id: '',
+  sav_type: '',
   service_date_from: '',
   service_date_to: '',
   q: '',
@@ -92,7 +93,7 @@ const SORT_DEFAULT_DIR = {
 const sortKey = ref('')
 const sortDir = ref('desc')
 
-const listTitle = computed(() => (isAdmin.value ? 'Listado de servicios' : 'Mis servicios'))
+const listTitle = computed(() => (isAdmin.value ? 'Listado SAV' : 'Mis SAV'))
 
 const empleadoCommercial = ref({ venta: false, alquiler: false })
 
@@ -317,6 +318,13 @@ function clip(s, n = 72) {
   return s.length > n ? `${s.slice(0, n)}…` : s
 }
 
+function detectSavTypeByCode(code) {
+  const c = String(code || '').toUpperCase().trim()
+  if (c.startsWith('VENT')) return 'venta'
+  if (c.startsWith('ALQ')) return 'alquiler'
+  return 'servicio'
+}
+
 function formatDate(iso) {
   if (!iso) return '—'
   const d = new Date(iso + (iso.length === 10 ? 'T12:00:00' : ''))
@@ -334,6 +342,12 @@ const pageSummary = computed(() => {
   const m = meta.value
   if (!m || !m.total) return ''
   return `${m.from ?? 0}–${m.to ?? 0} de ${m.total} servicio(s)`
+})
+
+const filteredRows = computed(() => {
+  const wanted = String(filters.value.sav_type || '')
+  if (!wanted) return rows.value
+  return rows.value.filter((s) => detectSavTypeByCode(s.code) === wanted)
 })
 
 async function exportServicesCsv() {
@@ -429,6 +443,15 @@ async function exportServicesCsv() {
           <option v-for="u in empleados" :key="u.id" :value="String(u.id)">{{ u.nombre }}</option>
         </select>
       </label>
+      <label>
+        <span>Tipo SAV</span>
+        <select v-model="filters.sav_type">
+          <option value="">Todos</option>
+          <option value="servicio">Servicio</option>
+          <option value="venta">Venta</option>
+          <option value="alquiler">Alquiler</option>
+        </select>
+      </label>
       <template v-if="isAdmin">
         <label>
           <span>Fecha desde</span>
@@ -450,7 +473,7 @@ async function exportServicesCsv() {
     </div>
     <p class="filter-hint muted">
       <template v-if="isAdmin">
-        Los filtros y la búsqueda se aplican automáticamente al cambiar valores. El listado incluye servicios
+        Los filtros y la búsqueda se aplican automáticamente al cambiar valores. El listado SAV incluye servicios
         eliminados; se distinguen por el estado «Eliminado». Pulsa un encabezado de columna para ordenar (▲/▼).
       </template>
       <template v-else>
@@ -512,7 +535,7 @@ async function exportServicesCsv() {
           </thead>
           <tbody>
             <tr
-              v-for="s in rows"
+              v-for="s in filteredRows"
               :key="s.id"
               class="row-data"
               :class="{ 'row-data--clickable': !isAdmin }"
@@ -618,9 +641,9 @@ async function exportServicesCsv() {
                 </div>
               </td>
             </tr>
-            <tr v-if="!rows.length">
+            <tr v-if="!filteredRows.length">
               <td :colspan="tableColspan" class="muted center empty-msg">
-                No hay servicios con los filtros actuales. Prueba limpiar la búsqueda o cambiar empresa.
+                No hay registros SAV con los filtros actuales. Prueba limpiar la búsqueda o cambiar filtros.
               </td>
             </tr>
           </tbody>

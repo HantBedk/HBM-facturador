@@ -6,7 +6,23 @@ use Illuminate\Database\Eloquent\Model;
 
 class AppSetting extends Model
 {
+    /** Margen global servicio / catálogo / línea «Otro» (no inventario comercial). */
     public const KEY_TECHNICIAN_CATALOG_DISCOUNT_PERCENT = 'technician_catalog_discount_percent';
+
+    /** Margen venta de inventario (líneas «Venta equipo:»). */
+    public const KEY_TECHNICIAN_INVENTORY_SALE_DISCOUNT_PERCENT = 'technician_inventory_sale_discount_percent';
+
+    /** Margen alquiler de inventario (líneas «Alquiler equipo:»). */
+    public const KEY_TECHNICIAN_INVENTORY_RENTAL_DISCOUNT_PERCENT = 'technician_inventory_rental_discount_percent';
+
+    /** Piso mínimo del margen servicio (no se puede guardar ni facturar por debajo). */
+    public const KEY_TECHNICIAN_CATALOG_DISCOUNT_FLOOR_PERCENT = 'technician_catalog_discount_floor_percent';
+
+    /** Piso mínimo del margen venta inventario. */
+    public const KEY_TECHNICIAN_INVENTORY_SALE_DISCOUNT_FLOOR_PERCENT = 'technician_inventory_sale_discount_floor_percent';
+
+    /** Piso mínimo del margen alquiler inventario. */
+    public const KEY_TECHNICIAN_INVENTORY_RENTAL_DISCOUNT_FLOOR_PERCENT = 'technician_inventory_rental_discount_floor_percent';
 
     public const KEY_AUTOMATION_DRAFT_GENERATION_ENABLED = 'automation_draft_generation_enabled';
 

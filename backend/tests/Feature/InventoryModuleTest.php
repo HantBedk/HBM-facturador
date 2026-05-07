@@ -161,6 +161,41 @@ class InventoryModuleTest extends TestCase
         $this->assertSame(1, InventoryMovement::query()->where('type', InventoryMovement::TYPE_VENTA)->count());
     }
 
+    public function test_full_sale_marks_lot_baja_when_stock_reaches_zero(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+
+        $lot = InventoryLot::query()->create([
+            'owner_user_id' => $admin->id,
+            'name' => 'Item agotado',
+            'sku' => 'SKU-DEPL',
+            'description' => null,
+            'quantity_available' => 2,
+            'unit_price' => '50.00',
+            'is_active' => true,
+            'allow_sale' => true,
+            'allow_rental' => true,
+            'lifecycle_status' => InventoryLot::LIFECYCLE_ACTIVO,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->postJson('/api/inventory/sales', [
+            'lines' => [
+                ['inventory_lot_id' => $lot->id, 'quantity' => 2],
+            ],
+        ])->assertOk();
+
+        $lot->refresh();
+        $this->assertSame(0, $lot->quantity_available);
+        $this->assertFalse($lot->is_active);
+        $this->assertFalse($lot->allow_sale);
+        $this->assertFalse($lot->allow_rental);
+        $this->assertSame(InventoryLot::LIFECYCLE_BAJA, $lot->lifecycle_status);
+        $this->assertNotNull($lot->decommissioned_at);
+        $this->assertSame((int) $admin->id, (int) $lot->decommissioned_by_user_id);
+    }
+
     public function test_empleado_only_sees_own_sales_in_index(): void
     {
         $e1 = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
