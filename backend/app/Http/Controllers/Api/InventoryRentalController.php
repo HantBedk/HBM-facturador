@@ -4,14 +4,18 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\InventoryRentalResource;
+use App\Models\AppSetting;
 use App\Models\InventoryAuditEvent;
 use App\Models\InventoryLot;
 use App\Models\InventoryMovement;
 use App\Models\InventoryRental;
 use App\Models\InventoryRentalLine;
 use App\Models\PanelNotification;
+use App\Models\User;
+use App\Support\DecimalMath;
 use App\Support\Pagination;
 use App\Services\PanelNotificationDispatcher;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
@@ -29,6 +33,7 @@ class InventoryRentalController extends Controller
                 'lines.owner:id,nombre',
                 'lines.lot:id,name,sku',
             ])
+            ->whereNull('deleted_at')
             ->orderByDesc('id');
 
         if ($request->filled('status')) {
@@ -44,9 +49,7 @@ class InventoryRentalController extends Controller
     public function store(Request $request): InventoryRentalResource
     {
         $actor = $request->user();
-        if (! $actor->isAdminEquipo()) {
-            abort(403, 'Solo administración puede registrar alquileres.');
-        }
+        $this->assertCanRegisterInventoryRental($actor);
 
         $validated = $request->validate([
             'tenant_company_id' => ['sometimes', 'nullable', 'integer', 'exists:companies,id'],
@@ -114,7 +117,7 @@ class InventoryRentalController extends Controller
                 }
 
                 $unit = (string) $lot->unit_price;
-                $lineTotal = bcmul($unit, (string) $qty, 2);
+                $lineTotal = DecimalMath::mul($unit, (string) $qty, 2);
 
                 InventoryRentalLine::query()->create([
                     'inventory_rental_id' => $rental->id,
@@ -239,6 +242,114 @@ class InventoryRentalController extends Controller
         );
 
         return new InventoryRentalResource($rental);
+    }
+
+    /**
+     * Elimina el registro de alquiler; si sigue activo, devuelve existencias como close().
+     */
+    public function destroy(Request $request, InventoryRental $inventory_rental): JsonResponse
+    {
+        $actor = $request->user();
+        $ownRentalRollback =
+            $actor->rol === User::ROL_EMPLEADO
+            && (int) $inventory_rental->created_by_user_id === (int) $actor->id
+            && $inventory_rental->invoice_id === null;
+
+        if (! $actor->isAdminEquipo() && ! $ownRentalRollback) {
+            abort(403, 'Solo administración puede anular alquileres.');
+        }
+
+        $tenantCompanyId = $this->tenantCompanyIdFromRequest($request);
+        if ($tenantCompanyId !== null && (int) ($inventory_rental->tenant_company_id ?? 0) !== $tenantCompanyId) {
+            abort(403, 'El alquiler no pertenece al contexto de empresa indicado.');
+        }
+        if ($tenantCompanyId === null && $request->input('tenant_scope') === 'internal' && $inventory_rental->tenant_company_id !== null) {
+            abort(403, 'El alquiler no pertenece al inventario interno.');
+        }
+
+        if ($inventory_rental->invoice_id !== null && $actor->rol !== User::ROL_SUPER_ADMIN) {
+            abort(403, 'Este alquiler está asociado a una factura. Solo super administración puede anularlo indicando el motivo.');
+        }
+
+        $voidReason = null;
+        if ($inventory_rental->invoice_id !== null) {
+            $validated = $request->validate([
+                'void_reason' => ['required', 'string', 'min:20', 'max:500'],
+            ]);
+            $voidReason = $validated['void_reason'];
+        }
+
+        DB::transaction(function () use ($inventory_rental, $actor, $request, $tenantCompanyId, $voidReason) {
+            $lines = InventoryRentalLine::query()
+                ->where('inventory_rental_id', $inventory_rental->id)
+                ->lockForUpdate()
+                ->get();
+
+            $lotIds = $lines->pluck('inventory_lot_id')->unique()->values()->all();
+            $lots = InventoryLot::query()->whereIn('id', $lotIds)->lockForUpdate()->get()->keyBy('id');
+
+            if ($inventory_rental->status === InventoryRental::STATUS_ACTIVE) {
+                foreach ($lines as $line) {
+                    if ($line->returned_at !== null) {
+                        continue;
+                    }
+                    $lot = $lots->get($line->inventory_lot_id);
+                    if (! $lot) {
+                        continue;
+                    }
+                    if (! $this->lotBelongsToTenantContext($lot, $tenantCompanyId, $request)) {
+                        throw ValidationException::withMessages([
+                            'rental' => ['El contexto de empresa no coincide con uno de los lotes.'],
+                        ]);
+                    }
+                    $q = (int) $line->quantity;
+                    $lot->quantity_available = $lot->quantity_available + $q;
+                    $lot->save();
+
+                    InventoryMovement::query()->create([
+                        'inventory_lot_id' => $lot->id,
+                        'user_id' => $actor->id,
+                        'tenant_company_id' => $tenantCompanyId ?? $inventory_rental->tenant_company_id,
+                        'type' => InventoryMovement::TYPE_ALQUILER_REVERSA,
+                        'quantity_delta' => $q,
+                        'inventory_sale_line_id' => null,
+                        'note' => 'Anulación alquiler #'.$inventory_rental->id,
+                        'created_at' => now(),
+                    ]);
+
+                    $line->returned_at = now();
+                    $line->save();
+                }
+            }
+
+            $inventory_rental->voided_at = now();
+            $inventory_rental->voided_by_user_id = $actor->id;
+            $inventory_rental->void_reason = $voidReason;
+            $inventory_rental->status = InventoryRental::STATUS_CLOSED;
+            if ($inventory_rental->closed_at === null) {
+                $inventory_rental->closed_at = now();
+            }
+            $inventory_rental->save();
+
+            $this->audit($request, $tenantCompanyId ?? $inventory_rental->tenant_company_id, 'inventory_rental', (int) $inventory_rental->id, 'delete', [
+                'status' => $inventory_rental->status,
+            ], null);
+
+            $inventory_rental->delete();
+        });
+
+        return response()->json(['message' => 'Alquiler anulado.']);
+    }
+
+    private function assertCanRegisterInventoryRental(User $actor): void
+    {
+        if ($actor->isAdminEquipo()) {
+            return;
+        }
+        if ($actor->rol === User::ROL_EMPLEADO && AppSetting::getBool(AppSetting::KEY_EMPLEADO_INVENTORY_ALQUILER_ENABLED, false)) {
+            return;
+        }
+        abort(403, 'Solo administración puede registrar alquileres (o habilite alquileres para técnicos en configuración).');
     }
 
     private function tenantCompanyIdFromRequest(Request $request, array $validated = []): ?int

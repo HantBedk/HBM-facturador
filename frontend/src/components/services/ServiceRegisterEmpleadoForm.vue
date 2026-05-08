@@ -305,11 +305,13 @@ watch([selectedOperationLot, operationType], () => {
 
 const lotPickSearchQ = ref('')
 const selectedSaleLotId = ref('')
+const selectedRentalLotId = ref('')
 watch(
   () => props.modelValue.inventory_operation_type,
   () => {
     lotPickSearchQ.value = ''
     selectedSaleLotId.value = ''
+    selectedRentalLotId.value = ''
   }
 )
 const filteredOperationLots = computed(() => {
@@ -370,9 +372,18 @@ function setInventoryOperationType(t) {
   })
 }
 
-function pickInventoryLotRow(lot) {
+function confirmRentalLotPick() {
   if (props.disabled) return
-  patch({ inventory_lot_id: String(lot.id) })
+  const id = Number(selectedRentalLotId.value)
+  if (!id) return
+  patch({ inventory_lot_id: String(id), inventory_quantity: 1, inventory_days: 1 })
+  selectedRentalLotId.value = ''
+}
+
+function clearRentalLotSelection() {
+  if (props.disabled) return
+  patch({ inventory_lot_id: '', inventory_quantity: 1, inventory_days: 1 })
+  selectedRentalLotId.value = ''
 }
 
 function addSaleItem() {
@@ -457,6 +468,13 @@ const showCommercialInventoryShell = computed(
 
 const showCommercialTypeSwitcher = computed(
   () => props.registerKind === 'servicio' && props.allowInventoryCommercialOps
+)
+
+/** Aclara titular económico (owner del lote) vs ejecutor del registro en operaciones de inventario. */
+const showInventoryOwnerExecutorBanner = computed(
+  () =>
+    props.allowInventoryCommercialOps &&
+    (operationType.value === 'venta' || operationType.value === 'alquiler')
 )
 
 const isSimpleServicioMode = computed(() => {
@@ -665,6 +683,15 @@ watch(
       v-if="showCommercialInventoryShell"
       class="rounded-2xl border border-slate-700/60 bg-slate-900/30 p-3"
     >
+      <p
+        v-if="showInventoryOwnerExecutorBanner"
+        class="mb-3 rounded-xl border border-sky-500/35 bg-sky-950/45 px-3 py-2.5 text-xs leading-relaxed text-sky-100/95"
+      >
+        <span class="font-semibold text-sky-200">Importante:</span>
+        el valor facturable del equipo corresponde al titular del inventario (administración); usted figura como
+        <span class="font-medium">ejecutor del registro</span>. Las líneas de venta o alquiler de inventario
+        <span class="font-medium">no generan comisión</span> en la liquidación del técnico por ese concepto.
+      </p>
       <template v-if="showCommercialTypeSwitcher">
         <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
           Operación comercial
@@ -787,30 +814,55 @@ watch(
             v-model="lotPickSearchQ"
             type="search"
             autocomplete="off"
-            placeholder="Buscar equipo por nombre…"
+            placeholder="Buscar equipo por nombre o código…"
             :disabled="disabled"
             class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-sky-500 disabled:opacity-50"
           />
-          <p v-if="selectedOperationLot" class="text-xs text-emerald-400/95">
-            Seleccionado: {{ selectedOperationLot.name }}
-          </p>
+          <div class="flex gap-2">
+            <select
+              v-model="selectedRentalLotId"
+              :disabled="disabled"
+              class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white outline-none focus:border-sky-500 disabled:opacity-50"
+            >
+              <option value="" disabled>Seleccionar equipo…</option>
+              <option v-for="lot in filteredOperationLots" :key="lot.id" :value="String(lot.id)">
+                {{ lot.name }} · Stock {{ lot.quantity_available }} · {{ formatHintMoneyCop(lot.unit_price) }}
+              </option>
+            </select>
+            <button
+              type="button"
+              :disabled="disabled || !selectedRentalLotId"
+              class="shrink-0 rounded-xl border border-slate-600 px-3 py-2.5 text-xs font-semibold text-slate-200 transition hover:border-sky-500 hover:text-sky-300 disabled:opacity-50"
+              @click="confirmRentalLotPick"
+            >
+              Agregar
+            </button>
+          </div>
+          <p class="text-xs text-slate-400">Equipo en operación: {{ selectedOperationLot ? 1 : 0 }}</p>
           <ul
-            class="max-h-44 divide-y divide-slate-700/50 overflow-y-auto rounded-xl border border-slate-700/80 bg-[#141a22]"
-            role="listbox"
+            v-if="selectedOperationLot"
+            class="max-h-56 divide-y divide-slate-700/50 overflow-y-auto rounded-xl border border-slate-700/80 bg-[#141a22]"
           >
             <li
-              v-for="lot in filteredOperationLots"
-              :key="lot.id"
-              role="option"
-              class="cursor-pointer px-3 py-2.5 text-sm transition hover:bg-slate-800/80"
-              :class="
-                Number(inner.inventory_lot_id) === Number(lot.id) ? 'bg-sky-900/35 text-sky-100' : 'text-slate-200'
-              "
-              @click="pickInventoryLotRow(lot)"
+              class="flex flex-col gap-2 px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between"
             >
-              {{ lot.name }} · Stock {{ lot.quantity_available }} · {{ formatHintMoneyCop(lot.unit_price) }}
+              <div class="text-slate-200">
+                {{ selectedOperationLot.name }} · {{ formatHintMoneyCop(selectedOperationLot.unit_price) }}
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span v-if="operationPreview" class="text-xs text-emerald-400">{{ formatHintMoneyCop(operationPreview.total) }}</span>
+                <button
+                  type="button"
+                  :disabled="disabled"
+                  class="rounded-lg px-2 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+                  @click="clearRentalLotSelection"
+                >
+                  Quitar
+                </button>
+              </div>
             </li>
           </ul>
+          <p v-else class="text-xs text-slate-500">No hay equipo seleccionado para el alquiler.</p>
         </template>
       </div>
       <div v-if="operationType === 'alquiler'" class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -1097,6 +1149,12 @@ watch(
       class="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-center text-sm font-semibold text-emerald-100"
     >
       Total de la venta: {{ formatHintMoneyCop(saleGrandTotal) }}
+    </p>
+    <p
+      v-if="operationType === 'alquiler' && operationPreview"
+      class="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-center text-sm font-semibold text-emerald-100"
+    >
+      Total del alquiler: {{ formatHintMoneyCop(operationPreview.total) }}
     </p>
 
     <button

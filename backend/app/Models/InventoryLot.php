@@ -6,10 +6,22 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * Lote de inventario (operación interna o por empresa cliente vía `tenant_company_id`).
+ *
+ * Roadmap inventario-empresa (migrar desde `description` a columnas): tipo_activo, subcategoria, marca, modelo,
+ * codigo_interno_dedicado, estado_fisico, condicion_compra, garantia_hasta, fecha_compra, fecha_ingreso_custodia,
+ * responsable_empresa, sede, area, notas_internas — manteniendo `description` solo como texto libre opcional.
+ */
 class InventoryLot extends Model
 {
     public const LIFECYCLE_ACTIVO = 'activo';
+
+    /** Existencias agotadas por venta (distinto de baja por inservible). */
+    public const LIFECYCLE_VENDIDO = 'vendido';
+
     public const LIFECYCLE_REPARACION = 'reparacion';
+
     public const LIFECYCLE_BAJA = 'baja';
 
     protected $fillable = [
@@ -79,9 +91,8 @@ class InventoryLot extends Model
     }
 
     /**
-     * Tras una venta que deja existencias en cero: el activo deja de estar disponible (no «vuelve» como el mismo
-     * producto; un ingreso nuevo debe ser otro lote). Los alquileres no llaman a este método: al cerrarse devuelven
-     * unidades y el lote sigue en ciclo activo.
+     * Tras una venta que deja existencias en cero: el lote queda marcado como vendido (no «baja» por daño).
+     * Los alquileres no llaman a este método: al cerrarse devuelven unidades y el lote sigue activo.
      */
     public function markExhaustedAfterFullSale(int $actorUserId): void
     {
@@ -92,11 +103,31 @@ class InventoryLot extends Model
         $this->is_active = false;
         $this->allow_sale = false;
         $this->allow_rental = false;
-        $this->lifecycle_status = self::LIFECYCLE_BAJA;
+        $this->lifecycle_status = self::LIFECYCLE_VENDIDO;
         $this->lifecycle_status_changed_at = now();
-        $this->decommission_reason = 'Agotado por venta (existencias en cero).';
-        $this->decommissioned_at = now();
-        $this->decommissioned_by_user_id = $actorUserId;
+        // No usar decommission_*: eso es solo para retiro/baja por inservible.
+        $this->decommission_reason = null;
+        $this->decommissioned_at = null;
+        $this->decommissioned_by_user_id = null;
+        $this->save();
+    }
+
+    /**
+     * Al anular una venta que había dejado el lote en «vendido», restaurar disponibilidad operativa.
+     */
+    public function restoreAfterSaleVoid(int $qtyReturned, int $actorUserId): void
+    {
+        $this->quantity_available += $qtyReturned;
+        if ($this->lifecycle_status === self::LIFECYCLE_VENDIDO) {
+            $this->lifecycle_status = self::LIFECYCLE_ACTIVO;
+            $this->is_active = true;
+            $this->allow_sale = true;
+            $this->allow_rental = false;
+            $this->lifecycle_status_changed_at = now();
+            $this->decommission_reason = null;
+            $this->decommissioned_at = null;
+            $this->decommissioned_by_user_id = null;
+        }
         $this->save();
     }
 }

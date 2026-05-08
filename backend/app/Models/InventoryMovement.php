@@ -12,8 +12,14 @@ class InventoryMovement extends Model
     public const TYPE_AJUSTE = 'ajuste';
 
     public const TYPE_VENTA = 'venta';
+
+    public const TYPE_VENTA_REVERSA = 'venta_reversa';
+
     public const TYPE_ALQUILER_SALIDA = 'alquiler_salida';
+
     public const TYPE_ALQUILER_DEVOLUCION = 'alquiler_devolucion';
+
+    public const TYPE_ALQUILER_REVERSA = 'alquiler_reversa';
     public const TYPE_REPARACION = 'reparacion';
     public const TYPE_REACTIVACION = 'reactivacion';
     public const TYPE_BAJA = 'baja';

@@ -30,6 +30,9 @@ class InventoryLotResource extends JsonResource
             'name' => $this->name,
             'description' => $this->description,
             'quantity_available' => $this->quantity_available,
+            /** Unidades actualmente en alquiler activo (no devueltas). */
+            'units_on_rent' => (int) ($this->resource->getAttribute('units_on_rent') ?? 0),
+            'quantity_total' => (int) $this->quantity_available + (int) ($this->resource->getAttribute('units_on_rent') ?? 0),
             'unit_price' => (string) $this->unit_price,
             'is_active' => (bool) $this->is_active,
             'lifecycle_status' => $this->lifecycle_status ?: ((bool) $this->is_active ? 'activo' : 'baja'),

@@ -27,6 +27,7 @@ const ServiceDetailView = () => import('@/views/services/ServiceDetailView.vue')
 const ServiceEditView = () => import('@/views/services/ServiceEditView.vue')
 const InventoryView = () => import('@/views/inventory/InventoryView.vue')
 const PublicInvoiceConsultView = () => import('@/views/public/PublicInvoiceConsultView.vue')
+const PublicCompanyInventoryView = () => import('@/views/public/PublicCompanyInventoryView.vue')
 import { isAdminPanelRole } from '@/utils/roles.js'
 import { isEmpleadoPerfilIncomplete } from '@/utils/empleadoPerfil.js'
 
@@ -41,6 +42,12 @@ const routes = [
     path: '/consulta-factura',
     name: 'consulta-factura-publica',
     component: PublicInvoiceConsultView,
+    meta: { public: true },
+  },
+  {
+    path: '/consulta-empresa',
+    name: 'consulta-empresa-publica',
+    component: PublicCompanyInventoryView,
     meta: { public: true },
   },
   {

@@ -1065,6 +1065,26 @@ class ServiceController extends Controller
                         'items' => ['Línea «Otro» '.($i + 1).': describe el trabajo realizado (mín. 8 caracteres).'],
                     ]);
                 }
+                $cnameTrim = trim($cname);
+                /**
+                 * Inventario comercial: el importe enviado es el valor facturable acordado (lista/precio interno);
+                 * el ejecutor del registro no devenga por estas líneas — el titular del lote se reconoce vía `owner_user_id` en inventario.
+                 */
+                if (str_starts_with($cnameTrim, 'Venta equipo:') || str_starts_with($cnameTrim, 'Alquiler equipo:')) {
+                    $out[] = [
+                        'catalog_id' => null,
+                        'custom_name' => $cname,
+                        'custom_description' => $cdesc,
+                        'amount' => $amtStr,
+                        'technician_line_amount' => '0.00',
+                        'label' => $cname,
+                        'line_description' => $lineDesc,
+                        'is_custom' => true,
+                        'propose_catalog' => false,
+                    ];
+
+                    continue;
+                }
                 $pLine = CatalogPricing::technicianDiscountPercentForCustomLine($cname);
                 $billedStr = CatalogPricing::billedAmountFromTechnicianEntry((float) $amtStr, $pLine);
                 $out[] = [

@@ -38,6 +38,7 @@ use App\Http\Controllers\Api\InventoryEmpleadoCommercialSettingsController;
 use App\Http\Controllers\Api\InventoryRentalController;
 use App\Http\Controllers\Api\InventorySaleController;
 use App\Http\Controllers\Api\PublicInvoiceController;
+use App\Http\Controllers\Api\PublicCompanyInventoryController;
 use App\Http\Controllers\Api\ServiceCatalogController;
 use App\Http\Controllers\Api\ServiceController;
 use App\Http\Controllers\Api\UserController;
@@ -56,6 +57,9 @@ Route::prefix('public')
     ->group(function () {
         Route::post('/invoices/consult', [PublicInvoiceController::class, 'consult']);
         Route::post('/invoices/pdf', [PublicInvoiceController::class, 'pdf']);
+        Route::post('/company-inventory/otp/request', [PublicCompanyInventoryController::class, 'requestOtp']);
+        Route::post('/company-inventory/otp/verify', [PublicCompanyInventoryController::class, 'verifyOtp']);
+        Route::get('/company-inventory/lots', [PublicCompanyInventoryController::class, 'lots']);
     });
 
 Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
@@ -68,8 +72,10 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::get('/inventory/holder-options', InventoryHolderOptionController::class);
     Route::get('/inventory/sales', [InventorySaleController::class, 'index']);
     Route::post('/inventory/sales', [InventorySaleController::class, 'store']);
+    Route::delete('/inventory/sales/{inventory_sale}', [InventorySaleController::class, 'destroy']);
     Route::get('/inventory/rentals', [InventoryRentalController::class, 'index']);
     Route::post('/inventory/rentals', [InventoryRentalController::class, 'store']);
+    Route::delete('/inventory/rentals/{inventory_rental}', [InventoryRentalController::class, 'destroy']);
     Route::post('/inventory/lots/{inventory_lot}/lifecycle/report', [InventoryLifecycleController::class, 'report']);
     Route::middleware('role:admin,super_admin')->group(function () {
         Route::post('/inventory/lots', [InventoryLotController::class, 'store']);

@@ -54,16 +54,24 @@ export function fetchInventorySales(params = {}) {
   return api(`/inventory/sales${qs(params)}`)
 }
 
-export function createInventorySale(body) {
-  return api('/inventory/sales', { method: 'POST', body: JSON.stringify(body) })
+export function createInventorySale(body, params = {}) {
+  return api(`/inventory/sales${qs(params)}`, { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function deleteInventorySale(id, params = {}) {
+  return api(`/inventory/sales/${id}${qs(params)}`, { method: 'DELETE' })
 }
 
 export function fetchInventoryRentals(params = {}) {
   return api(`/inventory/rentals${qs(params)}`)
 }
 
-export function createInventoryRental(body) {
-  return api('/inventory/rentals', { method: 'POST', body: JSON.stringify(body) })
+export function createInventoryRental(body, params = {}) {
+  return api(`/inventory/rentals${qs(params)}`, { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function deleteInventoryRental(id, params = {}) {
+  return api(`/inventory/rentals/${id}${qs(params)}`, { method: 'DELETE' })
 }
 
 export function closeInventoryRental(id) {

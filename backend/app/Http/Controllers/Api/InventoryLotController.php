@@ -19,6 +19,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use App\Models\InventoryRental;
 use Illuminate\Validation\ValidationException;
 
 class InventoryLotController extends Controller
@@ -55,9 +56,24 @@ class InventoryLotController extends Controller
 
         $q->orderByDesc('id');
 
-        return InventoryLotResource::collection(
-            $q->paginate(Pagination::perPage($request))->withQueryString()
-        );
+        $paginator = $q->paginate(Pagination::perPage($request))->withQueryString();
+        $ids = $paginator->getCollection()->pluck('id')->filter()->values();
+        if ($ids->isNotEmpty()) {
+            $sums = DB::table('inventory_rental_lines as irl')
+                ->join('inventory_rentals as ir', 'ir.id', '=', 'irl.inventory_rental_id')
+                ->whereNull('ir.deleted_at')
+                ->where('ir.status', InventoryRental::STATUS_ACTIVE)
+                ->whereNull('irl.returned_at')
+                ->whereIn('irl.inventory_lot_id', $ids->all())
+                ->groupBy('irl.inventory_lot_id')
+                ->selectRaw('irl.inventory_lot_id as lid, SUM(irl.quantity) as u')
+                ->pluck('u', 'lid');
+            foreach ($paginator->getCollection() as $lot) {
+                $lot->setAttribute('units_on_rent', (int) ($sums[$lot->id] ?? 0));
+            }
+        }
+
+        return InventoryLotResource::collection($paginator);
     }
 
     public function store(Request $request): JsonResponse

@@ -626,6 +626,8 @@ async function verPdfEnPestaña() {
       </section>
 
       <p class="foot no-print">
+        <RouterLink to="/consulta-empresa" class="link">Consultar inventario de mi empresa</RouterLink>
+        <span class="mx-2 text-slate-600">·</span>
         <RouterLink to="/login" class="link">← Volver al acceso de personal interno</RouterLink>
       </p>
     </div>

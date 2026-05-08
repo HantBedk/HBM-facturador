@@ -7,7 +7,14 @@ import {
   getRecentClientNames,
   pushRecentClientName,
 } from '@/services/servicesApi.js'
-import { fetchEmpleadoCommercialInventorySettings, fetchInventoryLots } from '@/services/inventoryApi.js'
+import {
+  createInventoryRental,
+  createInventorySale,
+  deleteInventoryRental,
+  deleteInventorySale,
+  fetchEmpleadoCommercialInventorySettings,
+  fetchInventoryLots,
+} from '@/services/inventoryApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
 import { isLineDescriptionStillTemplate } from '@/utils/serviceLineDescriptionTemplate.js'
 
@@ -289,6 +296,16 @@ export function useServiceRegisterFlow({
     )
   }
 
+  /** Query params para inventario interno vs por empresa cliente. */
+  function buildInventoryQueryFromLots(lots) {
+    const ids = [...new Set(lots.map((l) => (l.tenant_company_id != null ? String(l.tenant_company_id) : 'internal')))]
+    if (ids.length > 1) {
+      throw new Error('No puede combinar inventario de distintas empresas en una sola operación.')
+    }
+    if (ids[0] === 'internal') return { tenant_scope: 'internal' }
+    return { tenant_company_id: ids[0] }
+  }
+
   function lotAllowsRental(lot) {
     if (!lot) return false
     const desc = String(lot.description || '')
@@ -528,9 +545,67 @@ export function useServiceRegisterFlow({
       }
       payload.amount = Number(t.toFixed(2))
 
-      const created = await createService(payload, photoFiles.value)
+      /** Primero descuenta stock vía API de inventario; si falla el servicio, revierte la venta/alquiler. */
+      let inventoryRollback = null
+      if (opType === 'venta') {
+        const saleItems = Array.isArray(form.value.inventory_sale_items) ? form.value.inventory_sale_items : []
+        const lotsUsed = saleItems
+          .map((si) => inventoryLots.value.find((x) => Number(x.id) === Number(si.lot_id)))
+          .filter(Boolean)
+        if (!lotsUsed.length) {
+          throw new Error('No hay equipos válidos para registrar la venta en inventario.')
+        }
+        const q = buildInventoryQueryFromLots(lotsUsed)
+        const invRes = await createInventorySale(
+          {
+            lines: saleItems.map((si) => ({
+              inventory_lot_id: Number(si.lot_id),
+              quantity: Number(si.quantity || 1),
+            })),
+            notes: String(form.value.description || '').trim() || null,
+          },
+          q
+        )
+        const sid = invRes?.data?.id ?? invRes?.id
+        if (!sid) throw new Error('Respuesta inválida al registrar la venta de inventario.')
+        inventoryRollback = { type: 'sale', id: sid, query: q }
+      } else if (opType === 'alquiler') {
+        const lotId = Number(form.value.inventory_lot_id)
+        const lot = inventoryLots.value.find((x) => Number(x.id) === lotId)
+        if (!lot) throw new Error('Equipo de inventario no encontrado.')
+        const q = buildInventoryQueryFromLots([lot])
+        const invRes = await createInventoryRental(
+          {
+            lines: [{ inventory_lot_id: lotId, quantity: Number(form.value.inventory_quantity || 1) }],
+            customer_name: baseClient,
+            customer_phone: form.value.use_quick_client ? digitsOnly(form.value.quick_telefono) : '',
+            notes: String(form.value.description || '').trim() || null,
+          },
+          q
+        )
+        const rid = invRes?.data?.id ?? invRes?.id
+        if (!rid) throw new Error('Respuesta inválida al registrar el alquiler de inventario.')
+        inventoryRollback = { type: 'rental', id: rid, query: q }
+      }
+
+      let created
+      try {
+        created = await createService(payload, photoFiles.value)
+      } catch (svcErr) {
+        if (inventoryRollback?.type === 'sale') {
+          await deleteInventorySale(inventoryRollback.id, inventoryRollback.query).catch(() => {})
+        } else if (inventoryRollback?.type === 'rental') {
+          await deleteInventoryRental(inventoryRollback.id, inventoryRollback.query).catch(() => {})
+        }
+        throw svcErr
+      }
+
       pushRecentClientName(form.value.client_name)
       clearServiceDraft()
+
+      if (opType === 'venta' || opType === 'alquiler') {
+        await refreshInventoryLots()
+      }
 
       if (isEmpleadoRegistro.value) {
         const okMsg =

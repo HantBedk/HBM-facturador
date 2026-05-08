@@ -53,6 +53,12 @@ const lotsPage = ref(1)
 const lotsQ = ref('')
 const activeTab = ref('activos')
 
+watch(isCompanyInventoryRoute, (custodia) => {
+  if (custodia && ['alquiler', 'ventas', 'en_alquiler_lotes'].includes(activeTab.value)) {
+    activeTab.value = 'activos'
+  }
+})
+
 const rentalsLoading = ref(false)
 const rentalsError = ref('')
 const rentals = ref([])
@@ -68,6 +74,8 @@ const salesPage = ref(1)
 const salesQ = ref('')
 
 const bajasQ = ref('')
+const vendidosQ = ref('')
+const rentLotsQ = ref('')
 const repairQ = ref('')
 
 const sortState = ref({
@@ -75,6 +83,8 @@ const sortState = ref({
   rentals: { key: 'started_at', dir: 'desc' },
   sales: { key: 'created_at', dir: 'desc' },
   bajas: { key: 'name', dir: 'asc' },
+  vendidos: { key: 'name', dir: 'asc' },
+  rentLots: { key: 'name', dir: 'asc' },
   repair: { key: 'name', dir: 'asc' },
 })
 
@@ -122,7 +132,15 @@ function readAllowRentalFromRow(row) {
   return parsed === true
 }
 
-const activeLots = computed(() => (lots.value || []).filter((row) => String(row.lifecycle_status || 'activo') === 'activo'))
+const activeLots = computed(() =>
+  (lots.value || []).filter((row) => String(row.lifecycle_status || 'activo') === 'activo')
+)
+/** Equipos vendidos por completo (lifecycle «vendido», distinto de baja por inservible). */
+const soldLots = computed(() => (lots.value || []).filter((row) => String(row.lifecycle_status || '') === 'vendido'))
+/** Lotes con unidades físicamente en alquiler activo. */
+const lotsWithActiveRentUnits = computed(() =>
+  (lots.value || []).filter((row) => Number(row.units_on_rent || 0) > 0)
+)
 const decommissionedLots = computed(() => (lots.value || []).filter((row) => String(row.lifecycle_status || '') === 'baja'))
 const repairLots = computed(() => (lots.value || []).filter((row) => String(row.lifecycle_status || '') === 'reparacion'))
 
@@ -237,6 +255,35 @@ const filteredBajas = computed(() => {
   })
 })
 
+const filteredVendidos = computed(() => {
+  const q = String(vendidosQ.value || '').trim().toLowerCase()
+  if (!q) return soldLots.value
+  return soldLots.value.filter((row) => {
+    const haystack = [row.name, row.sku, row.created_at, row.description, readDescriptionField(row.description, 'Codigo interno')]
+      .join(' ')
+      .toLowerCase()
+    return haystack.includes(q)
+  })
+})
+
+const filteredRentLots = computed(() => {
+  const q = String(rentLotsQ.value || '').trim().toLowerCase()
+  if (!q) return lotsWithActiveRentUnits.value
+  return lotsWithActiveRentUnits.value.filter((row) => {
+    const haystack = [
+      row.name,
+      row.sku,
+      row.description,
+      readDescriptionField(row.description, 'Codigo interno'),
+      String(row.units_on_rent || ''),
+      String(row.quantity_available || ''),
+    ]
+      .join(' ')
+      .toLowerCase()
+    return haystack.includes(q)
+  })
+})
+
 const filteredRepair = computed(() => {
   const q = String(repairQ.value || '').trim().toLowerCase()
   if (!q) return repairLots.value
@@ -261,6 +308,8 @@ const activeTabSearch = computed({
     if (activeTab.value === 'alquiler') return rentalsQ.value
     if (activeTab.value === 'ventas') return salesQ.value
     if (activeTab.value === 'bajas') return bajasQ.value
+    if (activeTab.value === 'vendidos') return vendidosQ.value
+    if (activeTab.value === 'en_alquiler_lotes') return rentLotsQ.value
     if (activeTab.value === 'reparacion') return repairQ.value
     return ''
   },
@@ -270,6 +319,8 @@ const activeTabSearch = computed({
     else if (activeTab.value === 'alquiler') rentalsQ.value = value
     else if (activeTab.value === 'ventas') salesQ.value = value
     else if (activeTab.value === 'bajas') bajasQ.value = value
+    else if (activeTab.value === 'vendidos') vendidosQ.value = value
+    else if (activeTab.value === 'en_alquiler_lotes') rentLotsQ.value = value
     else if (activeTab.value === 'reparacion') repairQ.value = value
   },
 })
@@ -279,6 +330,9 @@ const activeTabSearchPlaceholder = computed(() => {
   if (activeTab.value === 'alquiler') return 'Buscar alquiler por cliente, teléfono, equipo, estado o fecha…'
   if (activeTab.value === 'ventas') return 'Buscar venta por ID, fecha, vendedor, total o detalle…'
   if (activeTab.value === 'bajas') return 'Buscar baja por nombre, código, fecha o detalle…'
+  if (activeTab.value === 'vendidos') return 'Buscar equipo vendido por nombre, código o detalle…'
+  if (activeTab.value === 'en_alquiler_lotes')
+    return 'Buscar lote con unidades en alquiler por nombre, código o stock…'
   if (activeTab.value === 'reparacion') return 'Buscar equipo en reparación por nombre, código, ubicación o detalle…'
   return 'Buscar…'
 })
@@ -287,6 +341,8 @@ const sortedLots = computed(() => sortRows(activeLots.value, 'lots', sortableVal
 const sortedRentals = computed(() => sortRows(filteredRentals.value, 'rentals', rentalSortValue))
 const sortedSales = computed(() => sortRows(filteredSales.value, 'sales', saleSortValue))
 const sortedBajas = computed(() => sortRows(filteredBajas.value, 'bajas', sortableValue))
+const sortedVendidos = computed(() => sortRows(filteredVendidos.value, 'vendidos', sortableValue))
+const sortedRentLots = computed(() => sortRows(filteredRentLots.value, 'rentLots', sortableValue))
 const sortedRepair = computed(() => sortRows(filteredRepair.value, 'repair', repairSortValue))
 
 function toggleTableSort(table, key) {
@@ -640,6 +696,7 @@ async function openCreateLot() {
   lotModalMode.value = 'create'
   editingLotId.value = null
   resetLotPickerSearches()
+  const custodia = isCompanyInventoryRoute.value
   lotForm.value = {
     name: '',
     sku: '',
@@ -654,10 +711,10 @@ async function openCreateLot() {
     condition: '',
     warranty_until: '',
     is_new_asset: true,
-    allow_sale: true,
+    allow_sale: custodia ? false : true,
     allow_rental: false,
     quantity_available: 1,
-    unit_price: '',
+    unit_price: custodia ? '0' : '',
     is_active: true,
     lifecycle_status: 'activo',
     adjustment_note: '',
@@ -740,6 +797,10 @@ async function submitLot() {
   try {
     const effectiveCode = generatedAssetCode.value || generateAssetCode()
     generatedAssetCode.value = effectiveCode
+    const allowSaleFinal = isCompanyInventoryRoute.value ? false : !!lotForm.value.allow_sale
+    const allowRentalFinal = isCompanyInventoryRoute.value ? false : !!lotForm.value.allow_rental
+    const unitPriceFinal = isCompanyInventoryRoute.value ? 0 : Number(String(lotForm.value.unit_price).replace(',', '.'))
+
     const detailLines = [
       ...(isCompanyInventoryRoute.value ? [] : [`Codigo interno: ${effectiveCode}`]),
       lotForm.value.asset_type ? `Tipo: ${lotForm.value.asset_type}` : '',
@@ -756,8 +817,8 @@ async function submitLot() {
           : '',
       lotForm.value.warranty_until ? `Garantia hasta: ${lotForm.value.warranty_until}` : '',
       `Condicion de compra: ${lotForm.value.is_new_asset ? 'Nuevo' : 'Usado'}`,
-      `Disponible para venta: ${lotForm.value.allow_sale ? 'Si' : 'No'}`,
-      `Disponible para alquiler: ${lotForm.value.allow_rental ? 'Si' : 'No'}`,
+      `Disponible para venta: ${allowSaleFinal ? 'Si' : 'No'}`,
+      `Disponible para alquiler: ${allowRentalFinal ? 'Si' : 'No'}`,
     ].filter(Boolean)
     const fullDescription = [lotForm.value.description?.trim() || '', ...detailLines].filter(Boolean).join('\n')
 
@@ -766,12 +827,12 @@ async function submitLot() {
       name: lotForm.value.name.trim(),
       description: fullDescription || null,
       quantity_available: Number(lotForm.value.quantity_available),
-      unit_price: Number(String(lotForm.value.unit_price).replace(',', '.')),
+      unit_price: unitPriceFinal,
       is_active: !!lotForm.value.is_active,
       serial_number: lotForm.value.serial_number?.trim() || null,
       mac_address: lotForm.value.mac_address?.trim() || null,
-      allow_sale: !!lotForm.value.allow_sale,
-      allow_rental: !!lotForm.value.allow_rental,
+      allow_sale: allowSaleFinal,
+      allow_rental: allowRentalFinal,
       tenant_company_id: lockedTenantCompanyId.value ? Number(lockedTenantCompanyId.value) : null,
     }
     if (isCompanyInventoryRoute.value) {
@@ -847,12 +908,14 @@ const assetSheetHistory = ref([])
 function lotLifecycleStatusLabel(row) {
   const s = String(row?.lifecycle_status || 'activo')
   if (s === 'baja') return 'Dado de baja'
+  if (s === 'vendido') return 'Vendido'
   if (s === 'reparacion') return 'En reparación'
   return 'Activo'
 }
 
 function availableLifecycleActions(row) {
   const s = String(row?.lifecycle_status || 'activo')
+  if (s === 'vendido') return []
   if (s === 'activo') return ['reparacion', 'baja']
   if (s === 'reparacion') return ['activo', 'baja']
   return []
@@ -1101,7 +1164,8 @@ onMounted(async () => {
   } catch {
     /* defaults en refs */
   }
-  await Promise.all([loadLots(), loadRentals(), loadSales(), loadPendingBajaRequests()])
+  const extraLoads = isCompanyInventoryRoute.value ? [] : [loadRentals(), loadSales()]
+  await Promise.all([loadLots(), loadPendingBajaRequests(), ...extraLoads])
 })
 
 onUnmounted(() => {
@@ -1166,6 +1230,7 @@ onUnmounted(() => {
             Activos
           </button>
           <button
+            v-if="!isCompanyInventoryRoute"
             type="button"
             class="rounded-xl px-3 py-2 text-sm font-medium transition"
             :class="
@@ -1178,6 +1243,7 @@ onUnmounted(() => {
             Alquiler
           </button>
           <button
+            v-if="!isCompanyInventoryRoute"
             type="button"
             class="rounded-xl px-3 py-2 text-sm font-medium transition"
             :class="
@@ -1188,6 +1254,31 @@ onUnmounted(() => {
             @click="activeTab = 'ventas'"
           >
             Historial de ventas
+          </button>
+          <button
+            type="button"
+            class="rounded-xl px-3 py-2 text-sm font-medium transition"
+            :class="
+              activeTab === 'vendidos'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
+            "
+            @click="activeTab = 'vendidos'"
+          >
+            Vendidos
+          </button>
+          <button
+            v-if="!isCompanyInventoryRoute"
+            type="button"
+            class="rounded-xl px-3 py-2 text-sm font-medium transition"
+            :class="
+              activeTab === 'en_alquiler_lotes'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
+            "
+            @click="activeTab = 'en_alquiler_lotes'"
+          >
+            En alquiler (lotes)
           </button>
           <button
             type="button"
@@ -1287,9 +1378,11 @@ onUnmounted(() => {
                   <button type="button" class="hover:text-white" @click="toggleTableSort('lots', 'location')">Ubicación{{ tableSortIndicator('lots', 'location') }}</button>
                 </th>
                 <th class="pb-2 pr-3 font-medium">
-                  <button type="button" class="hover:text-white" @click="toggleTableSort('lots', 'stock')">Stock{{ tableSortIndicator('lots', 'stock') }}</button>
+                  <button type="button" class="hover:text-white" @click="toggleTableSort('lots', 'stock')">
+                    Stock (disp. / alq. / tot.){{ tableSortIndicator('lots', 'stock') }}
+                  </button>
                 </th>
-                <th class="pb-2 pr-3 font-medium">
+                <th v-if="!isCompanyInventoryRoute" class="pb-2 pr-3 font-medium">
                   <button type="button" class="hover:text-white" @click="toggleTableSort('lots', 'price')">Precio{{ tableSortIndicator('lots', 'price') }}</button>
                 </th>
                 <th class="pb-2 pr-3 font-medium">
@@ -1312,10 +1405,30 @@ onUnmounted(() => {
                 </td>
                 <td class="py-2 pr-3 align-top text-slate-300">{{ row.created_at?.slice(0, 10) || '—' }}</td>
                 <td class="py-2 pr-3 align-top text-slate-300">{{ readDescriptionField(row.description, 'Ubicacion') || '—' }}</td>
-                <td class="py-2 pr-3 align-top">{{ row.quantity_available }}</td>
-                <td class="py-2 pr-3 align-top">{{ moneyCo(row.unit_price) }}</td>
+                <td class="py-2 pr-3 align-top text-xs leading-snug">
+                  <span class="font-medium text-emerald-300">{{ row.quantity_available }}</span>
+                  <span class="text-slate-600"> / </span>
+                  <span class="text-amber-300">{{ Number(row.units_on_rent || 0) }}</span>
+                  <span class="text-slate-600"> / </span>
+                  <span class="text-slate-200">{{
+                    row.quantity_total != null && row.quantity_total !== undefined
+                      ? row.quantity_total
+                      : Number(row.quantity_available || 0) + Number(row.units_on_rent || 0)
+                  }}</span>
+                </td>
+                <td v-if="!isCompanyInventoryRoute" class="py-2 pr-3 align-top">{{ moneyCo(row.unit_price) }}</td>
                 <td class="py-2 pr-3 align-top">
-                  <span :class="row.lifecycle_status === 'activo' ? 'text-emerald-400' : row.lifecycle_status === 'reparacion' ? 'text-amber-300' : 'text-rose-300'">
+                  <span
+                    :class="
+                      row.lifecycle_status === 'activo'
+                        ? 'text-emerald-400'
+                        : row.lifecycle_status === 'reparacion'
+                          ? 'text-amber-300'
+                          : row.lifecycle_status === 'vendido'
+                            ? 'text-sky-300'
+                            : 'text-rose-300'
+                    "
+                  >
                     {{ lotLifecycleStatusLabel(row) }}
                   </span>
                 </td>
@@ -1362,7 +1475,7 @@ onUnmounted(() => {
         </div>
       </template>
 
-      <template v-else-if="activeTab === 'alquiler'">
+      <template v-else-if="activeTab === 'alquiler' && !isCompanyInventoryRoute">
         <p v-if="rentalsError" class="mb-2 text-sm text-rose-400">{{ rentalsError }}</p>
         <div v-if="rentalsLoading" class="py-6 text-slate-500">Cargando…</div>
         <div v-else class="overflow-x-auto">
@@ -1435,7 +1548,7 @@ onUnmounted(() => {
         </div>
       </template>
 
-      <template v-else-if="activeTab === 'ventas'">
+      <template v-else-if="activeTab === 'ventas' && !isCompanyInventoryRoute">
         <p v-if="salesError" class="mb-2 text-sm text-rose-400">{{ salesError }}</p>
         <div v-if="salesLoading" class="py-6 text-slate-500">Cargando…</div>
         <div v-else class="overflow-x-auto">
@@ -1489,6 +1602,154 @@ onUnmounted(() => {
           >
             Siguiente
           </button>
+        </div>
+      </template>
+
+      <template v-else-if="activeTab === 'vendidos'">
+        <div class="overflow-x-auto">
+          <table class="min-w-[880px] w-full text-left text-sm">
+            <thead>
+              <tr class="border-b border-slate-700/80 text-slate-400">
+                <th class="pb-2 pr-3 font-medium">
+                  <button type="button" class="hover:text-white" @click="toggleTableSort('vendidos', 'code')">
+                    Código{{ tableSortIndicator('vendidos', 'code') }}
+                  </button>
+                </th>
+                <th class="pb-2 pr-3 font-medium">
+                  <button type="button" class="hover:text-white" @click="toggleTableSort('vendidos', 'name')">
+                    Activo / dispositivo{{ tableSortIndicator('vendidos', 'name') }}
+                  </button>
+                </th>
+                <th v-if="isAdminInventoryRoute" class="pb-2 pr-3 font-medium">
+                  <button type="button" class="hover:text-white" @click="toggleTableSort('vendidos', 'owner')">
+                    Titular{{ tableSortIndicator('vendidos', 'owner') }}
+                  </button>
+                </th>
+                <th class="pb-2 pr-3 font-medium">
+                  <button type="button" class="hover:text-white" @click="toggleTableSort('vendidos', 'entry_date')">
+                    Fecha de entrada{{ tableSortIndicator('vendidos', 'entry_date') }}
+                  </button>
+                </th>
+                <th class="pb-2 pr-3 font-medium">
+                  <button type="button" class="hover:text-white" @click="toggleTableSort('vendidos', 'stock')">
+                    Stock final{{ tableSortIndicator('vendidos', 'stock') }}
+                  </button>
+                </th>
+                <th class="pb-2 pr-3 font-medium">Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in sortedVendidos" :key="`vend-${row.id}`" class="border-b border-slate-800/80">
+                <td class="py-2 pr-3 align-top font-mono text-slate-300">
+                  <button type="button" class="text-sky-300 hover:text-sky-200 hover:underline" @click="openAssetSheet(row)">
+                    {{ readDescriptionField(row.description, 'Codigo interno') || row.sku || '—' }}
+                  </button>
+                </td>
+                <td class="py-2 pr-3 align-top text-white">{{ row.name }}</td>
+                <td v-if="isAdminInventoryRoute" class="py-2 pr-3 align-top text-slate-300">
+                  {{ row.owner?.nombre || '—' }}
+                </td>
+                <td class="py-2 pr-3 align-top text-slate-300">{{ row.created_at?.slice(0, 10) || '—' }}</td>
+                <td class="py-2 pr-3 align-top text-xs">
+                  <span class="text-emerald-300">{{ row.quantity_available }}</span>
+                  <span class="text-slate-600"> / </span>
+                  <span class="text-amber-300">{{ Number(row.units_on_rent || 0) }}</span>
+                  <span class="text-slate-600"> / </span>
+                  <span class="text-slate-200">{{
+                    row.quantity_total != null && row.quantity_total !== undefined
+                      ? row.quantity_total
+                      : Number(row.quantity_available || 0) + Number(row.units_on_rent || 0)
+                  }}</span>
+                </td>
+                <td class="py-2 pr-3 align-top text-sky-300">Vendido</td>
+              </tr>
+              <tr v-if="!sortedVendidos.length">
+                <td :colspan="isAdminInventoryRoute ? 6 : 5" class="py-3 text-slate-500">
+                  No hay equipos marcados como vendidos en esta vista.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
+      <template v-else-if="activeTab === 'en_alquiler_lotes' && !isCompanyInventoryRoute">
+        <div class="overflow-x-auto">
+          <table class="min-w-[920px] w-full text-left text-sm">
+            <thead>
+              <tr class="border-b border-slate-700/80 text-slate-400">
+                <th class="pb-2 pr-3 font-medium">
+                  <button type="button" class="hover:text-white" @click="toggleTableSort('rentLots', 'code')">
+                    Código{{ tableSortIndicator('rentLots', 'code') }}
+                  </button>
+                </th>
+                <th class="pb-2 pr-3 font-medium">
+                  <button type="button" class="hover:text-white" @click="toggleTableSort('rentLots', 'name')">
+                    Activo / dispositivo{{ tableSortIndicator('rentLots', 'name') }}
+                  </button>
+                </th>
+                <th v-if="isAdminInventoryRoute" class="pb-2 pr-3 font-medium">
+                  <button type="button" class="hover:text-white" @click="toggleTableSort('rentLots', 'owner')">
+                    Titular{{ tableSortIndicator('rentLots', 'owner') }}
+                  </button>
+                </th>
+                <th class="pb-2 pr-3 font-medium">
+                  <button type="button" class="hover:text-white" @click="toggleTableSort('rentLots', 'location')">
+                    Ubicación{{ tableSortIndicator('rentLots', 'location') }}
+                  </button>
+                </th>
+                <th class="pb-2 pr-3 font-medium">
+                  <button type="button" class="hover:text-white" @click="toggleTableSort('rentLots', 'stock')">
+                    Stock (disp. / alq. / tot.){{ tableSortIndicator('rentLots', 'stock') }}
+                  </button>
+                </th>
+                <th class="pb-2 pr-3 font-medium">Estado ciclo</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in sortedRentLots" :key="`rentlot-${row.id}`" class="border-b border-slate-800/80">
+                <td class="py-2 pr-3 align-top font-mono text-slate-300">
+                  <button type="button" class="text-sky-300 hover:text-sky-200 hover:underline" @click="openAssetSheet(row)">
+                    {{ readDescriptionField(row.description, 'Codigo interno') || row.sku || '—' }}
+                  </button>
+                </td>
+                <td class="py-2 pr-3 align-top text-white">{{ row.name }}</td>
+                <td v-if="isAdminInventoryRoute" class="py-2 pr-3 align-top text-slate-300">
+                  {{ row.owner?.nombre || '—' }}
+                </td>
+                <td class="py-2 pr-3 align-top text-slate-300">{{ readDescriptionField(row.description, 'Ubicacion') || '—' }}</td>
+                <td class="py-2 pr-3 align-top text-xs leading-snug">
+                  <span class="font-medium text-emerald-300">{{ row.quantity_available }}</span>
+                  <span class="text-slate-600"> / </span>
+                  <span class="font-medium text-amber-300">{{ Number(row.units_on_rent || 0) }}</span>
+                  <span class="text-slate-600"> / </span>
+                  <span class="text-slate-200">{{
+                    row.quantity_total != null && row.quantity_total !== undefined
+                      ? row.quantity_total
+                      : Number(row.quantity_available || 0) + Number(row.units_on_rent || 0)
+                  }}</span>
+                </td>
+                <td class="py-2 pr-3 align-top">
+                  <span
+                    :class="
+                      row.lifecycle_status === 'activo'
+                        ? 'text-emerald-400'
+                        : row.lifecycle_status === 'reparacion'
+                          ? 'text-amber-300'
+                          : 'text-rose-300'
+                    "
+                  >
+                    {{ lotLifecycleStatusLabel(row) }}
+                  </span>
+                </td>
+              </tr>
+              <tr v-if="!sortedRentLots.length">
+                <td :colspan="isAdminInventoryRoute ? 6 : 5" class="py-3 text-slate-500">
+                  No hay lotes con unidades actualmente en alquiler.
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </template>
 
@@ -2022,7 +2283,7 @@ onUnmounted(() => {
               <p v-if="!filteredConditionOptions.length" class="px-3 py-2 text-xs text-slate-500">Sin coincidencias.</p>
             </div>
           </div>
-          <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div v-if="!isCompanyInventoryRoute" class="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <label class="flex items-center gap-2 text-sm text-slate-300">
               <input v-model="lotForm.allow_sale" type="checkbox" class="rounded border-slate-500" />
               Etiqueta para venta
@@ -2032,6 +2293,12 @@ onUnmounted(() => {
               Etiqueta para alquiler
             </label>
           </div>
+          <p
+            v-else
+            class="rounded-lg border border-slate-600/80 bg-slate-900/45 px-3 py-2 text-xs leading-relaxed text-slate-400"
+          >
+            Inventario de custodia por empresa: sin precio de lista ni habilitación comercial de venta/alquiler desde esta vista.
+          </p>
           <label class="block text-sm">
             <span class="text-slate-400">Garantía hasta</span>
             <input
@@ -2066,7 +2333,7 @@ onUnmounted(() => {
               placeholder="Ej. inventario físico, devolución…"
             />
           </label>
-          <label class="block text-sm">
+          <label v-if="!isCompanyInventoryRoute" class="block text-sm">
             <span class="text-slate-400">Precio unitario</span>
             <input
               v-model="lotForm.unit_price"

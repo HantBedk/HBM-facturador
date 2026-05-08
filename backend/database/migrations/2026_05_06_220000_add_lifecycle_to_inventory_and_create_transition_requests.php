@@ -61,20 +61,37 @@ return new class extends Migration
         if (! Schema::hasTable('inventory_lifecycle_transition_requests')) {
             Schema::create('inventory_lifecycle_transition_requests', function (Blueprint $table) {
                 $table->id();
-                $table->foreignId('inventory_lot_id')->constrained('inventory_lots')->cascadeOnDelete();
-                $table->foreignId('tenant_company_id')->nullable()->constrained('companies')->nullOnDelete();
-                $table->foreignId('requested_by_user_id')->constrained('users')->cascadeOnUpdate()->restrictOnDelete();
+                $table->unsignedBigInteger('inventory_lot_id');
+                $table->unsignedBigInteger('tenant_company_id')->nullable();
+                $table->unsignedBigInteger('requested_by_user_id');
                 $table->string('target_status', 24);
                 $table->string('status', 24)->default('pending');
                 $table->text('reason');
                 $table->unsignedTinyInteger('required_approvals')->default(2);
                 $table->timestamp('resolved_at')->nullable();
-                $table->foreignId('resolved_by_user_id')->nullable()->constrained('users')->nullOnDelete();
+                $table->unsignedBigInteger('resolved_by_user_id')->nullable();
                 $table->text('resolution_note')->nullable();
                 $table->timestamps();
 
                 $table->index(['inventory_lot_id', 'status'], 'inv_lifecycle_req_lot_status_idx');
                 $table->index(['status', 'target_status'], 'inv_lifecycle_req_status_target_idx');
+                $table->foreign('inventory_lot_id', 'inv_lifecycle_req_lot_fk')
+                    ->references('id')
+                    ->on('inventory_lots')
+                    ->cascadeOnDelete();
+                $table->foreign('tenant_company_id', 'inv_lifecycle_req_tenant_fk')
+                    ->references('id')
+                    ->on('companies')
+                    ->nullOnDelete();
+                $table->foreign('requested_by_user_id', 'inv_lifecycle_req_requested_fk')
+                    ->references('id')
+                    ->on('users')
+                    ->cascadeOnUpdate()
+                    ->restrictOnDelete();
+                $table->foreign('resolved_by_user_id', 'inv_lifecycle_req_resolved_fk')
+                    ->references('id')
+                    ->on('users')
+                    ->nullOnDelete();
             });
         }
 

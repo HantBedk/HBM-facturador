@@ -14,7 +14,7 @@ class AdminCompanyRecurringServiceApiTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function seed(): array
+    private function seedData(): array
     {
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
         $company = Company::query()->create([
@@ -35,7 +35,7 @@ class AdminCompanyRecurringServiceApiTest extends TestCase
 
     public function test_admin_can_list_create_update_and_delete_recurring_lines(): void
     {
-        $s = $this->seed();
+        $s = $this->seedData();
         Sanctum::actingAs($s['admin']);
 
         $list = $this->getJson('/api/admin/companies/'.$s['company']->id.'/recurring-services');
@@ -71,7 +71,7 @@ class AdminCompanyRecurringServiceApiTest extends TestCase
 
     public function test_update_returns_404_when_recurring_belongs_to_other_company(): void
     {
-        $s = $this->seed();
+        $s = $this->seedData();
         $other = Company::query()->create([
             'nombre' => 'Otra',
             'factura_sigla' => 'OTR',

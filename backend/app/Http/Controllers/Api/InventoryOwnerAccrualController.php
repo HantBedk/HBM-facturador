@@ -29,6 +29,7 @@ class InventoryOwnerAccrualController extends Controller
 
         $q = InventorySaleLine::query()
             ->join('inventory_sales', 'inventory_sales.id', '=', 'inventory_sale_lines.inventory_sale_id')
+            ->whereNull('inventory_sales.deleted_at')
             ->when($validated['from'] ?? null, fn ($q, $d) => $q->whereDate('inventory_sales.created_at', '>=', $d))
             ->when($validated['to'] ?? null, fn ($q, $d) => $q->whereDate('inventory_sales.created_at', '<=', $d))
             ->when(
