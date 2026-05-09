@@ -19,7 +19,19 @@ class ServiceResource extends JsonResource
             'id' => $this->id,
             'code' => $this->code,
             'company_id' => $this->company_id,
+            'inventory_lot_id' => $this->inventory_lot_id,
             'user_id' => $this->user_id,
+            'kind' => $this->kind ?? Service::KIND_SERVICIO,
+            'inventory_lot' => $this->when(
+                $this->relationLoaded('inventoryLot') && $this->inventoryLot,
+                fn () => [
+                    'id' => $this->inventoryLot->id,
+                    'name' => $this->inventoryLot->name,
+                    'internal_code' => $this->inventoryLot->internal_code,
+                    'tenant_company_id' => $this->inventoryLot->tenant_company_id,
+                    'lifecycle_status' => (string) ($this->inventoryLot->lifecycle_status ?? ''),
+                ]
+            ),
             'catalog_id' => $this->catalog_id,
             'client_name' => $this->client_name,
             'client_telefono' => $this->client_telefono,

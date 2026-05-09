@@ -55,10 +55,11 @@ class ServiceCatalogTest extends TestCase
         $emp = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
         Sanctum::actingAs($emp);
 
-        $this->getJson('/api/service-catalog/active')
-            ->assertOk()
-            ->assertHeader('Cache-Control', 'private, no-store, must-revalidate')
-            ->assertJsonCount(1, 'data');
+        $res = $this->getJson('/api/service-catalog/active')->assertOk()->assertJsonCount(1, 'data');
+        $cc = (string) $res->headers->get('Cache-Control');
+        $parts = array_values(array_filter(array_map('trim', explode(',', $cc))));
+        sort($parts);
+        $this->assertSame(['must-revalidate', 'no-store', 'private'], $parts);
     }
 
     public function test_admin_can_crud_catalog_and_service_stores_catalog_id(): void
@@ -539,7 +540,7 @@ class ServiceCatalogTest extends TestCase
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
         Sanctum::actingAs($admin);
 
-        $lineDesc = 'Equipo Router (SKU-1), cantidad 1, precio unitario fijo 50000.00.';
+        $lineDesc = 'Equipo Router (INV-REF-1), cantidad 1, precio unitario fijo 50000.00.';
         $r = $this->postJson('/api/services', [
             'company_id' => $company->id,
             'client_name' => 'Cliente venta',
@@ -566,7 +567,7 @@ class ServiceCatalogTest extends TestCase
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
         Sanctum::actingAs($admin);
 
-        $lineDesc = 'Equipo Router (SKU-1), cantidad 1, precio unitario fijo 50000.00.';
+        $lineDesc = 'Equipo Router (INV-REF-1), cantidad 1, precio unitario fijo 50000.00.';
         $r = $this->postJson('/api/services', [
             'company_id' => $company->id,
             'client_name' => 'Cliente venta',

@@ -4,8 +4,18 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
 import { archiveService, fetchService, rejectServiceAssignment, updateService } from '@/services/servicesApi.js'
+import { createInvoice } from '@/services/invoicesApi.js'
 import ServiceCorrectionFields from '@/components/services/ServiceCorrectionFields.vue'
 import { useUiDialogStore } from '@/stores/uiDialog'
+import { moneyCOPIntegerOrDash as money } from '@/utils/moneyFormatCo.js'
+import {
+  formatDateLongEsCo as formatDateLong,
+  lineBilledAmount,
+  lineCompanyMargin,
+  lineTechnicianAmount,
+  numMoneyBase,
+  serviceInventoryAssetDetailTo,
+} from './serviceDetailHelpers.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,6 +26,7 @@ const service = ref(null)
 const loading = ref(true)
 const error = ref('')
 const saving = ref(false)
+const creatingMaintenanceInvoice = ref(false)
 const fieldErrors = ref({})
 const saveError = ref('')
 
@@ -64,23 +75,6 @@ const statusLabel = computed(() => {
   return s || '—'
 })
 
-function money(v) {
-  const n = Number(v)
-  if (Number.isNaN(n)) return '—'
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
-}
-
-function formatDateLong(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso + (iso.length <= 10 ? 'T12:00:00' : ''))
-  if (Number.isNaN(d.getTime())) return iso
-  return new Intl.DateTimeFormat('es-CO', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  }).format(d)
-}
-
 function syncEditFormFromService() {
   const s = service.value
   if (!s) return
@@ -108,29 +102,14 @@ const serviceItems = computed(() =>
   Array.isArray(service.value?.items) ? service.value.items : []
 )
 
+const isMaintenanceService = computed(() => String(service.value?.kind || '') === 'mantenimiento')
+
+/** Enlace a hoja de vida del equipo vinculado (custodia incluye query para técnico). */
+const inventoryAssetDetailTo = computed(() => serviceInventoryAssetDetailTo(service.value, isAdmin.value))
+
 const showLiquidacionBlock = computed(
   () => isAdmin.value && service.value != null && serviceItems.value.length > 0
 )
-
-function numMoneyBase(v) {
-  const n = Number(v)
-  return Number.isNaN(n) ? 0 : n
-}
-
-function lineBilledAmount(it) {
-  return numMoneyBase(it.amount)
-}
-
-function lineTechnicianAmount(it) {
-  if (it.technician_line_amount != null && String(it.technician_line_amount).trim() !== '') {
-    return numMoneyBase(it.technician_line_amount)
-  }
-  return lineBilledAmount(it)
-}
-
-function lineCompanyMargin(it) {
-  return lineBilledAmount(it) - lineTechnicianAmount(it)
-}
 
 /** Totales guardados en servidor (conciliación técnico vs factura). */
 const storedBilledTotal = computed(() => numMoneyBase(service.value?.amount))
@@ -145,6 +124,41 @@ const storedTechnicianTotal = computed(() => {
 const companyMarginTotal = computed(() => {
   if (storedTechnicianTotal.value == null) return null
   return storedBilledTotal.value - storedTechnicianTotal.value
+})
+
+/** Periodo contable del servicio (mes de `service_date`), alineado con facturación backend. */
+const maintenanceInvoicePeriod = computed(() => {
+  const iso = service.value?.service_date
+  if (!iso || typeof iso !== 'string') return null
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(iso.trim())
+  if (!m) return null
+  return { year: Number(m[1]), month: Number(m[2]) }
+})
+
+const hasUnsavedCorrections = computed(() => {
+  if (!canAdminEdit.value || !service.value) return false
+  const s = service.value
+  const f = editForm.value
+  const norm = (v) => String(v ?? '').trim()
+  const draftAmt = Number(f.amount)
+  const savedAmt = numMoneyBase(s.amount)
+  const amtDiff = Number.isNaN(draftAmt) || Math.abs(draftAmt - savedAmt) > 0.009
+  return (
+    norm(f.client_name) !== norm(s.client_name) ||
+    norm(f.service_type) !== norm(s.service_type) ||
+    norm(f.description) !== norm(s.description) ||
+    amtDiff
+  )
+})
+
+const canCreateMaintenanceInvoiceDraft = computed(() => {
+  if (!isAdmin.value || !isMaintenanceService.value || !service.value) return false
+  const s = service.value
+  if (s.invoiced || (s.status !== 'activo' && s.status !== 'corregido')) return false
+  if (!s.company_id || !maintenanceInvoicePeriod.value) return false
+  if (storedBilledTotal.value < 0.01) return false
+  if (hasUnsavedCorrections.value) return false
+  return true
 })
 
 function validateLocal() {
@@ -223,6 +237,43 @@ async function onRejectAssignment() {
       title: 'Error',
       message: e.data?.message || e.message || 'No se pudo rechazar.',
     })
+  }
+}
+
+async function onCreateMaintenanceInvoiceDraft() {
+  const s = service.value
+  const per = maintenanceInvoicePeriod.value
+  if (!s || !per || !canCreateMaintenanceInvoiceDraft.value) return
+  const ok = await uiDialog.confirm({
+    title: 'Crear borrador de factura',
+    message:
+      `Se creará un borrador del periodo ${per.month}/${per.year} incluyendo solo el mantenimiento ${s.code}. ` +
+      'Podrá revisarlo y añadir más servicios en Facturas si aplica.',
+    confirmLabel: 'Crear borrador',
+    cancelLabel: 'Cancelar',
+  })
+  if (!ok) return
+  creatingMaintenanceInvoice.value = true
+  try {
+    const inv = await createInvoice({
+      company_id: s.company_id,
+      period_year: per.year,
+      period_month: per.month,
+      service_ids: [s.id],
+    })
+    await router.push({ name: 'admin-factura-detalle', params: { id: String(inv.id) } })
+  } catch (e) {
+    const parts = []
+    if (e.data?.errors && typeof e.data.errors === 'object') {
+      for (const v of Object.values(e.data.errors)) {
+        if (Array.isArray(v)) parts.push(...v)
+        else if (v != null) parts.push(String(v))
+      }
+    }
+    const msg = parts.length ? parts.join('\n') : e.message || 'No se pudo crear el borrador.'
+    await uiDialog.alert({ title: 'No se pudo crear el borrador', message: msg })
+  } finally {
+    creatingMaintenanceInvoice.value = false
   }
 }
 
@@ -327,6 +378,23 @@ async function onEmpleadoArchive() {
               <dt>Tipo de servicio</dt>
               <dd>{{ service.service_type || '—' }}</dd>
             </div>
+            <div v-if="isMaintenanceService && service.inventory_lot" class="wide">
+              <dt>Equipo (inventario)</dt>
+              <dd>
+                <RouterLink v-if="inventoryAssetDetailTo" class="link-inv" :to="inventoryAssetDetailTo">
+                  {{ service.inventory_lot.name || 'Activo' }}
+                  <span v-if="service.inventory_lot.internal_code" class="muted">
+                    · {{ service.inventory_lot.internal_code }}
+                  </span>
+                </RouterLink>
+                <template v-else>
+                  {{ service.inventory_lot.name || '—' }}
+                  <span v-if="service.inventory_lot.internal_code" class="muted">
+                    · {{ service.inventory_lot.internal_code }}
+                  </span>
+                </template>
+              </dd>
+            </div>
             <div v-if="service.catalog?.name" class="wide">
               <dt>Referencia catálogo</dt>
               <dd>{{ service.catalog.name }}</dd>
@@ -394,6 +462,26 @@ async function onEmpleadoArchive() {
                 <dd>
                   {{ service.company?.nombre || '—' }}
                   <span v-if="service.company?.nit" class="muted">· NIT {{ service.company.nit }}</span>
+                </dd>
+              </div>
+              <div v-if="isMaintenanceService && service.inventory_lot" class="wide">
+                <dt>Equipo (inventario)</dt>
+                <dd>
+                  <RouterLink v-if="inventoryAssetDetailTo" class="link-inv" :to="inventoryAssetDetailTo">
+                    {{ service.inventory_lot.name || 'Activo' }}
+                    <span v-if="service.inventory_lot.internal_code" class="muted">
+                      · {{ service.inventory_lot.internal_code }}
+                    </span>
+                  </RouterLink>
+                  <template v-else>
+                    {{ service.inventory_lot.name || '—' }}
+                    <span v-if="service.inventory_lot.internal_code" class="muted">
+                      · {{ service.inventory_lot.internal_code }}
+                    </span>
+                  </template>
+                  <span v-if="service.inventory_lot.lifecycle_status" class="muted">
+                    · Estado: {{ service.inventory_lot.lifecycle_status }}
+                  </span>
                 </dd>
               </div>
               <div class="wide">
@@ -540,6 +628,32 @@ async function onEmpleadoArchive() {
               Sin líneas detalladas en este registro; solo hay un total único (factura = referencia guardada).
             </p>
             <p class="aside-company">{{ service.company?.nombre || '—' }}</p>
+            <div v-if="isMaintenanceService" class="aside-invoice">
+              <template v-if="canCreateMaintenanceInvoiceDraft">
+                <button
+                  type="button"
+                  class="btn primary aside-invoice-btn"
+                  :disabled="creatingMaintenanceInvoice"
+                  @click="onCreateMaintenanceInvoiceDraft"
+                >
+                  {{ creatingMaintenanceInvoice ? 'Creando borrador…' : 'Crear borrador de factura' }}
+                </button>
+                <p class="aside-invoice-hint muted">
+                  Usa el periodo de la fecha del servicio ({{ maintenanceInvoicePeriod?.month }}/{{
+                    maintenanceInvoicePeriod?.year
+                  }}).
+                </p>
+              </template>
+              <template v-else-if="!service.invoiced && (service.status === 'activo' || service.status === 'corregido')">
+                <p v-if="hasUnsavedCorrections" class="aside-invoice-hint muted">
+                  Guarde las correcciones (bloque B) antes de generar el borrador, para que el importe coincida con lo
+                  facturado.
+                </p>
+                <p v-else-if="storedBilledTotal < 0.01" class="aside-invoice-hint muted">
+                  Defina un importe mayor a cero (bloque B) para poder incluir este mantenimiento en una factura.
+                </p>
+              </template>
+            </div>
           </div>
         </aside>
       </template>
@@ -568,6 +682,15 @@ async function onEmpleadoArchive() {
   text-decoration: none;
   font-size: 0.9rem;
   margin-bottom: 0.35rem;
+}
+
+.link-inv {
+  color: #7dd3fc;
+  text-decoration: none;
+  font-weight: 600;
+}
+.link-inv:hover {
+  text-decoration: underline;
 }
 
 h1 {
@@ -786,6 +909,23 @@ h1 {
   margin: 0.65rem 0 0;
   font-size: 0.85rem;
   color: #94a3b8;
+}
+
+.aside-invoice {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.aside-invoice-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.aside-invoice-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
 }
 
 .block-title {

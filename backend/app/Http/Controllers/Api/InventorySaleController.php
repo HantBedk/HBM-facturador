@@ -31,7 +31,7 @@ class InventorySaleController extends Controller
                 'tenantCompany:id,nombre,nit',
                 'soldBy:id,nombre,correo',
                 'lines.owner:id,nombre',
-                'lines.lot:id,name,sku',
+                'lines.lot:id,name,sku,description,serial_number',
             ])
             ->whereNull('deleted_at')
             ->orderByDesc('id');
@@ -106,6 +106,11 @@ class InventorySaleController extends Controller
                         'lines' => ["El producto «{$lot->name}» está inactivo."],
                     ]);
                 }
+                if ($lot->tenant_company_id !== null) {
+                    throw ValidationException::withMessages([
+                        'lines' => ["El producto «{$lot->name}» pertenece a inventario de empresa y no puede venderse."],
+                    ]);
+                }
                 if (($lot->lifecycle_status ?? InventoryLot::LIFECYCLE_ACTIVO) !== InventoryLot::LIFECYCLE_ACTIVO) {
                     throw ValidationException::withMessages([
                         'lines' => ["El producto «{$lot->name}» no está disponible para venta (estado ciclo de vida)."],
@@ -171,7 +176,7 @@ class InventorySaleController extends Controller
                 'tenantCompany:id,nombre,nit',
                 'soldBy:id,nombre,correo',
                 'lines.owner:id,nombre',
-                'lines.lot:id,name,sku',
+                'lines.lot:id,name,sku,description,serial_number',
             ]);
         });
         app(PanelNotificationDispatcher::class)->notifyAdmins(

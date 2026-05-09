@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\Company;
 use App\Models\InventoryLot;
 use App\Models\User;
+use App\Support\InventoryLotWarrantyLabels;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
@@ -31,6 +33,7 @@ class PublicCompanyInventoryTest extends TestCase
             'owner_user_id' => User::factory()->create()->id,
             'tenant_company_id' => $company->id,
             'sku' => 'TST-1',
+            'serial_number' => 'SN-PUB-1',
             'name' => 'Router test',
             'description' => 'test',
             'quantity_available' => 2,
@@ -39,6 +42,11 @@ class PublicCompanyInventoryTest extends TestCase
             'lifecycle_status' => InventoryLot::LIFECYCLE_ACTIVO,
             'allow_sale' => false,
             'allow_rental' => false,
+            'warranty_until' => '2027-06-01',
+            'purchase_date' => '2025-01-15',
+            'custody_received_at' => '2025-02-01',
+            'responsible_name' => 'Ana López',
+            'responsible_role' => 'TI',
         ]);
 
         $this->postJson('/api/public/company-inventory/otp/request', [
@@ -69,7 +77,71 @@ class PublicCompanyInventoryTest extends TestCase
         $list->assertJsonCount(1, 'data');
         $row = $list->json('data.0');
         $this->assertSame('Router test', $row['name']);
+        $this->assertSame('SN-PUB-1', $row['serial_number']);
+        $this->assertSame('test', $row['description']);
+        $this->assertSame('2025-01-15', $row['purchase_date']);
+        $this->assertSame('2025-02-01', $row['custody_received_at']);
+        $this->assertSame('Ana López', $row['responsible_name']);
+        $this->assertSame('TI', $row['responsible_role']);
+        $this->assertSame('2027-06-01', $row['warranty_until']);
+        $this->assertSame(InventoryLotWarrantyLabels::SEMAPHORE_VIGENTE, $row['warranty_semaphore']);
         $this->assertArrayNotHasKey('unit_price', $row);
+        $this->assertArrayNotHasKey('sku', $row);
+        $this->assertSame('TST-1', $row['internal_code']);
+    }
+
+    public function test_public_lots_warranty_semaphore_por_vencer_within_30_days(): void
+    {
+        Mail::fake();
+        Cache::flush();
+        Carbon::setTestNow(Carbon::parse('2026-05-10', config('app.timezone')));
+        try {
+            $company = Company::query()->create([
+                'nombre' => 'Empresa Portal GAR',
+                'factura_sigla' => 'EPG',
+                'nit' => '901888777',
+                'estado' => Company::ESTADO_ACTIVO,
+                'correo' => 'portal@epg.test',
+            ]);
+
+            InventoryLot::query()->create([
+                'owner_user_id' => User::factory()->create()->id,
+                'tenant_company_id' => $company->id,
+                'sku' => 'EPG-1',
+                'name' => 'Equipo por vencer',
+                'description' => null,
+                'quantity_available' => 1,
+                'unit_price' => '0.00',
+                'is_active' => true,
+                'lifecycle_status' => InventoryLot::LIFECYCLE_ACTIVO,
+                'allow_sale' => false,
+                'allow_rental' => false,
+                'warranty_until' => '2026-05-25',
+            ]);
+
+            $this->postJson('/api/public/company-inventory/otp/request', [
+                'nit' => '901888777',
+                'email' => 'portal@epg.test',
+            ])->assertOk();
+
+            $cacheKey = 'company_inv_otp:'.hash('sha256', '901888777|portal@epg.test|'.config('app.key'));
+            $otp = Cache::get($cacheKey)['otp'];
+
+            $token = (string) $this->postJson('/api/public/company-inventory/otp/verify', [
+                'nit' => '901888777',
+                'email' => 'portal@epg.test',
+                'code' => $otp,
+            ])->assertOk()->json('access_token');
+
+            $row = $this->withHeader('Authorization', 'Bearer '.$token)
+                ->getJson('/api/public/company-inventory/lots')
+                ->assertOk()
+                ->json('data.0');
+
+            $this->assertSame(InventoryLotWarrantyLabels::SEMAPHORE_POR_VENCER, $row['warranty_semaphore']);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_verify_otp_rejects_invalid_code(): void

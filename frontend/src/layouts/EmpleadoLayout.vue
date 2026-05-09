@@ -135,6 +135,13 @@ async function salir() {
           >
             Servicio
           </RouterLink>
+          <RouterLink
+            to="/empleado/mantenimientos"
+            class="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-800/80 hover:text-sky-300"
+            :class="{ 'bg-slate-800/60 text-sky-300': route.path.startsWith('/empleado/mantenimientos') || route.path === '/empleado/registro-mantenimiento' }"
+          >
+            Mantenimiento
+          </RouterLink>
         </nav>
         <RouterLink
           v-if="showPanelLink"

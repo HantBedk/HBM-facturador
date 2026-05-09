@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\InventoryLotInternalCode;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -24,6 +25,19 @@ class InventoryLot extends Model
 
     public const LIFECYCLE_BAJA = 'baja';
 
+    public const REPAIR_DAMAGE_HARDWARE = 'hardware';
+
+    public const REPAIR_DAMAGE_SOFTWARE = 'software';
+
+    /** Columna `sku` se mantiene en BD como referencia interna; no se expone en JSON. */
+    protected $hidden = [
+        'sku',
+    ];
+
+    protected $appends = [
+        'internal_code',
+    ];
+
     protected $fillable = [
         'owner_user_id',
         'tenant_company_id',
@@ -33,6 +47,19 @@ class InventoryLot extends Model
         'fingerprint_hash',
         'name',
         'description',
+        'asset_type',
+        'asset_subtype',
+        'brand',
+        'model',
+        'site_label',
+        'area_label',
+        'physical_condition',
+        'repair_damage_kind',
+        'warranty_until',
+        'purchase_date',
+        'custody_received_at',
+        'responsible_name',
+        'responsible_role',
         'quantity_available',
         'unit_price',
         'is_active',
@@ -57,6 +84,9 @@ class InventoryLot extends Model
             'decommissioned_at' => 'datetime',
             'allow_sale' => 'boolean',
             'allow_rental' => 'boolean',
+            'warranty_until' => 'date',
+            'purchase_date' => 'date',
+            'custody_received_at' => 'date',
         ];
     }
 
@@ -85,9 +115,24 @@ class InventoryLot extends Model
         return $this->hasMany(InventoryMovement::class);
     }
 
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(InventoryLotAttachment::class, 'inventory_lot_id')->orderByDesc('id');
+    }
+
     public function lifecycleRequests(): HasMany
     {
         return $this->hasMany(InventoryLifecycleTransitionRequest::class, 'inventory_lot_id');
+    }
+
+    public function getInternalCodeAttribute(): string
+    {
+        return InventoryLotInternalCode::resolve(
+            $this->description,
+            $this->sku,
+            (int) $this->id,
+            $this->serial_number,
+        );
     }
 
     /**

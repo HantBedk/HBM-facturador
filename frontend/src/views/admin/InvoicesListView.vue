@@ -12,6 +12,8 @@ import {
   patchInvoiceStatus,
 } from '@/services/invoicesApi.js'
 import { tableAriaSort, tableSortIndicator } from '@/utils/tableSort.js'
+import { moneyCOPIntegerOrDash as money } from '@/utils/moneyFormatCo.js'
+import { canPayInvoiceFromList as canPayFromList, invoiceSaldoDisplay } from './invoicesListHelpers.js'
 
 const companies = ref([])
 const rows = ref([])
@@ -219,10 +221,6 @@ function flushSearchFromInput() {
   load()
 }
 
-function canPayFromList(inv) {
-  return inv.status === 'enviada' || inv.status === 'parcialmente_pagada'
-}
-
 const sendingInvoiceId = ref(null)
 
 const invoiceListStatusBusy = computed(() => sendingInvoiceId.value != null)
@@ -243,18 +241,6 @@ async function onSendFromList(inv) {
   } finally {
     sendingInvoiceId.value = null
   }
-}
-
-/** Saldo pendiente de cobro; en borrador/aprobada no aplica en el listado. */
-function invoiceSaldoDisplay(inv) {
-  if (!['enviada', 'parcialmente_pagada', 'pagada'].includes(inv.status)) {
-    return '—'
-  }
-  const b = inv.financial?.balance
-  if (b === undefined || b === null) {
-    return '—'
-  }
-  return money(b)
 }
 
 const payModalOpen = ref(false)
@@ -369,12 +355,6 @@ function onGlobalEscape(ev) {
     ev.preventDefault()
     closePayModal()
   }
-}
-
-function money(v) {
-  const n = Number(v)
-  if (Number.isNaN(n)) return '—'
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
 }
 
 const pageSummary = computed(() => {

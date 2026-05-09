@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\AuthorizesInventoryLotEmpleadoCustody;
 use App\Http\Controllers\Controller;
 use App\Models\Company;
 use App\Models\InventoryAuditEvent;
@@ -12,7 +13,9 @@ use App\Models\PanelNotification;
 use App\Models\InventorySaleLine;
 use App\Models\User;
 use App\Support\InventoryInternalHolders;
+use App\Support\InventoryLotInternalCode;
 use App\Support\Pagination;
+use App\Services\InventoryLotCsvImportService;
 use App\Services\PanelNotificationDispatcher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,15 +27,35 @@ use Illuminate\Validation\ValidationException;
 
 class InventoryLotController extends Controller
 {
+    use AuthorizesInventoryLotEmpleadoCustody;
+
     public function index(Request $request): AnonymousResourceCollection
     {
+        $request->validate([
+            'created_from' => ['nullable', 'date'],
+            'created_to' => ['nullable', 'date', 'after_or_equal:created_from'],
+            'sort' => ['nullable', 'string', 'in:id,created_at,name,quantity_available,serial_number,brand,asset_type,site_label,warranty_until'],
+            'sort_dir' => ['nullable', 'string', 'in:asc,desc'],
+            'asset_type' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'brand' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'site_label' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'physical_condition' => ['sometimes', 'nullable', 'string', 'max:120'],
+        ]);
+
         $user = $request->user();
         $q = InventoryLot::query()->with(['owner:id,nombre,correo,rol', 'tenantCompany:id,nombre,nit']);
         $tenantCompanyId = $this->tenantCompanyIdFromRequest($request);
 
         if (! $user->isAdminEquipo()) {
-            $q->where('lifecycle_status', InventoryLot::LIFECYCLE_ACTIVO);
-            $q->where('owner_user_id', $user->id);
+            if ($request->boolean('for_maintenance') && $tenantCompanyId !== null) {
+                if (! Company::query()->whereKey($tenantCompanyId)->where('estado', Company::ESTADO_ACTIVO)->exists()) {
+                    abort(403, 'Empresa no disponible para este contexto.');
+                }
+                $q->where('lifecycle_status', InventoryLot::LIFECYCLE_ACTIVO);
+            } else {
+                $q->where('lifecycle_status', InventoryLot::LIFECYCLE_ACTIVO);
+                $q->where('owner_user_id', $user->id);
+            }
         } elseif ($request->boolean('active_only')) {
             $q->where('lifecycle_status', InventoryLot::LIFECYCLE_ACTIVO);
         }
@@ -45,16 +68,50 @@ class InventoryLotController extends Controller
         }
         $this->applyTenantContextFilter($q, $request, $tenantCompanyId);
 
+        if ($request->filled('asset_type')) {
+            $q->where('asset_type', 'like', '%'.addcslashes($request->string('asset_type')->toString(), '%_\\').'%');
+        }
+        if ($request->filled('brand')) {
+            $q->where('brand', 'like', '%'.addcslashes($request->string('brand')->toString(), '%_\\').'%');
+        }
+        if ($request->filled('site_label')) {
+            $q->where('site_label', 'like', '%'.addcslashes($request->string('site_label')->toString(), '%_\\').'%');
+        }
+        if ($request->filled('physical_condition')) {
+            $q->where('physical_condition', 'like', '%'.addcslashes($request->string('physical_condition')->toString(), '%_\\').'%');
+        }
+
         if ($request->filled('q')) {
             $raw = $request->string('q')->toString();
             $term = '%'.addcslashes($raw, '%_\\').'%';
             $q->where(function ($sub) use ($term) {
                 $sub->where('name', 'like', $term)
-                    ->orWhere('sku', 'like', $term);
+                    ->orWhere('serial_number', 'like', $term)
+                    ->orWhere('mac_address', 'like', $term)
+                    ->orWhere('description', 'like', $term)
+                    ->orWhere('asset_type', 'like', $term)
+                    ->orWhere('asset_subtype', 'like', $term)
+                    ->orWhere('brand', 'like', $term)
+                    ->orWhere('model', 'like', $term)
+                    ->orWhere('site_label', 'like', $term)
+                    ->orWhere('area_label', 'like', $term)
+                    ->orWhere('responsible_name', 'like', $term);
             });
         }
 
-        $q->orderByDesc('id');
+        if ($request->filled('created_from')) {
+            $q->whereDate('created_at', '>=', $request->date('created_from')->format('Y-m-d'));
+        }
+        if ($request->filled('created_to')) {
+            $q->whereDate('created_at', '<=', $request->date('created_to')->format('Y-m-d'));
+        }
+
+        $sort = (string) $request->input('sort', 'id');
+        $dir = strtolower((string) $request->input('sort_dir', 'desc')) === 'asc' ? 'asc' : 'desc';
+        $q->orderBy($sort, $dir);
+        if ($sort !== 'id') {
+            $q->orderByDesc('id');
+        }
 
         $paginator = $q->paginate(Pagination::perPage($request))->withQueryString();
         $ids = $paginator->getCollection()->pluck('id')->filter()->values();
@@ -85,7 +142,6 @@ class InventoryLotController extends Controller
 
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'sku' => ['nullable', 'string', 'max:64'],
             'serial_number' => ['sometimes', 'nullable', 'string', 'max:120'],
             'mac_address' => ['sometimes', 'nullable', 'string', 'max:120'],
             'description' => ['nullable', 'string', 'max:2000'],
@@ -95,6 +151,18 @@ class InventoryLotController extends Controller
             'allow_rental' => ['sometimes', 'boolean'],
             'owner_user_id' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
             'tenant_company_id' => ['sometimes', 'nullable', 'integer', 'exists:companies,id'],
+            'asset_type' => ['nullable', 'string', 'max:120'],
+            'asset_subtype' => ['nullable', 'string', 'max:120'],
+            'brand' => ['nullable', 'string', 'max:120'],
+            'model' => ['nullable', 'string', 'max:120'],
+            'site_label' => ['nullable', 'string', 'max:255'],
+            'area_label' => ['nullable', 'string', 'max:255'],
+            'physical_condition' => ['nullable', 'string', 'max:120'],
+            'warranty_until' => ['nullable', 'date'],
+            'purchase_date' => ['nullable', 'date'],
+            'custody_received_at' => ['nullable', 'date'],
+            'responsible_name' => ['nullable', 'string', 'max:255'],
+            'responsible_role' => ['nullable', 'string', 'max:120'],
         ]);
         $tenantCompanyId = $this->tenantCompanyIdFromRequest($request, $validated);
 
@@ -105,11 +173,9 @@ class InventoryLotController extends Controller
         $owner = User::query()->findOrFail($ownerId);
         $this->assertUserCanOwnInventory($owner);
 
-        $requestedSku = array_key_exists('sku', $validated) && $validated['sku'] !== null
-            ? trim((string) $validated['sku'])
-            : '';
-        $skuAtCreate = $requestedSku !== '' ? $requestedSku : null;
+        $fromDesc = InventoryLotInternalCode::extractFromDescription($validated['description'] ?? null);
         $serialAtCreate = trim((string) ($validated['serial_number'] ?? ''));
+        $skuAtCreate = $serialAtCreate !== '' ? $serialAtCreate : (($fromDesc !== null && $fromDesc !== '') ? $fromDesc : null);
         $macAtCreate = trim((string) ($validated['mac_address'] ?? ''));
         $fingerprintHash = $this->fingerprintHashFrom($serialAtCreate, $macAtCreate);
         $this->assertFingerprintNotBlocked($fingerprintHash);
@@ -124,17 +190,37 @@ class InventoryLotController extends Controller
                 'fingerprint_hash' => $fingerprintHash,
                 'name' => $validated['name'],
                 'description' => $validated['description'] ?? null,
+                'asset_type' => $validated['asset_type'] ?? null,
+                'asset_subtype' => $validated['asset_subtype'] ?? null,
+                'brand' => $validated['brand'] ?? null,
+                'model' => $validated['model'] ?? null,
+                'site_label' => $validated['site_label'] ?? null,
+                'area_label' => $validated['area_label'] ?? null,
+                'physical_condition' => $validated['physical_condition'] ?? null,
+                'warranty_until' => $validated['warranty_until'] ?? null,
+                'purchase_date' => $validated['purchase_date'] ?? null,
+                'custody_received_at' => $validated['custody_received_at'] ?? null,
+                'responsible_name' => $validated['responsible_name'] ?? null,
+                'responsible_role' => $validated['responsible_role'] ?? null,
                 'quantity_available' => (int) $validated['quantity_available'],
                 'unit_price' => $validated['unit_price'],
                 'is_active' => true,
                 'lifecycle_status' => InventoryLot::LIFECYCLE_ACTIVO,
                 'lifecycle_status_changed_at' => now(),
-                'allow_sale' => array_key_exists('allow_sale', $validated) ? (bool) $validated['allow_sale'] : true,
-                'allow_rental' => array_key_exists('allow_rental', $validated) ? (bool) $validated['allow_rental'] : false,
+                // Inventario de empresa cliente = custodia: nunca comercializable por venta/alquiler.
+                'allow_sale' => $tenantCompanyId !== null
+                    ? false
+                    : (array_key_exists('allow_sale', $validated) ? (bool) $validated['allow_sale'] : true),
+                'allow_rental' => $tenantCompanyId !== null
+                    ? false
+                    : (array_key_exists('allow_rental', $validated) ? (bool) $validated['allow_rental'] : false),
             ]);
 
             if ($tenantCompanyId !== null && $lot->sku === null) {
                 $this->assignTenantAssetSku($lot, $tenantCompanyId);
+            } elseif ($lot->sku === null) {
+                $lot->sku = sprintf('INT-A%06d', $lot->id);
+                $lot->save();
             }
 
             InventoryMovement::query()->create([
@@ -149,7 +235,7 @@ class InventoryLotController extends Controller
             ]);
             $this->audit($request, $tenantCompanyId, 'inventory_lot', (int) $lot->id, 'create', null, [
                 'name' => $lot->name,
-                'sku' => $lot->sku,
+                'inventory_reference' => $lot->sku,
                 'serial_number' => $lot->serial_number,
                 'mac_address' => $lot->mac_address,
                 'lifecycle_status' => $lot->lifecycle_status,
@@ -170,6 +256,37 @@ class InventoryLotController extends Controller
         return (new InventoryLotResource($lot))->response()->setStatusCode(201);
     }
 
+    public function show(Request $request, InventoryLot $inventoryLot): InventoryLotResource
+    {
+        $actor = $request->user();
+        $tenantCompanyId = $this->tenantCompanyIdFromRequest($request);
+        $this->assertLotTenantScope($inventoryLot, $tenantCompanyId);
+
+        if (! $actor->isAdminEquipo()) {
+            if (! $this->empleadoCustodyMaintenanceReadAllowed($request, $inventoryLot, $tenantCompanyId)) {
+                if ((int) $inventoryLot->owner_user_id !== (int) $actor->id) {
+                    abort(403);
+                }
+                if ($inventoryLot->lifecycle_status !== InventoryLot::LIFECYCLE_ACTIVO) {
+                    abort(403);
+                }
+            }
+        }
+
+        $unitsOnRent = (int) DB::table('inventory_rental_lines as irl')
+            ->join('inventory_rentals as ir', 'ir.id', '=', 'irl.inventory_rental_id')
+            ->whereNull('ir.deleted_at')
+            ->where('ir.status', InventoryRental::STATUS_ACTIVE)
+            ->whereNull('irl.returned_at')
+            ->where('irl.inventory_lot_id', $inventoryLot->id)
+            ->sum('irl.quantity');
+
+        $inventoryLot->setAttribute('units_on_rent', $unitsOnRent);
+        $inventoryLot->load(['owner:id,nombre,correo,rol', 'tenantCompany:id,nombre,nit']);
+
+        return new InventoryLotResource($inventoryLot);
+    }
+
     public function update(Request $request, InventoryLot $inventoryLot): InventoryLotResource
     {
         $actor = $request->user();
@@ -182,7 +299,6 @@ class InventoryLotController extends Controller
 
         $validated = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
-            'sku' => ['sometimes', 'nullable', 'string', 'max:64'],
             'serial_number' => ['sometimes', 'nullable', 'string', 'max:120'],
             'mac_address' => ['sometimes', 'nullable', 'string', 'max:120'],
             'description' => ['sometimes', 'nullable', 'string', 'max:2000'],
@@ -192,6 +308,18 @@ class InventoryLotController extends Controller
             'allow_rental' => ['sometimes', 'boolean'],
             'quantity_available' => ['sometimes', 'integer', 'min:0', 'max:999999'],
             'adjustment_note' => ['required_with:quantity_available', 'nullable', 'string', 'max:500'],
+            'asset_type' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'asset_subtype' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'brand' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'model' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'site_label' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'area_label' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'physical_condition' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'warranty_until' => ['sometimes', 'nullable', 'date'],
+            'purchase_date' => ['sometimes', 'nullable', 'date'],
+            'custody_received_at' => ['sometimes', 'nullable', 'date'],
+            'responsible_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'responsible_role' => ['sometimes', 'nullable', 'string', 'max:120'],
         ]);
 
         if (array_key_exists('quantity_available', $validated)) {
@@ -204,9 +332,12 @@ class InventoryLotController extends Controller
 
         DB::transaction(function () use ($inventoryLot, $validated, $actor) {
             $before = $inventoryLot->only([
-                'name', 'sku', 'serial_number', 'mac_address', 'description', 'unit_price', 'is_active', 'lifecycle_status',
+                'name', 'serial_number', 'mac_address', 'description', 'unit_price', 'is_active', 'lifecycle_status',
                 'allow_sale', 'allow_rental', 'quantity_available',
+                'asset_type', 'asset_subtype', 'brand', 'model', 'site_label', 'area_label', 'physical_condition',
+                'warranty_until', 'purchase_date', 'custody_received_at', 'responsible_name', 'responsible_role',
             ]);
+            $before['inventory_reference'] = $inventoryLot->sku;
             if (array_key_exists('quantity_available', $validated)) {
                 $newQty = (int) $validated['quantity_available'];
                 $delta = $newQty - (int) $inventoryLot->quantity_available;
@@ -225,7 +356,11 @@ class InventoryLotController extends Controller
                 $inventoryLot->quantity_available = $newQty;
             }
 
-            foreach (['name', 'sku', 'description', 'unit_price', 'is_active', 'allow_sale', 'allow_rental'] as $field) {
+            foreach ([
+                'name', 'description', 'unit_price', 'is_active', 'allow_sale', 'allow_rental',
+                'asset_type', 'asset_subtype', 'brand', 'model', 'site_label', 'area_label', 'physical_condition',
+                'warranty_until', 'purchase_date', 'custody_received_at', 'responsible_name', 'responsible_role',
+            ] as $field) {
                 if (array_key_exists($field, $validated)) {
                     $inventoryLot->{$field} = $validated[$field];
                 }
@@ -237,6 +372,11 @@ class InventoryLotController extends Controller
             if (array_key_exists('mac_address', $validated)) {
                 $macRaw = trim((string) ($validated['mac_address'] ?? ''));
                 $inventoryLot->mac_address = $macRaw !== '' ? $this->normalizeMacAddress($macRaw) : null;
+            }
+            if ($inventoryLot->tenant_company_id !== null) {
+                // Custodia por empresa: no se habilita comercialización aunque llegue en payload.
+                $inventoryLot->allow_sale = false;
+                $inventoryLot->allow_rental = false;
             }
             if ($inventoryLot->lifecycle_status === InventoryLot::LIFECYCLE_BAJA) {
                 $inventoryLot->is_active = false;
@@ -259,10 +399,22 @@ class InventoryLotController extends Controller
             $inventoryLot->save();
             $this->audit(request(), $inventoryLot->tenant_company_id, 'inventory_lot', (int) $inventoryLot->id, 'update', $before, [
                 'name' => $inventoryLot->name,
-                'sku' => $inventoryLot->sku,
+                'inventory_reference' => $inventoryLot->sku,
                 'serial_number' => $inventoryLot->serial_number,
                 'mac_address' => $inventoryLot->mac_address,
                 'description' => $inventoryLot->description,
+                'asset_type' => $inventoryLot->asset_type,
+                'asset_subtype' => $inventoryLot->asset_subtype,
+                'brand' => $inventoryLot->brand,
+                'model' => $inventoryLot->model,
+                'site_label' => $inventoryLot->site_label,
+                'area_label' => $inventoryLot->area_label,
+                'physical_condition' => $inventoryLot->physical_condition,
+                'warranty_until' => $inventoryLot->warranty_until?->format('Y-m-d'),
+                'purchase_date' => $inventoryLot->purchase_date?->format('Y-m-d'),
+                'custody_received_at' => $inventoryLot->custody_received_at?->format('Y-m-d'),
+                'responsible_name' => $inventoryLot->responsible_name,
+                'responsible_role' => $inventoryLot->responsible_role,
                 'unit_price' => (string) $inventoryLot->unit_price,
                 'is_active' => $inventoryLot->is_active,
                 'lifecycle_status' => $inventoryLot->lifecycle_status,
@@ -278,6 +430,32 @@ class InventoryLotController extends Controller
         );
 
         return new InventoryLotResource($inventoryLot->fresh(['owner:id,nombre,correo,rol', 'tenantCompany:id,nombre,nit']));
+    }
+
+    /**
+     * Importación CSV de activos en custodia (empresa cliente). multipart: file, tenant_company_id, dry_run.
+     */
+    public function importLots(Request $request, InventoryLotCsvImportService $importer): JsonResponse
+    {
+        $actor = $request->user();
+        if (! $actor->isAdminEquipo()) {
+            abort(403);
+        }
+        $validated = $request->validate([
+            'tenant_company_id' => ['required', 'integer', 'exists:companies,id'],
+            'dry_run' => ['required', 'boolean'],
+            'file' => ['required', 'file', 'mimes:csv,txt', 'max:8192'],
+        ]);
+        $tenantId = (int) $validated['tenant_company_id'];
+        $dryRun = (bool) $validated['dry_run'];
+        $out = $importer->run($request->file('file'), $tenantId, $actor, $request, $dryRun);
+
+        return response()->json([
+            'dry_run' => $dryRun,
+            'errors' => $out['errors'],
+            'preview' => $out['preview'],
+            'created_ids' => $out['created_ids'],
+        ]);
     }
 
     public function destroy(Request $request, InventoryLot $inventoryLot): JsonResponse
@@ -297,8 +475,9 @@ class InventoryLotController extends Controller
         }
 
         $before = $inventoryLot->only([
-            'name', 'sku', 'description', 'unit_price', 'is_active', 'quantity_available', 'tenant_company_id',
+            'name', 'description', 'unit_price', 'is_active', 'quantity_available', 'tenant_company_id',
         ]);
+        $before['inventory_reference'] = $inventoryLot->sku;
         $inventoryLot->delete();
         $this->audit($request, $inventoryLot->tenant_company_id, 'inventory_lot', (int) $inventoryLot->id, 'delete', $before, null);
         app(PanelNotificationDispatcher::class)->notifyAdmins(

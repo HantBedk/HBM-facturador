@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\AdminInvoiceResource;
+use App\Mail\InvoicePdfToCompanyMail;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\PanelNotification;
@@ -24,6 +25,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -413,6 +415,64 @@ class AdminInvoiceController extends Controller
                     : 'No se pudo generar el PDF.',
             ], 500);
         }
+    }
+
+    /**
+     * Envía el PDF oficial de la factura al correo registrado en la ficha de la empresa (directorio).
+     */
+    public function sendEmailToCompany(Request $request, Invoice $invoice): JsonResponse
+    {
+        if ($invoice->status === Invoice::STATUS_BORRADOR) {
+            return response()->json([
+                'message' => 'No se puede enviar por correo un borrador. Apruebe la factura o use la vista previa PDF desde el panel.',
+            ], 422);
+        }
+
+        $invoice->load('company');
+        if ($invoice->company_id === null || $invoice->company === null) {
+            return response()->json([
+                'message' => 'Solo se envían facturas vinculadas a una empresa del directorio con correo registrado.',
+            ], 422);
+        }
+
+        $correo = strtolower(trim((string) ($invoice->company->correo ?? '')));
+        if ($correo === '' || ! filter_var($correo, FILTER_VALIDATE_EMAIL)) {
+            throw ValidationException::withMessages([
+                'company' => ['La empresa no tiene un correo válido en su ficha. Edite la empresa en el directorio y vuelva a intentar.'],
+            ]);
+        }
+
+        try {
+            $data = InvoicePdfPayload::build($invoice, ['preview' => false]);
+            $filename = 'factura-'.preg_replace('/[^a-zA-Z0-9_-]/', '_', $invoice->code).'.pdf';
+            $binary = Pdf::loadView('pdf.public_invoice', ['data' => $data])->output();
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => config('app.debug')
+                    ? ('No se pudo generar el PDF: '.$e->getMessage())
+                    : 'No se pudo generar el PDF para el envío.',
+            ], 500);
+        }
+
+        Mail::to($correo)->send(new InvoicePdfToCompanyMail(
+            $invoice->code,
+            (string) $invoice->company->nombre,
+            $binary,
+            $filename,
+        ));
+
+        ActivityLogger::log(
+            $request->user(),
+            'factura_enviada_correo',
+            'Envió por correo la factura '.$invoice->code.' a '.$correo.'.'
+        );
+
+        return response()->json([
+            'message' => 'Factura enviada a '.$correo.'.',
+            'sent_to' => $correo,
+        ]);
     }
 
     public function updateStatus(Request $request, Invoice $invoice, InvoicePublicAccessService $publicAccess): AdminInvoiceResource|JsonResponse

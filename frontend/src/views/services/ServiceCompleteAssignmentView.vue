@@ -375,10 +375,11 @@ async function onSubmit() {
         const unit = Number(lot.unit_price || 0)
         const total = opType === 'alquiler' ? unit * qty * days : unit * qty
         const label = opType === 'alquiler' ? `Alquiler equipo: ${lot.name}` : `Venta equipo: ${lot.name}`
+        const lotRef = lot.internal_code || lot.serial_number || (lot.id != null ? `LOT-${lot.id}` : 'sin código interno')
         const lineDesc =
           opType === 'alquiler'
-            ? `Equipo ${lot.name} (${lot.sku || 'sin SKU'}), cantidad ${qty}, días ${days}, tarifa diaria fija ${unit.toFixed(2)}.`
-            : `Equipo ${lot.name} (${lot.sku || 'sin SKU'}), cantidad ${qty}, precio unitario fijo ${unit.toFixed(2)}.`
+            ? `Equipo ${lot.name} (${lotRef}), cantidad ${qty}, días ${days}, tarifa diaria fija ${unit.toFixed(2)}.`
+            : `Equipo ${lot.name} (${lotRef}), cantidad ${qty}, precio unitario fijo ${unit.toFixed(2)}.`
         opItems.push({
           custom_name: label,
           amount: Number(total.toFixed(2)),

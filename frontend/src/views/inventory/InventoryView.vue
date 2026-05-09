@@ -1,20 +1,13 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
-
-const props = defineProps({
-  /** Desde la ruta `/admin/empresas/:companyId/inventario`: inventario solo de esa empresa. */
-  companyId: {
-    type: [String, Number],
-    default: null,
-  },
-})
 import {
   approveInventoryLifecycleRequest,
   createInventoryLot,
   deleteInventoryLot,
+  importInventoryLotsCsv,
   fetchInventoryAuditEvents,
   fetchInventoryLifecycleRequests,
   fetchInventoryLots,
@@ -24,8 +17,40 @@ import {
   reportInventoryLifecycle,
   updateInventoryLot,
 } from '@/services/inventoryApi.js'
+import {
+  assetSubcategoryByType,
+  escapeHtml,
+  formatDateTime,
+  formatRentalLinesSummary,
+  formatSaleLinesSummary,
+  generateAssetCode,
+  humanizeAuditAction,
+  lotCode,
+  moneyCo,
+  readAllowRentalFromRow,
+  readAllowSaleFromRow,
+  readDescriptionField,
+  rentalSortValue,
+  repairSortValue,
+  saleSortValue,
+  sortRows,
+  sortableValue,
+  sumInventoryLineTotals,
+  summarizeAuditEvent,
+  textMatchesQuery,
+  USED_PHYSICAL_CONDITIONS,
+} from './inventoryViewHelpers.js'
+
+const props = defineProps({
+  /** Desde la ruta `/admin/empresas/:companyId/inventario`: inventario solo de esa empresa. */
+  companyId: {
+    type: [String, Number],
+    default: null,
+  },
+})
 const auth = useAuthStore()
 const route = useRoute()
+const router = useRouter()
 
 const isAdmin = computed(() => isAdminPanelRole(auth.user?.rol))
 const isInternalAdminInventory = computed(() => route.name === 'admin-inventario')
@@ -51,10 +76,25 @@ const lots = ref([])
 const lotsMeta = ref(null)
 const lotsPage = ref(1)
 const lotsQ = ref('')
+/** Filtro API por fecha de alta del lote (inventario activos). */
+const lotsDateFrom = ref('')
+const lotsDateTo = ref('')
+let lotsDateFilterTimer = null
+/** Filtros API persistidos en URL (inv_*). */
+const invFilterAssetType = ref('')
+const invFilterBrand = ref('')
+let invFilterTimer = null
+const importCsvFileRef = ref(null)
+const importCsvBusy = ref(false)
+const importCsvFeedback = ref('')
+const importCsvModalOpen = ref(false)
 const activeTab = ref('activos')
 
 watch(isCompanyInventoryRoute, (custodia) => {
-  if (custodia && ['alquiler', 'ventas', 'en_alquiler_lotes'].includes(activeTab.value)) {
+  if (
+    custodia &&
+    ['alquiler', 'ventas', 'en_alquiler_lotes', 'vendidos'].includes(activeTab.value)
+  ) {
     activeTab.value = 'activos'
   }
 })
@@ -88,50 +128,6 @@ const sortState = ref({
   repair: { key: 'name', dir: 'asc' },
 })
 
-function readDescriptionField(description, key) {
-  const text = String(description || '')
-  const line = text
-    .split('\n')
-    .map((item) => item.trim())
-    .find((item) => item.toLowerCase().startsWith(`${key.toLowerCase()}:`))
-  if (!line) return ''
-  return line.slice(line.indexOf(':') + 1).trim()
-}
-
-function parseDescriptionYesNoLine(description, keys) {
-  const lines = String(description || '')
-    .split('\n')
-    .map((x) => x.trim())
-    .filter(Boolean)
-  for (const raw of lines) {
-    const line = raw.toLowerCase()
-    const hit = keys.some((k) => line.includes(String(k).toLowerCase()))
-    if (!hit) continue
-    const idx = raw.indexOf(':')
-    const value = (idx >= 0 ? raw.slice(idx + 1) : raw).trim().toLowerCase()
-    if (value.includes('no') || value === 'false' || value === '0') return false
-    if (value.includes('si') || value.includes('sí') || value.includes('true') || value === '1') return true
-    return true
-  }
-  return null
-}
-
-function readAllowSaleFromRow(row) {
-  if (typeof row.allow_sale === 'boolean') return row.allow_sale
-  const desc = String(row.description || '')
-  if (!/(disponible|etiqueta).*venta/i.test(desc)) return true
-  const parsed = parseDescriptionYesNoLine(desc, ['Disponible para venta', 'Etiqueta para venta'])
-  return parsed !== null ? parsed : true
-}
-
-function readAllowRentalFromRow(row) {
-  if (typeof row.allow_rental === 'boolean') return row.allow_rental
-  const desc = String(row.description || '')
-  if (!/(disponible|etiqueta).*alquiler/i.test(desc)) return false
-  const parsed = parseDescriptionYesNoLine(desc, ['Disponible para alquiler', 'Etiqueta para alquiler'])
-  return parsed === true
-}
-
 const activeLots = computed(() =>
   (lots.value || []).filter((row) => String(row.lifecycle_status || 'activo') === 'activo')
 )
@@ -143,64 +139,6 @@ const lotsWithActiveRentUnits = computed(() =>
 )
 const decommissionedLots = computed(() => (lots.value || []).filter((row) => String(row.lifecycle_status || '') === 'baja'))
 const repairLots = computed(() => (lots.value || []).filter((row) => String(row.lifecycle_status || '') === 'reparacion'))
-
-function sortableValue(row, key) {
-  if (key === 'code') return readDescriptionField(row.description, 'Codigo interno') || row.sku || ''
-  if (key === 'brand') return readDescriptionField(row.description, 'Marca') || ''
-  if (key === 'owner') return row.owner?.nombre || ''
-  if (key === 'name') return row.name || ''
-  if (key === 'entry_date') return row.created_at || ''
-  if (key === 'location') return readDescriptionField(row.description, 'Ubicacion') || ''
-  if (key === 'detail') return row.description || ''
-  if (key === 'stock') return Number(row.quantity_available || 0)
-  if (key === 'price') return Number(row.unit_price || 0)
-  if (key === 'status') return row.is_active ? 1 : 0
-  return ''
-}
-
-function sortRows(rows, table, getValue) {
-  const { key, dir } = sortState.value[table]
-  const d = dir === 'asc' ? 1 : -1
-  const copy = [...(rows || [])]
-  copy.sort((a, b) => {
-    const va = getValue(a, key)
-    const vb = getValue(b, key)
-    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * d
-    return String(va).localeCompare(String(vb), 'es', { sensitivity: 'base', numeric: true }) * d
-  })
-  return copy
-}
-
-function rentalSortValue(r, key) {
-  if (key === 'id') return Number(r.id) || 0
-  if (key === 'started_at') return r.started_at || ''
-  if (key === 'closed_at') return r.closed_at || ''
-  if (key === 'status') return r.status || ''
-  if (key === 'customer_name') return r.customer_name || ''
-  if (key === 'customer_phone') return r.customer_phone || ''
-  if (key === 'equipos') return formatRentalLinesSummary(r)
-  if (key === 'total') return sumInventoryLineTotals(r.lines)
-  return ''
-}
-
-function saleSortValue(s, key) {
-  if (key === 'id') return Number(s.id) || 0
-  if (key === 'created_at') return s.created_at || ''
-  if (key === 'total') return Number(s.total_amount) || 0
-  if (key === 'vendedor') return s.sold_by?.nombre || ''
-  if (key === 'detalle') return formatSaleLinesSummary(s)
-  return ''
-}
-
-function repairSortValue(row, key) {
-  if (key === 'name') return row.name || ''
-  if (key === 'code') return readDescriptionField(row.description, 'Codigo interno') || row.sku || ''
-  if (key === 'location') return readDescriptionField(row.description, 'Ubicacion') || ''
-  if (key === 'condition') return readDescriptionField(row.description, 'Estado fisico') || ''
-  if (key === 'detail') return row.description || ''
-  if (key === 'status') return row.is_active ? 1 : 0
-  return ''
-}
 
 const filteredRentals = computed(() => {
   const q = String(rentalsQ.value || '').trim().toLowerCase()
@@ -244,7 +182,8 @@ const filteredBajas = computed(() => {
   return decommissionedLots.value.filter((row) => {
     const haystack = [
       row.name,
-      row.sku,
+      row.internal_code,
+      row.serial_number,
       row.created_at,
       row.description,
       readDescriptionField(row.description, 'Codigo interno'),
@@ -259,7 +198,14 @@ const filteredVendidos = computed(() => {
   const q = String(vendidosQ.value || '').trim().toLowerCase()
   if (!q) return soldLots.value
   return soldLots.value.filter((row) => {
-    const haystack = [row.name, row.sku, row.created_at, row.description, readDescriptionField(row.description, 'Codigo interno')]
+    const haystack = [
+      row.name,
+      row.internal_code,
+      row.serial_number,
+      row.created_at,
+      row.description,
+      readDescriptionField(row.description, 'Codigo interno'),
+    ]
       .join(' ')
       .toLowerCase()
     return haystack.includes(q)
@@ -272,7 +218,8 @@ const filteredRentLots = computed(() => {
   return lotsWithActiveRentUnits.value.filter((row) => {
     const haystack = [
       row.name,
-      row.sku,
+      row.internal_code,
+      row.serial_number,
       row.description,
       readDescriptionField(row.description, 'Codigo interno'),
       String(row.units_on_rent || ''),
@@ -290,7 +237,8 @@ const filteredRepair = computed(() => {
   return repairLots.value.filter((row) => {
     const haystack = [
       row.name,
-      row.sku,
+      row.internal_code,
+      row.serial_number,
       row.description,
       readDescriptionField(row.description, 'Codigo interno'),
       readDescriptionField(row.description, 'Ubicacion'),
@@ -326,7 +274,7 @@ const activeTabSearch = computed({
 })
 
 const activeTabSearchPlaceholder = computed(() => {
-  if (activeTab.value === 'activos') return 'Buscar por nombre del dispositivo…'
+  if (activeTab.value === 'activos') return 'Buscar por nombre, código interno, serial o MAC…'
   if (activeTab.value === 'alquiler') return 'Buscar alquiler por cliente, teléfono, equipo, estado o fecha…'
   if (activeTab.value === 'ventas') return 'Buscar venta por ID, fecha, vendedor, total o detalle…'
   if (activeTab.value === 'bajas') return 'Buscar baja por nombre, código, fecha o detalle…'
@@ -337,13 +285,13 @@ const activeTabSearchPlaceholder = computed(() => {
   return 'Buscar…'
 })
 
-const sortedLots = computed(() => sortRows(activeLots.value, 'lots', sortableValue))
-const sortedRentals = computed(() => sortRows(filteredRentals.value, 'rentals', rentalSortValue))
-const sortedSales = computed(() => sortRows(filteredSales.value, 'sales', saleSortValue))
-const sortedBajas = computed(() => sortRows(filteredBajas.value, 'bajas', sortableValue))
-const sortedVendidos = computed(() => sortRows(filteredVendidos.value, 'vendidos', sortableValue))
-const sortedRentLots = computed(() => sortRows(filteredRentLots.value, 'rentLots', sortableValue))
-const sortedRepair = computed(() => sortRows(filteredRepair.value, 'repair', repairSortValue))
+const sortedLots = computed(() => sortRows(activeLots.value, sortState.value.lots, sortableValue))
+const sortedRentals = computed(() => sortRows(filteredRentals.value, sortState.value.rentals, rentalSortValue))
+const sortedSales = computed(() => sortRows(filteredSales.value, sortState.value.sales, saleSortValue))
+const sortedBajas = computed(() => sortRows(filteredBajas.value, sortState.value.bajas, sortableValue))
+const sortedVendidos = computed(() => sortRows(filteredVendidos.value, sortState.value.vendidos, sortableValue))
+const sortedRentLots = computed(() => sortRows(filteredRentLots.value, sortState.value.rentLots, sortableValue))
+const sortedRepair = computed(() => sortRows(filteredRepair.value, sortState.value.repair, repairSortValue))
 
 function toggleTableSort(table, key) {
   const cur = sortState.value[table]
@@ -370,7 +318,6 @@ const lotFormError = ref('')
 const editingLotId = ref(null)
 const lotForm = ref({
   name: '',
-  sku: '',
   description: '',
   asset_type: '',
   asset_subcategory: '',
@@ -388,29 +335,15 @@ const lotForm = ref({
   is_active: true,
   adjustment_note: '',
   owner_user_id: '',
+  area_label: '',
+  responsible_name: '',
+  responsible_role: '',
+  purchase_date: '',
+  custody_received_at: '',
 })
 
 const locationOptions = ref(['Bodega principal', 'Taller', 'Oficina administrativa'])
 const assetTypeList = ref(['Equipo', 'Herramienta', 'Accesorio', 'Consumible', 'Mobiliario', 'Otro'])
-
-/** Estado físico solo para activos usados (condición de compra «Usado»). */
-const USED_PHYSICAL_CONDITIONS = ['Excelente', 'Muy bueno', 'Bueno', 'Regular', 'Requiere mantenimiento']
-
-/** Subcategorías por tipo (mismas etiquetas que `assetTypeList` por defecto). */
-const assetSubcategoryByType = {
-  Equipo: ['Portátil', 'Desktop', 'Impresora', 'Router', 'Switch', 'Servidor', 'Otro'],
-  Herramienta: ['Manual', 'Eléctrica', 'Medición', 'Seguridad', 'Otro'],
-  Accesorio: ['Cableado', 'Adaptador', 'Periférico', 'Montaje', 'Otro'],
-  Consumible: ['Tinta', 'Papel', 'Limpieza', 'Batería', 'Otro'],
-  Mobiliario: ['Escritorio', 'Silla', 'Estantería', 'Archivador', 'Otro'],
-  Otro: ['General'],
-}
-
-function textMatchesQuery(text, q) {
-  const needle = String(q || '').trim().toLowerCase()
-  if (!needle) return true
-  return String(text || '').toLowerCase().includes(needle)
-}
 
 const assetTypeSearchQ = ref('')
 const subcategorySearchQ = ref('')
@@ -538,91 +471,6 @@ watch(
 const generatedAssetCode = ref('')
 const generatedAssetTag = computed(() => (generatedAssetCode.value ? `HBM-${generatedAssetCode.value}` : ''))
 
-function moneyCo(value) {
-  const n = Number(value)
-  if (Number.isNaN(n)) return '—'
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
-}
-
-function formatDateTime(value) {
-  if (!value) return '—'
-  const dt = new Date(value)
-  if (Number.isNaN(dt.getTime())) return String(value)
-  return dt.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })
-}
-
-function lotCode(row) {
-  return readDescriptionField(row?.description, 'Codigo interno') || row?.sku || '—'
-}
-
-function humanizeAuditAction(action) {
-  const key = String(action || '').toLowerCase()
-  const map = {
-    create: 'Registro del activo',
-    update: 'Actualización de datos',
-    delete: 'Eliminación del activo',
-    lifecycle_to_reparacion: 'Cambio a reparación',
-    lifecycle_to_activo: 'Reactivación',
-    lifecycle_baja_requested: 'Solicitud de baja',
-    lifecycle_baja_approval_registered: 'Aprobación parcial de baja',
-    lifecycle_baja_approved: 'Baja aprobada',
-    lifecycle_baja_rejected: 'Baja rechazada',
-  }
-  return map[key] || key.replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
-function summarizeAuditEvent(ev) {
-  const out = []
-  const before = ev?.before || {}
-  const after = ev?.after || {}
-  if (before?.lifecycle_status && after?.lifecycle_status && before.lifecycle_status !== after.lifecycle_status) {
-    out.push(`Estado: ${before.lifecycle_status} -> ${after.lifecycle_status}`)
-  }
-  if (after?.reason) out.push(`Motivo: ${after.reason}`)
-  if (after?.resolution_note) out.push(`Resolución: ${after.resolution_note}`)
-  if (after?.repair_reason) out.push(`Detalle reparación: ${after.repair_reason}`)
-  if (after?.repair_resolution) out.push(`Cierre reparación: ${after.repair_resolution}`)
-  if (after?.decommission_reason) out.push(`Razón de baja: ${after.decommission_reason}`)
-  return out.join(' | ')
-}
-
-function escapeHtml(raw) {
-  return String(raw ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
-}
-
-function sumInventoryLineTotals(lines) {
-  if (!Array.isArray(lines)) return 0
-  return lines.reduce((acc, ln) => acc + Number(ln.line_total || 0), 0)
-}
-
-function formatRentalLinesSummary(r) {
-  const lines = r.lines || []
-  if (!lines.length) return '—'
-  return lines.map((ln) => `${ln.lot?.name || 'Equipo'} × ${ln.quantity}`).join('; ')
-}
-
-function formatSaleLinesSummary(s) {
-  const lines = s.lines || []
-  if (!lines.length) return '—'
-  return lines
-    .map((ln) => `${ln.lot?.name || 'Equipo'} × ${ln.quantity} — ${moneyCo(ln.line_total)}`)
-    .join('; ')
-}
-
-function generateAssetCode() {
-  const now = new Date()
-  const y = String(now.getUTCFullYear()).slice(-2)
-  const m = String(now.getUTCMonth() + 1).padStart(2, '0')
-  const d = String(now.getUTCDate()).padStart(2, '0')
-  const rand = Math.random().toString(36).slice(2, 6).toUpperCase()
-  return `${y}${m}${d}-${rand}`
-}
-
 const contextQueryParams = computed(() => {
   if (lockedTenantCompanyId.value) {
     return { tenant_company_id: lockedTenantCompanyId.value }
@@ -636,6 +484,22 @@ function inventoryMutationQuery() {
   return { tenant_company_id: id }
 }
 
+function syncInventoryListUrlQuery() {
+  if (!isAdmin.value || !isAdminInventoryRoute.value) return
+  const next = { ...route.query }
+  const assign = (k, v) => {
+    const s = String(v ?? '').trim()
+    if (s) next[k] = s
+    else delete next[k]
+  }
+  assign('inv_q', lotsQ.value)
+  assign('inv_from', lotsDateFrom.value)
+  assign('inv_to', lotsDateTo.value)
+  assign('inv_asset_type', invFilterAssetType.value)
+  assign('inv_brand', invFilterBrand.value)
+  router.replace({ path: route.path, query: next })
+}
+
 async function loadLots() {
   lotsLoading.value = true
   lotsError.value = ''
@@ -646,6 +510,10 @@ async function loadLots() {
       active_only: isAdmin.value ? undefined : '1',
       ...contextQueryParams.value,
     }
+    if (lotsDateFrom.value.trim()) params.created_from = lotsDateFrom.value.trim()
+    if (lotsDateTo.value.trim()) params.created_to = lotsDateTo.value.trim()
+    if (invFilterAssetType.value.trim()) params.asset_type = invFilterAssetType.value.trim()
+    if (invFilterBrand.value.trim()) params.brand = invFilterBrand.value.trim()
     const res = await fetchInventoryLots(params)
     lots.value = res.data || []
     lotsMeta.value = res.meta || null
@@ -699,7 +567,6 @@ async function openCreateLot() {
   const custodia = isCompanyInventoryRoute.value
   lotForm.value = {
     name: '',
-    sku: '',
     description: '',
     asset_type: '',
     asset_subcategory: '',
@@ -710,6 +577,11 @@ async function openCreateLot() {
     location: '',
     condition: '',
     warranty_until: '',
+    area_label: '',
+    responsible_name: '',
+    responsible_role: '',
+    purchase_date: '',
+    custody_received_at: '',
     is_new_asset: true,
     allow_sale: custodia ? false : true,
     allow_rental: false,
@@ -732,17 +604,21 @@ async function openEditLot(row) {
   const desc = row.description || ''
   lotForm.value = {
     name: row.name || '',
-    sku: row.sku || '',
     description: row.description || '',
-    asset_type: readDescriptionField(desc, 'Tipo') || '',
-    asset_subcategory: readDescriptionField(desc, 'Subcategoria') || '',
-    serial_number: readDescriptionField(desc, 'Serial') || row.sku || '',
+    asset_type: row.asset_type || readDescriptionField(desc, 'Tipo') || '',
+    asset_subcategory: row.asset_subtype || readDescriptionField(desc, 'Subcategoria') || '',
+    serial_number: readDescriptionField(desc, 'Serial') || row.serial_number || '',
     mac_address: row.mac_address || readDescriptionField(desc, 'MAC') || '',
-    brand: readDescriptionField(desc, 'Marca') || '',
-    model: readDescriptionField(desc, 'Modelo') || '',
-    location: readDescriptionField(desc, 'Ubicacion') || '',
-    condition: readDescriptionField(desc, 'Estado fisico') || '',
-    warranty_until: readDescriptionField(desc, 'Garantia hasta') || '',
+    brand: row.brand || readDescriptionField(desc, 'Marca') || '',
+    model: row.model || readDescriptionField(desc, 'Modelo') || '',
+    location: row.site_label || readDescriptionField(desc, 'Ubicacion') || '',
+    condition: row.physical_condition || readDescriptionField(desc, 'Estado fisico') || '',
+    warranty_until: row.warranty_until || readDescriptionField(desc, 'Garantia hasta') || '',
+    area_label: row.area_label || '',
+    responsible_name: row.responsible_name || '',
+    responsible_role: row.responsible_role || '',
+    purchase_date: row.purchase_date || '',
+    custody_received_at: row.custody_received_at || '',
     is_new_asset: !String(readDescriptionField(desc, 'Condicion de compra') || '')
       .toLowerCase()
       .includes('usado'),
@@ -822,11 +698,13 @@ async function submitLot() {
     ].filter(Boolean)
     const fullDescription = [lotForm.value.description?.trim() || '', ...detailLines].filter(Boolean).join('\n')
 
-    const manualSku = lotForm.value.sku?.trim() || lotForm.value.serial_number?.trim() || ''
     const body = {
       name: lotForm.value.name.trim(),
       description: fullDescription || null,
-      quantity_available: Number(lotForm.value.quantity_available),
+      quantity_available:
+        isCompanyInventoryRoute.value && savingAsCreate
+          ? 1
+          : Number(lotForm.value.quantity_available),
       unit_price: unitPriceFinal,
       is_active: !!lotForm.value.is_active,
       serial_number: lotForm.value.serial_number?.trim() || null,
@@ -834,11 +712,18 @@ async function submitLot() {
       allow_sale: allowSaleFinal,
       allow_rental: allowRentalFinal,
       tenant_company_id: lockedTenantCompanyId.value ? Number(lockedTenantCompanyId.value) : null,
-    }
-    if (isCompanyInventoryRoute.value) {
-      if (manualSku) body.sku = manualSku
-    } else {
-      body.sku = manualSku || effectiveCode
+      asset_type: lotForm.value.asset_type?.trim() || null,
+      asset_subtype: lotForm.value.asset_subcategory?.trim() || null,
+      brand: lotForm.value.brand?.trim() || null,
+      model: lotForm.value.model?.trim() || null,
+      site_label: lotForm.value.location?.trim() || null,
+      area_label: lotForm.value.area_label?.trim() || null,
+      physical_condition: lotForm.value.is_new_asset ? 'Nuevo' : lotForm.value.condition?.trim() || null,
+      warranty_until: lotForm.value.warranty_until?.trim() || null,
+      purchase_date: lotForm.value.purchase_date?.trim() || null,
+      custody_received_at: lotForm.value.custody_received_at?.trim() || null,
+      responsible_name: lotForm.value.responsible_name?.trim() || null,
+      responsible_role: lotForm.value.responsible_role?.trim() || null,
     }
     let postCreateLines = null
     if (savingAsCreate) {
@@ -847,15 +732,18 @@ async function submitLot() {
       }
       const res = await createInventoryLot(body)
       const payload = res?.data ?? res
-      const assignedSku = payload?.sku
+      const assignedCode =
+        payload?.internal_code ||
+        readDescriptionField(payload?.description, 'Codigo interno') ||
+        payload?.serial_number ||
+        ''
       postCreateLines =
-        isCompanyInventoryRoute.value && assignedSku
-          ? ['Activo registrado correctamente.', `Código de inventario asignado: ${assignedSku}`]
+        isCompanyInventoryRoute.value && assignedCode
+          ? ['Activo registrado correctamente.', `Código interno asignado: ${assignedCode}`]
           : ['Activo registrado correctamente.', `Etiqueta sugerida: ${generatedAssetTag.value}`]
     } else {
       const patch = {
         name: body.name,
-        sku: body.sku,
         description: body.description,
         unit_price: body.unit_price,
         is_active: body.is_active,
@@ -863,6 +751,18 @@ async function submitLot() {
         mac_address: body.mac_address,
         allow_sale: body.allow_sale,
         allow_rental: body.allow_rental,
+        asset_type: body.asset_type,
+        asset_subtype: body.asset_subtype,
+        brand: body.brand,
+        model: body.model,
+        site_label: body.site_label,
+        area_label: body.area_label,
+        physical_condition: body.physical_condition,
+        warranty_until: body.warranty_until,
+        purchase_date: body.purchase_date,
+        custody_received_at: body.custody_received_at,
+        responsible_name: body.responsible_name,
+        responsible_role: body.responsible_role,
       }
       const origQty = lots.value.find((l) => l.id === editingLotId.value)?.quantity_available
       if (origQty !== undefined && Number(body.quantity_available) !== Number(origQty)) {
@@ -889,13 +789,63 @@ async function submitLot() {
   }
 }
 
+function openImportCsvModal() {
+  importCsvModalOpen.value = true
+  importCsvFeedback.value = ''
+}
+
+async function runImportCsv(dryRun) {
+  if (!isCompanyInventoryRoute.value || !isAdmin.value || !lockedTenantCompanyId.value) return
+  const el = importCsvFileRef.value
+  const file = el?.files?.[0]
+  if (!file) {
+    importCsvFeedback.value = 'Seleccione un archivo CSV (UTF-8, separador ;).'
+    return
+  }
+  importCsvBusy.value = true
+  importCsvFeedback.value = ''
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('tenant_company_id', String(lockedTenantCompanyId.value))
+    fd.append('dry_run', dryRun ? '1' : '0')
+    const res = await importInventoryLotsCsv(fd)
+    const errCount = Array.isArray(res.errors) ? res.errors.length : 0
+    const okCount = dryRun ? (res.preview?.length || 0) : (res.created_ids?.length || 0)
+    importCsvFeedback.value = dryRun
+      ? `Vista previa: ${okCount} fila(s) válida(s). Errores: ${errCount}.`
+      : `Importados: ${okCount}. Errores: ${errCount}.`
+    if (!dryRun && okCount) await loadLots()
+  } catch (e) {
+    importCsvFeedback.value = e.data?.message || e.message || 'Error en importación.'
+  } finally {
+    importCsvBusy.value = false
+  }
+}
+
 const reportModalOpen = ref(false)
 const reportSaving = ref(false)
 const reportError = ref('')
 const reportLot = ref(null)
 const reportTargetStatus = ref('reparacion')
 const reportReason = ref('')
-const reportResolution = ref('')
+const reportPhysicalConditionOptions = ref([
+  'Nuevo',
+  'Bueno',
+  'Regular',
+  'Requiere mantenimiento',
+  'Fuera de servicio',
+])
+const reportPhysicalCondition = ref('')
+const reportDamageKind = ref('')
+
+const reportPhysicalSelectOptions = computed(() => {
+  const base = [...(reportPhysicalConditionOptions.value || [])]
+  const cur = String(reportPhysicalCondition.value || '').trim()
+  if (cur && !base.includes(cur)) base.unshift(cur)
+  return base
+})
+
 const reportHistoryLoading = ref(false)
 const reportHistory = ref([])
 const pendingBajaRequests = ref([])
@@ -926,7 +876,10 @@ function openReportModal(row, preset = null) {
   const actions = availableLifecycleActions(row)
   reportTargetStatus.value = preset && actions.includes(preset) ? preset : (actions[0] || 'reparacion')
   reportReason.value = ''
-  reportResolution.value = ''
+  reportPhysicalCondition.value =
+    String(row?.physical_condition || readDescriptionField(row?.description, 'Estado fisico') || '').trim() || ''
+  reportDamageKind.value =
+    row?.repair_damage_kind === 'hardware' || row?.repair_damage_kind === 'software' ? row.repair_damage_kind : ''
   reportError.value = ''
   reportHistory.value = []
   reportModalOpen.value = true
@@ -937,7 +890,13 @@ async function loadLotHistory(lotId) {
   reportHistoryLoading.value = true
   try {
     const res = await fetchInventoryAuditEvents({ entity_type: 'inventory_lot', entity_id: lotId, per_page: 20 })
-    reportHistory.value = res.data || []
+    const rows = [...(res.data || [])]
+    rows.sort((a, b) => {
+      const t = String(a.occurred_at || '').localeCompare(String(b.occurred_at || ''))
+      if (t !== 0) return t
+      return Number(a.id || 0) - Number(b.id || 0)
+    })
+    reportHistory.value = rows
   } catch {
     reportHistory.value = []
   } finally {
@@ -945,20 +904,57 @@ async function loadLotHistory(lotId) {
   }
 }
 
+const reportNoteLabel = computed(() => {
+  const t = reportTargetStatus.value
+  if (t === 'activo') return 'Detalle de la reparación realizada'
+  if (t === 'reparacion') return 'Motivo o detalle del envío a reparación'
+  return 'Motivo / justificación de la baja'
+})
+
+const reportNotePlaceholder = computed(() => {
+  const t = reportTargetStatus.value
+  if (t === 'activo') return 'Describa qué intervención o revisión se hizo para volver a operación el equipo…'
+  if (t === 'reparacion') return 'Ej. falla reportada, taller externo, pieza en espera…'
+  return 'Indique el motivo de la solicitud de baja…'
+})
+
 async function submitLifecycleReport() {
   if (!reportLot.value) return
   if (!String(reportReason.value || '').trim()) {
-    reportError.value = 'Debe indicar un motivo.'
+    reportError.value =
+      reportTargetStatus.value === 'activo'
+        ? 'Indique el detalle de la reparación realizada.'
+        : 'Complete el texto requerido.'
     return
+  }
+  if (reportTargetStatus.value === 'reparacion' || reportTargetStatus.value === 'activo') {
+    if (!String(reportPhysicalCondition.value || '').trim()) {
+      reportError.value = 'Seleccione el estado físico actual del equipo.'
+      return
+    }
+    if (reportDamageKind.value !== 'hardware' && reportDamageKind.value !== 'software') {
+      reportError.value = 'Indique si el daño o la intervención corresponde principalmente a hardware o a software.'
+      return
+    }
   }
   reportSaving.value = true
   reportError.value = ''
   try {
-    await reportInventoryLifecycle(reportLot.value.id, {
+    const note = reportReason.value.trim()
+    const payload = {
       target_status: reportTargetStatus.value,
-      reason: reportReason.value.trim(),
-      resolution_note: reportResolution.value.trim() || undefined,
-    })
+      reason: note,
+    }
+    if (reportTargetStatus.value === 'reparacion' || reportTargetStatus.value === 'activo') {
+      payload.physical_condition = String(reportPhysicalCondition.value).trim()
+      payload.repair_damage_kind = reportDamageKind.value
+    }
+    // Al activar, el motivo implícito es la reparación; el backend guarda el detalle en repair_resolution.
+    if (reportTargetStatus.value === 'activo') {
+      payload.reason = 'Reactivación tras reparación.'
+      payload.resolution_note = note
+    }
+    await reportInventoryLifecycle(reportLot.value.id, payload)
     reportModalOpen.value = false
     await Promise.all([loadLots(), loadPendingBajaRequests()])
   } catch (e) {
@@ -978,29 +974,35 @@ const assetSheetDetails = computed(() => {
     ['Nombre del activo', row.name || '—'],
     ['Tipo', readDescriptionField(desc, 'Tipo') || '—'],
     ['Subcategoría', readDescriptionField(desc, 'Subcategoria') || '—'],
-    ['Serial', readDescriptionField(desc, 'Serial') || row.sku || '—'],
+    ['Serial', readDescriptionField(desc, 'Serial') || row.serial_number || '—'],
     ['MAC', row.mac_address || readDescriptionField(desc, 'MAC') || '—'],
     ['Marca', readDescriptionField(desc, 'Marca') || '—'],
     ['Modelo', readDescriptionField(desc, 'Modelo') || '—'],
     ['Ubicación', readDescriptionField(desc, 'Ubicacion') || '—'],
     ['Estado físico', readDescriptionField(desc, 'Estado fisico') || '—'],
     ['Condición de compra', readDescriptionField(desc, 'Condicion de compra') || '—'],
-    ['Estado ciclo de vida', lotLifecycleStatusLabel(row)],
-    ['Stock disponible', String(row.quantity_available ?? '—')],
-    ['Precio unitario', moneyCo(row.unit_price)],
+    ...(isCompanyInventoryRoute.value ? [] : [['Estado ciclo de vida', lotLifecycleStatusLabel(row)]]),
+    ...(isCompanyInventoryRoute.value ? [] : [['Stock disponible', String(row.quantity_available ?? '—')]]),
+    ...(isCompanyInventoryRoute.value ? [] : [['Precio unitario', moneyCo(row.unit_price)]]),
     ['Fecha de alta', formatDateTime(row.created_at)],
-    ['Titular', row.owner?.nombre || '—'],
+    ...(isCompanyInventoryRoute.value ? [] : [['Titular', row.owner?.nombre || '—']]),
   ]
 })
 
 const assetSheetTimeline = computed(() =>
-  (assetSheetHistory.value || []).map((ev) => ({
-    id: ev.id,
-    title: humanizeAuditAction(ev.action),
-    when: formatDateTime(ev.occurred_at),
-    actor: ev.actor?.nombre || 'Sistema',
-    note: summarizeAuditEvent(ev),
-  }))
+  [...(assetSheetHistory.value || [])]
+    .sort((a, b) => {
+      const t = String(a.occurred_at || '').localeCompare(String(b.occurred_at || ''))
+      if (t !== 0) return t
+      return Number(a.id || 0) - Number(b.id || 0)
+    })
+    .map((ev) => ({
+      id: ev.id,
+      title: humanizeAuditAction(ev.action),
+      when: formatDateTime(ev.occurred_at),
+      actor: ev.actor?.nombre || 'Sistema',
+      note: summarizeAuditEvent(ev),
+    }))
 )
 
 async function openAssetSheet(row) {
@@ -1009,6 +1011,22 @@ async function openAssetSheet(row) {
   assetSheetHistory.value = []
   assetSheetOpen.value = true
   await loadAssetSheetHistory(row.id)
+}
+
+function openAssetDetailRoute() {
+  if (!assetSheetLot.value?.id) return
+  const lotId = String(assetSheetLot.value.id)
+  if (isCompanyInventoryRoute.value) {
+    router.push({
+      name: 'admin-empresa-inventario-activo-detalle',
+      params: { companyId: props.companyId, lotId },
+    })
+    return
+  }
+  router.push({
+    name: route.path.startsWith('/admin') ? 'admin-inventario-activo-detalle' : 'empleado-inventario-activo-detalle',
+    params: { lotId },
+  })
 }
 
 async function loadAssetSheetHistory(lotId) {
@@ -1141,10 +1159,30 @@ watch(lotsQ, () => {
   searchTimer = setTimeout(() => {
     lotsPage.value = 1
     loadLots()
+    syncInventoryListUrlQuery()
   }, 350)
 })
 
 watch(lotsPage, () => loadLots())
+watch([lotsDateFrom, lotsDateTo], () => {
+  if (activeTab.value !== 'activos') return
+  clearTimeout(lotsDateFilterTimer)
+  lotsDateFilterTimer = setTimeout(() => {
+    lotsPage.value = 1
+    loadLots()
+    syncInventoryListUrlQuery()
+  }, 400)
+})
+
+watch([invFilterAssetType, invFilterBrand], () => {
+  if (activeTab.value !== 'activos') return
+  clearTimeout(invFilterTimer)
+  invFilterTimer = setTimeout(() => {
+    lotsPage.value = 1
+    loadLots()
+    syncInventoryListUrlQuery()
+  }, 400)
+})
 watch(rentalsPage, () => loadRentals())
 watch(salesPage, () => loadSales())
 onMounted(async () => {
@@ -1161,22 +1199,30 @@ onMounted(async () => {
     const opts = await fetchInventoryFormFieldOptions()
     locationOptions.value = opts.locations.slice(0, 5)
     if (opts.asset_types.length) assetTypeList.value = opts.asset_types
+    if (opts.physical_conditions?.length) reportPhysicalConditionOptions.value = opts.physical_conditions
   } catch {
     /* defaults en refs */
   }
+  const q = route.query || {}
+  if (q.inv_q != null) lotsQ.value = String(q.inv_q)
+  if (q.inv_from) lotsDateFrom.value = String(q.inv_from)
+  if (q.inv_to) lotsDateTo.value = String(q.inv_to)
+  if (q.inv_asset_type) invFilterAssetType.value = String(q.inv_asset_type)
+  if (q.inv_brand) invFilterBrand.value = String(q.inv_brand)
   const extraLoads = isCompanyInventoryRoute.value ? [] : [loadRentals(), loadSales()]
   await Promise.all([loadLots(), loadPendingBajaRequests(), ...extraLoads])
 })
 
 onUnmounted(() => {
   document.removeEventListener('mousedown', onInventoryFormMousedown)
+  clearTimeout(invFilterTimer)
 })
 </script>
 
 <template>
   <div class="mx-auto w-full max-w-[96rem] space-y-6 px-2 text-slate-200 sm:px-4 lg:px-6">
     <div class="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-      <div>
+      <div class="min-w-0 w-full flex-1">
         <RouterLink
           v-if="isCompanyInventoryRoute"
           to="/admin/empresas"
@@ -1189,9 +1235,10 @@ onUnmounted(() => {
           <template v-else-if="isInternalAdminInventory">Inventario interno</template>
           <template v-else>Mi inventario</template>
         </h1>
-        <p class="mt-1 max-w-2xl text-sm text-slate-400">
+        <p class="mt-1 w-full max-w-none text-sm text-slate-400">
           <template v-if="isCompanyInventoryRoute">
-            Activos y equipos de esta empresa. Al registrar un artículo sin número de serie ni código manual, el sistema asigna un
+            Equipos en custodia de la empresa: activos (bodega u operación), en reparación y dados de baja. No se listan
+            ventas de equipo desde esta vista. Al registrar un artículo sin número de serie ni código manual, el sistema asigna un
             código de inventario único (sigla de factura de la empresa + correlativo).
           </template>
           <template v-else-if="isInternalAdminInventory">
@@ -1202,7 +1249,7 @@ onUnmounted(() => {
           </template>
         </p>
       </div>
-      <div class="flex w-full flex-wrap gap-2 xl:w-auto xl:justify-end">
+      <div class="flex w-full flex-wrap items-center gap-2 xl:w-auto xl:justify-end">
         <button
           v-if="isAdmin"
           type="button"
@@ -1210,6 +1257,14 @@ onUnmounted(() => {
           @click="openCreateLot"
         >
           Registrar activo
+        </button>
+        <button
+          v-if="isCompanyInventoryRoute && isAdmin"
+          type="button"
+          class="w-full rounded-xl border border-slate-500/80 bg-slate-800/90 px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-sm hover:bg-slate-700 sm:w-auto"
+          @click="openImportCsvModal"
+        >
+          Importar CSV
         </button>
       </div>
     </div>
@@ -1227,7 +1282,19 @@ onUnmounted(() => {
             "
             @click="activeTab = 'activos'"
           >
-            Activos
+            Equipos activos
+          </button>
+          <button
+            type="button"
+            class="rounded-xl px-3 py-2 text-sm font-medium transition"
+            :class="
+              activeTab === 'reparacion'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
+            "
+            @click="activeTab = 'reparacion'"
+          >
+            Equipos en reparación
           </button>
           <button
             v-if="!isCompanyInventoryRoute"
@@ -1256,6 +1323,7 @@ onUnmounted(() => {
             Historial de ventas
           </button>
           <button
+            v-if="!isCompanyInventoryRoute"
             type="button"
             class="rounded-xl px-3 py-2 text-sm font-medium transition"
             :class="
@@ -1291,18 +1359,6 @@ onUnmounted(() => {
             @click="activeTab = 'bajas'"
           >
             Equipos dados de baja
-          </button>
-          <button
-            type="button"
-            class="rounded-xl px-3 py-2 text-sm font-medium transition"
-            :class="
-              activeTab === 'reparacion'
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
-                : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
-            "
-            @click="activeTab = 'reparacion'"
-          >
-            En reparación / por reparar
           </button>
         </div>
         <input
@@ -1352,6 +1408,54 @@ onUnmounted(() => {
 
       <template v-if="activeTab === 'activos'">
         <p v-if="lotsError" class="mb-3 text-sm text-rose-400">{{ lotsError }}</p>
+        <div
+          class="mb-3 flex flex-wrap items-end gap-3 rounded-xl border border-slate-700/50 bg-[#13161f]/80 px-3 py-2 text-xs text-slate-400"
+        >
+          <label class="block min-w-[9.5rem]">
+            <span class="mb-0.5 block text-[0.65rem] uppercase tracking-wide text-slate-500">Alta desde</span>
+            <input
+              v-model="lotsDateFrom"
+              type="date"
+              class="w-full rounded-lg border border-slate-600 bg-[#111723] px-2 py-1.5 text-sm text-slate-100"
+            />
+          </label>
+          <label class="block min-w-[9.5rem]">
+            <span class="mb-0.5 block text-[0.65rem] uppercase tracking-wide text-slate-500">Alta hasta</span>
+            <input
+              v-model="lotsDateTo"
+              type="date"
+              class="w-full rounded-lg border border-slate-600 bg-[#111723] px-2 py-1.5 text-sm text-slate-100"
+            />
+          </label>
+          <button
+            type="button"
+            class="rounded-lg border border-slate-600 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+            @click="() => { lotsDateFrom = ''; lotsDateTo = ''; }"
+          >
+            Limpiar fechas
+          </button>
+          <label v-if="isAdmin" class="block min-w-[8rem]">
+            <span class="mb-0.5 block text-[0.65rem] uppercase tracking-wide text-slate-500">Tipo activo</span>
+            <input
+              v-model="invFilterAssetType"
+              type="text"
+              placeholder="Ej. Equipo"
+              class="w-full rounded-lg border border-slate-600 bg-[#111723] px-2 py-1.5 text-sm text-slate-100"
+            />
+          </label>
+          <label v-if="isAdmin" class="block min-w-[8rem]">
+            <span class="mb-0.5 block text-[0.65rem] uppercase tracking-wide text-slate-500">Marca</span>
+            <input
+              v-model="invFilterBrand"
+              type="text"
+              class="w-full rounded-lg border border-slate-600 bg-[#111723] px-2 py-1.5 text-sm text-slate-100"
+            />
+          </label>
+          <p class="max-w-xl flex-1 text-[0.7rem] leading-snug text-slate-500">
+            Filtro por fecha de registro del activo. La búsqueda incluye nombre, serial, MAC, marca, modelo, sede y
+            responsable (servidor). Los filtros de tipo/marca se reflejan en la URL (compartir enlace).
+          </p>
+        </div>
         <div v-if="lotsLoading" class="py-8 text-center text-slate-500">Cargando…</div>
         <div v-else class="overflow-x-auto">
           <table class="min-w-[1080px] w-full text-left text-sm">
@@ -1366,7 +1470,7 @@ onUnmounted(() => {
                 <th class="pb-2 pr-3 font-medium">
                   <button type="button" class="hover:text-white" @click="toggleTableSort('lots', 'name')">Activo / dispositivo{{ tableSortIndicator('lots', 'name') }}</button>
                 </th>
-                <th v-if="isAdminInventoryRoute" class="pb-2 pr-3 font-medium">
+                <th v-if="isAdminInventoryRoute && !isCompanyInventoryRoute" class="pb-2 pr-3 font-medium">
                   <button type="button" class="hover:text-white" @click="toggleTableSort('lots', 'owner')">
                     Titular{{ tableSortIndicator('lots', 'owner') }}
                   </button>
@@ -1378,6 +1482,9 @@ onUnmounted(() => {
                   <button type="button" class="hover:text-white" @click="toggleTableSort('lots', 'location')">Ubicación{{ tableSortIndicator('lots', 'location') }}</button>
                 </th>
                 <th class="pb-2 pr-3 font-medium">
+                  <button type="button" class="hover:text-white" @click="toggleTableSort('lots', 'warranty')">Garantía{{ tableSortIndicator('lots', 'warranty') }}</button>
+                </th>
+                <th v-if="!isCompanyInventoryRoute" class="pb-2 pr-3 font-medium">
                   <button type="button" class="hover:text-white" @click="toggleTableSort('lots', 'stock')">
                     Stock (disp. / alq. / tot.){{ tableSortIndicator('lots', 'stock') }}
                   </button>
@@ -1385,7 +1492,7 @@ onUnmounted(() => {
                 <th v-if="!isCompanyInventoryRoute" class="pb-2 pr-3 font-medium">
                   <button type="button" class="hover:text-white" @click="toggleTableSort('lots', 'price')">Precio{{ tableSortIndicator('lots', 'price') }}</button>
                 </th>
-                <th class="pb-2 pr-3 font-medium">
+                <th v-if="!isCompanyInventoryRoute" class="pb-2 pr-3 font-medium">
                   <button type="button" class="hover:text-white" @click="toggleTableSort('lots', 'status')">Estado{{ tableSortIndicator('lots', 'status') }}</button>
                 </th>
                 <th v-if="isAdmin" class="pb-2 font-medium">Acciones</th>
@@ -1395,17 +1502,35 @@ onUnmounted(() => {
               <tr v-for="row in sortedLots" :key="row.id" class="border-b border-slate-800/80">
                 <td class="py-2 pr-3 align-top font-mono text-slate-300">
                   <button type="button" class="text-sky-300 hover:text-sky-200 hover:underline" @click="openAssetSheet(row)">
-                    {{ readDescriptionField(row.description, 'Codigo interno') || row.sku || '—' }}
+                    {{ lotCode(row) }}
                   </button>
                 </td>
-                <td class="py-2 pr-3 align-top text-slate-300">{{ readDescriptionField(row.description, 'Marca') || '—' }}</td>
+                <td class="py-2 pr-3 align-top text-slate-300">{{ row.brand || readDescriptionField(row.description, 'Marca') || '—' }}</td>
                 <td class="py-2 pr-3 align-top text-white">{{ row.name }}</td>
-                <td v-if="isAdminInventoryRoute" class="py-2 pr-3 align-top text-slate-300">
+                <td v-if="isAdminInventoryRoute && !isCompanyInventoryRoute" class="py-2 pr-3 align-top text-slate-300">
                   {{ row.owner?.nombre || '—' }}
                 </td>
                 <td class="py-2 pr-3 align-top text-slate-300">{{ row.created_at?.slice(0, 10) || '—' }}</td>
-                <td class="py-2 pr-3 align-top text-slate-300">{{ readDescriptionField(row.description, 'Ubicacion') || '—' }}</td>
-                <td class="py-2 pr-3 align-top text-xs leading-snug">
+                <td class="py-2 pr-3 align-top text-slate-300">{{ row.site_label || readDescriptionField(row.description, 'Ubicacion') || '—' }}</td>
+                <td class="py-2 pr-3 align-top text-xs text-slate-300">
+                  <span
+                    v-if="row.warranty_semaphore === 'vigente'"
+                    class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-emerald-200"
+                    >{{ row.warranty_semaphore_label || 'Vigente' }}</span
+                  >
+                  <span
+                    v-else-if="row.warranty_semaphore === 'por_vencer'"
+                    class="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-200"
+                    >{{ row.warranty_semaphore_label || 'Por vencer' }}</span
+                  >
+                  <span
+                    v-else-if="row.warranty_semaphore === 'vencida'"
+                    class="rounded bg-rose-500/15 px-1.5 py-0.5 text-rose-200"
+                    >{{ row.warranty_semaphore_label || 'Vencida' }}</span
+                  >
+                  <span v-else class="text-slate-500">{{ row.warranty_semaphore_label || '—' }}</span>
+                </td>
+                <td v-if="!isCompanyInventoryRoute" class="py-2 pr-3 align-top text-xs leading-snug">
                   <span class="font-medium text-emerald-300">{{ row.quantity_available }}</span>
                   <span class="text-slate-600"> / </span>
                   <span class="text-amber-300">{{ Number(row.units_on_rent || 0) }}</span>
@@ -1417,7 +1542,7 @@ onUnmounted(() => {
                   }}</span>
                 </td>
                 <td v-if="!isCompanyInventoryRoute" class="py-2 pr-3 align-top">{{ moneyCo(row.unit_price) }}</td>
-                <td class="py-2 pr-3 align-top">
+                <td v-if="!isCompanyInventoryRoute" class="py-2 pr-3 align-top">
                   <span
                     :class="
                       row.lifecycle_status === 'activo'
@@ -1605,7 +1730,7 @@ onUnmounted(() => {
         </div>
       </template>
 
-      <template v-else-if="activeTab === 'vendidos'">
+      <template v-else-if="activeTab === 'vendidos' && !isCompanyInventoryRoute">
         <div class="overflow-x-auto">
           <table class="min-w-[880px] w-full text-left text-sm">
             <thead>
@@ -1642,7 +1767,7 @@ onUnmounted(() => {
               <tr v-for="row in sortedVendidos" :key="`vend-${row.id}`" class="border-b border-slate-800/80">
                 <td class="py-2 pr-3 align-top font-mono text-slate-300">
                   <button type="button" class="text-sky-300 hover:text-sky-200 hover:underline" @click="openAssetSheet(row)">
-                    {{ readDescriptionField(row.description, 'Codigo interno') || row.sku || '—' }}
+                    {{ lotCode(row) }}
                   </button>
                 </td>
                 <td class="py-2 pr-3 align-top text-white">{{ row.name }}</td>
@@ -1710,7 +1835,7 @@ onUnmounted(() => {
               <tr v-for="row in sortedRentLots" :key="`rentlot-${row.id}`" class="border-b border-slate-800/80">
                 <td class="py-2 pr-3 align-top font-mono text-slate-300">
                   <button type="button" class="text-sky-300 hover:text-sky-200 hover:underline" @click="openAssetSheet(row)">
-                    {{ readDescriptionField(row.description, 'Codigo interno') || row.sku || '—' }}
+                    {{ lotCode(row) }}
                   </button>
                 </td>
                 <td class="py-2 pr-3 align-top text-white">{{ row.name }}</td>
@@ -1770,10 +1895,10 @@ onUnmounted(() => {
                 <th class="pb-2 pr-3 font-medium">
                   <button type="button" class="hover:text-white" @click="toggleTableSort('bajas', 'detail')">Detalle{{ tableSortIndicator('bajas', 'detail') }}</button>
                 </th>
-                <th class="pb-2 pr-3 font-medium">
+                <th v-if="!isCompanyInventoryRoute" class="pb-2 pr-3 font-medium">
                   <button type="button" class="hover:text-white" @click="toggleTableSort('bajas', 'stock')">Stock{{ tableSortIndicator('bajas', 'stock') }}</button>
                 </th>
-                <th class="pb-2 pr-3 font-medium">Estado</th>
+                <th v-if="!isCompanyInventoryRoute" class="pb-2 pr-3 font-medium">Estado</th>
               </tr>
             </thead>
             <tbody>
@@ -1782,15 +1907,15 @@ onUnmounted(() => {
                 <td class="py-2 pr-3 align-top text-slate-300">{{ row.created_at?.slice(0, 10) || '—' }}</td>
                 <td class="py-2 pr-3 align-top font-mono text-slate-300">
                   <button type="button" class="text-sky-300 hover:text-sky-200 hover:underline" @click="openAssetSheet(row)">
-                    {{ readDescriptionField(row.description, 'Codigo interno') || row.sku || '—' }}
+                    {{ lotCode(row) }}
                   </button>
                 </td>
                 <td class="py-2 pr-3 align-top text-slate-400">{{ row.description || '—' }}</td>
-                <td class="py-2 pr-3 align-top">{{ row.quantity_available }}</td>
-                <td class="py-2 pr-3 align-top text-amber-400">Dado de baja</td>
+                <td v-if="!isCompanyInventoryRoute" class="py-2 pr-3 align-top">{{ row.quantity_available }}</td>
+                <td v-if="!isCompanyInventoryRoute" class="py-2 pr-3 align-top text-amber-400">Dado de baja</td>
               </tr>
               <tr v-if="!sortedBajas.length">
-                <td colspan="6" class="py-3 text-slate-500">No hay equipos dados de baja.</td>
+                <td :colspan="isCompanyInventoryRoute ? 4 : 6" class="py-3 text-slate-500">No hay equipos dados de baja.</td>
               </tr>
             </tbody>
           </table>
@@ -1817,7 +1942,7 @@ onUnmounted(() => {
                 <th class="pb-2 pr-3 font-medium">
                   <button type="button" class="hover:text-white" @click="toggleTableSort('repair', 'detail')">Detalle{{ tableSortIndicator('repair', 'detail') }}</button>
                 </th>
-                <th class="pb-2 pr-3 font-medium">
+                <th v-if="!isCompanyInventoryRoute" class="pb-2 pr-3 font-medium">
                   <button type="button" class="hover:text-white" @click="toggleTableSort('repair', 'status')">Estado{{ tableSortIndicator('repair', 'status') }}</button>
                 </th>
                 <th v-if="isAdmin" class="pb-2 pr-3 font-medium">Acciones</th>
@@ -1828,7 +1953,7 @@ onUnmounted(() => {
                 <td class="py-2 pr-3 align-top text-white">{{ row.name }}</td>
                 <td class="py-2 pr-3 align-top font-mono text-slate-300">
                   <button type="button" class="text-sky-300 hover:text-sky-200 hover:underline" @click="openAssetSheet(row)">
-                    {{ readDescriptionField(row.description, 'Codigo interno') || row.sku || '—' }}
+                    {{ lotCode(row) }}
                   </button>
                 </td>
                 <td class="py-2 pr-3 align-top text-slate-300">{{ readDescriptionField(row.description, 'Ubicacion') || '—' }}</td>
@@ -1836,7 +1961,7 @@ onUnmounted(() => {
                   {{ readDescriptionField(row.description, 'Estado fisico') || '—' }}
                 </td>
                 <td class="py-2 pr-3 align-top text-slate-400">{{ row.description || '—' }}</td>
-                <td class="py-2 pr-3 align-top">
+                <td v-if="!isCompanyInventoryRoute" class="py-2 pr-3 align-top">
                   <span class="text-amber-300">
                     {{ lotLifecycleStatusLabel(row) }}
                   </span>
@@ -1851,7 +1976,12 @@ onUnmounted(() => {
                 </td>
               </tr>
               <tr v-if="!sortedRepair.length">
-                <td :colspan="isAdmin ? 7 : 6" class="py-3 text-slate-500">No hay equipos en reparación o pendientes de reparación.</td>
+                <td
+                  :colspan="isCompanyInventoryRoute ? (isAdmin ? 6 : 5) : isAdmin ? 7 : 6"
+                  class="py-3 text-slate-500"
+                >
+                  No hay equipos en reparación o pendientes de reparación.
+                </td>
               </tr>
             </tbody>
           </table>
@@ -1869,7 +1999,8 @@ onUnmounted(() => {
       <div class="my-auto w-full max-w-2xl rounded-2xl border border-slate-600 bg-[#1c212c] p-5 shadow-2xl">
         <h3 class="text-lg font-semibold text-white">Reporte de estado del equipo</h3>
         <p class="mt-1 text-sm text-slate-400">
-          {{ reportLot?.name || '—' }} · Estado actual: {{ lotLifecycleStatusLabel(reportLot) }}
+          {{ reportLot?.name || '—'
+          }}<template v-if="!isCompanyInventoryRoute"> · Estado actual: {{ lotLifecycleStatusLabel(reportLot) }}</template>
         </p>
         <p v-if="reportError" class="mt-2 text-sm text-rose-400">{{ reportError }}</p>
         <form class="mt-4 space-y-3" @submit.prevent="submitLifecycleReport">
@@ -1884,21 +2015,39 @@ onUnmounted(() => {
               </option>
             </select>
           </label>
+          <template v-if="reportTargetStatus === 'reparacion' || reportTargetStatus === 'activo'">
+            <label class="block text-sm">
+              <span class="text-slate-400">Estado físico actual</span>
+              <select
+                v-model="reportPhysicalCondition"
+                required
+                class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+              >
+                <option disabled value="">Seleccione…</option>
+                <option v-for="c in reportPhysicalSelectOptions" :key="c" :value="c">{{ c }}</option>
+              </select>
+            </label>
+            <label class="block text-sm">
+              <span class="text-slate-400">Alcance del daño o intervención</span>
+              <select
+                v-model="reportDamageKind"
+                required
+                class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+              >
+                <option disabled value="">Seleccione…</option>
+                <option value="hardware">Hardware</option>
+                <option value="software">Software</option>
+              </select>
+            </label>
+          </template>
           <label class="block text-sm">
-            <span class="text-slate-400">Motivo / justificación</span>
+            <span class="text-slate-400">{{ reportNoteLabel }}</span>
             <textarea
               v-model="reportReason"
-              rows="3"
+              rows="4"
               required
-              class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
-            />
-          </label>
-          <label v-if="reportTargetStatus === 'activo'" class="block text-sm">
-            <span class="text-slate-400">Detalle de reparación realizada</span>
-            <textarea
-              v-model="reportResolution"
-              rows="2"
-              class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+              :placeholder="reportNotePlaceholder"
+              class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white placeholder:text-slate-600"
             />
           </label>
           <div class="flex justify-end gap-2 pt-1">
@@ -1919,7 +2068,7 @@ onUnmounted(() => {
           <p v-if="reportHistoryLoading" class="text-xs text-slate-500">Cargando historial…</p>
           <ul v-else class="max-h-44 space-y-2 overflow-y-auto text-xs">
             <li v-for="ev in reportHistory" :key="`ev-${ev.id}`" class="rounded border border-slate-700/70 bg-slate-900/30 px-2 py-1.5">
-              <p class="font-semibold text-slate-200">{{ ev.action }}</p>
+              <p class="font-semibold text-slate-200">{{ humanizeAuditAction(ev.action) }}</p>
               <p class="text-slate-400">{{ ev.occurred_at?.slice(0, 19)?.replace('T', ' ') || '—' }}</p>
             </li>
             <li v-if="!reportHistory.length" class="text-slate-500">Sin eventos registrados.</li>
@@ -1940,10 +2089,18 @@ onUnmounted(() => {
           <div>
             <h3 class="text-xl font-semibold text-white">Hoja de vida del activo</h3>
             <p class="mt-1 text-sm text-slate-400">
-              {{ assetSheetLot?.name || '—' }} · Código: {{ lotCode(assetSheetLot) }} · Estado: {{ lotLifecycleStatusLabel(assetSheetLot) }}
+              {{ assetSheetLot?.name || '—' }} · Código: {{ lotCode(assetSheetLot)
+              }}<template v-if="!isCompanyInventoryRoute"> · Estado: {{ lotLifecycleStatusLabel(assetSheetLot) }}</template>
             </p>
           </div>
           <div class="flex gap-2">
+            <button
+              type="button"
+              class="rounded-lg border border-slate-500 bg-slate-800/60 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700"
+              @click="openAssetDetailRoute"
+            >
+              Abrir vista detallada
+            </button>
             <button
               type="button"
               class="rounded-lg border border-slate-500 bg-slate-800/60 px-4 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700"
@@ -2031,7 +2188,7 @@ onUnmounted(() => {
         <p v-if="lotFormError" class="mb-3 text-sm text-rose-400">{{ lotFormError }}</p>
         <form class="space-y-3" @submit.prevent="submitLot">
           <p
-            v-if="lotModalMode === 'create' && isAdmin && isAdminInventoryRoute"
+            v-if="lotModalMode === 'create' && isAdmin && isAdminInventoryRoute && !isCompanyInventoryRoute"
             class="rounded-lg border border-slate-600/80 bg-slate-900/40 px-3 py-2 text-xs text-slate-400"
           >
             El titular del activo es quien lo registra (su usuario de administración).
@@ -2144,7 +2301,7 @@ onUnmounted(() => {
               class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
             />
             <span v-if="isCompanyInventoryRoute && lotModalMode === 'create'" class="mt-1 block text-xs text-slate-500">
-              Si lo deja vacío y no hay código manual en SKU, el servidor asignará el código de inventario del activo.
+              Si lo deja vacío, el servidor asignará un código interno de inventario automáticamente.
             </span>
           </label>
           <label class="block text-sm">
@@ -2307,6 +2464,45 @@ onUnmounted(() => {
               class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
             />
           </label>
+          <div v-if="isCompanyInventoryRoute" class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label class="block text-sm">
+              <span class="text-slate-400">Área / piso (opcional)</span>
+              <input
+                v-model="lotForm.area_label"
+                class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+              />
+            </label>
+            <label class="block text-sm">
+              <span class="text-slate-400">Responsable en empresa (opcional)</span>
+              <input
+                v-model="lotForm.responsible_name"
+                class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+              />
+            </label>
+            <label class="block text-sm">
+              <span class="text-slate-400">Cargo responsable (opcional)</span>
+              <input
+                v-model="lotForm.responsible_role"
+                class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+              />
+            </label>
+            <label class="block text-sm">
+              <span class="text-slate-400">Fecha de compra (opcional)</span>
+              <input
+                v-model="lotForm.purchase_date"
+                type="date"
+                class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+              />
+            </label>
+            <label class="block text-sm sm:col-span-2">
+              <span class="text-slate-400">Ingreso a custodia (opcional)</span>
+              <input
+                v-model="lotForm.custody_received_at"
+                type="date"
+                class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+              />
+            </label>
+          </div>
           <label class="block text-sm">
             <span class="text-slate-400">Descripción</span>
             <textarea
@@ -2315,24 +2511,26 @@ onUnmounted(() => {
               class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
             />
           </label>
-          <label class="block text-sm">
-            <span class="text-slate-400">Cantidad disponible</span>
-            <input
-              v-model.number="lotForm.quantity_available"
-              type="number"
-              min="0"
-              required
-              class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
-            />
-          </label>
-          <label v-if="lotModalMode === 'edit'" class="block text-sm">
-            <span class="text-slate-400">Motivo del ajuste (si cambia la cantidad)</span>
-            <input
-              v-model="lotForm.adjustment_note"
-              class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
-              placeholder="Ej. inventario físico, devolución…"
-            />
-          </label>
+          <template v-if="!isCompanyInventoryRoute">
+            <label class="block text-sm">
+              <span class="text-slate-400">Cantidad disponible</span>
+              <input
+                v-model.number="lotForm.quantity_available"
+                type="number"
+                min="0"
+                required
+                class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+              />
+            </label>
+            <label v-if="lotModalMode === 'edit'" class="block text-sm">
+              <span class="text-slate-400">Motivo del ajuste (si cambia la cantidad)</span>
+              <input
+                v-model="lotForm.adjustment_note"
+                class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+                placeholder="Ej. inventario físico, devolución…"
+              />
+            </label>
+          </template>
           <label v-if="!isCompanyInventoryRoute" class="block text-sm">
             <span class="text-slate-400">Precio unitario</span>
             <input
@@ -2386,6 +2584,81 @@ onUnmounted(() => {
           >
             Entendido
           </button>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="importCsvModalOpen"
+        class="fixed inset-0 z-[58] flex items-start justify-center overflow-y-auto bg-black/65 p-4 py-10 backdrop-blur-[1px]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="import-csv-title"
+        @click.self="importCsvModalOpen = false"
+      >
+        <div
+          class="my-auto w-full max-w-lg rounded-2xl border border-slate-600 bg-[#1c212c] p-5 shadow-2xl"
+          @click.stop
+        >
+          <div class="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <h3 id="import-csv-title" class="text-lg font-semibold text-white">Importar equipos (CSV)</h3>
+              <p class="mt-1 text-xs text-slate-500">UTF-8, columnas separadas con «;».</p>
+            </div>
+            <button
+              type="button"
+              class="rounded-lg p-2 text-slate-400 hover:bg-slate-700/80 hover:text-white"
+              aria-label="Cerrar"
+              @click="importCsvModalOpen = false"
+            >
+              <span class="text-xl leading-none" aria-hidden="true">×</span>
+            </button>
+          </div>
+          <p class="mb-3 text-[0.7rem] leading-snug text-slate-500">
+            Cabecera esperada:
+            <span class="mt-1 block break-all font-mono text-[0.65rem] text-slate-300"
+              >name;quantity;asset_type;asset_subtype;serial_number;brand;model;site_label;mac_address;warranty_until;physical_condition;area_label;responsible_name;responsible_role;purchase_date;custody_received_at;description</span
+            >
+          </p>
+          <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+            <input
+              ref="importCsvFileRef"
+              type="file"
+              accept=".csv,text/csv"
+              class="min-h-[44px] w-full min-w-0 flex-1 text-sm text-slate-300 file:mr-2 file:min-h-[44px] file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-2.5 file:text-sm file:text-slate-100"
+            />
+            <div class="flex w-full flex-wrap gap-2 sm:w-auto">
+              <button
+                type="button"
+                class="min-h-[44px] flex-1 rounded-lg border border-sky-600/60 px-4 py-2.5 text-sm font-medium text-sky-200 hover:bg-sky-900/30 disabled:opacity-40 sm:flex-none"
+                :disabled="importCsvBusy"
+                @click="runImportCsv(true)"
+              >
+                Vista previa
+              </button>
+              <button
+                type="button"
+                class="min-h-[44px] flex-1 rounded-lg border border-emerald-600/60 px-4 py-2.5 text-sm font-medium text-emerald-200 hover:bg-emerald-900/30 disabled:opacity-40 sm:flex-none"
+                :disabled="importCsvBusy"
+                @click="runImportCsv(false)"
+              >
+                Aplicar importación
+              </button>
+            </div>
+          </div>
+          <p v-if="importCsvFeedback" class="mt-4 rounded-lg border border-slate-600/60 bg-slate-900/50 px-3 py-2 text-sm text-slate-200">
+            {{ importCsvFeedback }}
+          </p>
+          <div class="mt-5 flex justify-end border-t border-slate-700/80 pt-4">
+            <button
+              type="button"
+              class="rounded-lg px-4 py-2 text-sm text-slate-400 hover:bg-slate-800 hover:text-white"
+              @click="importCsvModalOpen = false"
+            >
+              Cerrar
+            </button>
+          </div>
         </div>
       </div>
     </Teleport>

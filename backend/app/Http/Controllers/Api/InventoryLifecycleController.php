@@ -27,7 +27,7 @@ class InventoryLifecycleController extends Controller
 
         $q = InventoryLifecycleTransitionRequest::query()
             ->with([
-                'lot:id,name,sku,lifecycle_status,tenant_company_id',
+                'lot:id,name,sku,description,serial_number,lifecycle_status,tenant_company_id',
                 'requestedBy:id,nombre,correo,rol',
                 'resolvedBy:id,nombre,correo,rol',
                 'approvals.approvedBy:id,nombre,correo,rol',
@@ -50,11 +50,29 @@ class InventoryLifecycleController extends Controller
     public function report(Request $request, InventoryLot $inventoryLot): JsonResponse
     {
         $actor = $request->user();
-        $validated = $request->validate([
+        $targetInput = (string) $request->input('target_status');
+        $rules = [
             'target_status' => ['required', 'string', 'in:activo,reparacion,baja'],
             'reason' => ['required', 'string', 'max:3000'],
             'resolution_note' => ['nullable', 'string', 'max:3000'],
-        ]);
+        ];
+        if (in_array($targetInput, [InventoryLot::LIFECYCLE_REPARACION, InventoryLot::LIFECYCLE_ACTIVO], true)) {
+            $rules['physical_condition'] = ['required', 'string', 'max:120'];
+            $rules['repair_damage_kind'] = ['required', 'string', 'in:hardware,software'];
+        } else {
+            $rules['physical_condition'] = ['sometimes', 'nullable', 'string', 'max:120'];
+            $rules['repair_damage_kind'] = ['sometimes', 'nullable', 'string', 'in:hardware,software'];
+        }
+        $validated = $request->validate($rules);
+        // Reactivación: motivo genérico en `reason` y detalle operativo en `resolution_note` (un solo cuadro en UI).
+        if (($validated['target_status'] ?? '') === InventoryLot::LIFECYCLE_ACTIVO) {
+            $detail = trim((string) ($validated['resolution_note'] ?? ''));
+            if ($detail === '') {
+                throw ValidationException::withMessages([
+                    'resolution_note' => ['Indique el detalle de la reparación realizada.'],
+                ]);
+            }
+        }
 
         if (! $this->canOperateLot($actor, $inventoryLot)) {
             abort(403);
@@ -124,6 +142,7 @@ class InventoryLifecycleController extends Controller
         $updated = DB::transaction(function () use ($actor, $inventoryLot, $validated, $request, $target) {
             $before = $inventoryLot->only([
                 'lifecycle_status', 'is_active', 'allow_sale', 'allow_rental', 'repair_reason', 'repair_resolution',
+                'physical_condition', 'repair_damage_kind',
             ]);
 
             if ($target === InventoryLot::LIFECYCLE_REPARACION) {
@@ -131,6 +150,8 @@ class InventoryLifecycleController extends Controller
                 $inventoryLot->lifecycle_status_changed_at = now();
                 $inventoryLot->repair_reason = trim((string) $validated['reason']);
                 $inventoryLot->repair_resolution = null;
+                $inventoryLot->physical_condition = trim((string) $validated['physical_condition']);
+                $inventoryLot->repair_damage_kind = (string) $validated['repair_damage_kind'];
                 $inventoryLot->is_active = false;
                 $inventoryLot->allow_sale = false;
                 $inventoryLot->allow_rental = false;
@@ -145,11 +166,24 @@ class InventoryLifecycleController extends Controller
                 $inventoryLot->lifecycle_status = InventoryLot::LIFECYCLE_ACTIVO;
                 $inventoryLot->lifecycle_status_changed_at = now();
                 $inventoryLot->repair_resolution = trim((string) ($validated['resolution_note'] ?? $validated['reason']));
+                $inventoryLot->physical_condition = trim((string) $validated['physical_condition']);
+                $inventoryLot->repair_damage_kind = (string) $validated['repair_damage_kind'];
                 $inventoryLot->is_active = true;
                 $movementType = InventoryMovement::TYPE_REACTIVACION;
                 $action = 'lifecycle_to_activo';
             }
             $inventoryLot->save();
+
+            $movementNote = trim((string) $validated['reason']);
+            if ($target === InventoryLot::LIFECYCLE_ACTIVO) {
+                $movementNote = trim((string) ($validated['resolution_note'] ?? $movementNote));
+            }
+            if (in_array($target, [InventoryLot::LIFECYCLE_REPARACION, InventoryLot::LIFECYCLE_ACTIVO], true)) {
+                $pk = (string) $validated['repair_damage_kind'];
+                $damageLabel = $pk === InventoryLot::REPAIR_DAMAGE_HARDWARE ? 'Hardware' : 'Software';
+                $phys = trim((string) $validated['physical_condition']);
+                $movementNote = trim($movementNote.' [Estado físico: '.$phys.'; daño: '.$damageLabel.']');
+            }
 
             InventoryMovement::query()->create([
                 'inventory_lot_id' => $inventoryLot->id,
@@ -158,12 +192,13 @@ class InventoryLifecycleController extends Controller
                 'type' => $movementType,
                 'quantity_delta' => 0,
                 'inventory_sale_line_id' => null,
-                'note' => trim((string) $validated['reason']),
+                'note' => $movementNote,
                 'created_at' => now(),
             ]);
 
             $after = $inventoryLot->only([
                 'lifecycle_status', 'is_active', 'allow_sale', 'allow_rental', 'repair_reason', 'repair_resolution',
+                'physical_condition', 'repair_damage_kind',
             ]);
             $this->audit($request, $inventoryLot, $action, $before, $after);
 

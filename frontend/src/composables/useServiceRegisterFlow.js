@@ -1,4 +1,5 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   clearServiceDraft,
   createService,
@@ -18,6 +19,11 @@ import {
 import { useUiDialogStore } from '@/stores/uiDialog'
 import { isLineDescriptionStillTemplate } from '@/utils/serviceLineDescriptionTemplate.js'
 
+function inventoryLotShortRef(lot) {
+  if (!lot) return 'sin código interno'
+  return lot.internal_code || lot.serial_number || (lot.id != null ? `LOT-${lot.id}` : 'sin código interno')
+}
+
 /**
  * Flujo compartido: alta de servicio por líneas (catálogo + Otro).
  * @param {{
@@ -36,6 +42,7 @@ export function useServiceRegisterFlow({
   panelOpenRef = null,
 }) {
   const uiDialog = useUiDialogStore()
+  const route = useRoute()
 
   const registerKind = registerKindOption ?? ref('servicio')
 
@@ -48,6 +55,7 @@ export function useServiceRegisterFlow({
     if (k === 'servicio') return false
     if (k === 'venta') return empleadoCommercialVentaEnabled.value
     if (k === 'alquiler') return empleadoCommercialAlquilerEnabled.value
+    if (k === 'mantenimiento') return false
     return false
   })
 
@@ -94,7 +102,13 @@ export function useServiceRegisterFlow({
     const k = String(registerKind.value || 'servicio')
     const invOp = k === 'venta' || k === 'alquiler' ? k : 'servicio'
     const serviceTypeDefault =
-      k === 'venta' ? 'Venta de equipo' : k === 'alquiler' ? 'Alquiler de equipo' : ''
+      k === 'venta'
+        ? 'Venta de equipo'
+        : k === 'alquiler'
+          ? 'Alquiler de equipo'
+          : k === 'mantenimiento'
+            ? 'Mantenimiento'
+            : ''
     form.value = {
       company_id: '',
       use_quick_client: false,
@@ -157,7 +171,11 @@ export function useServiceRegisterFlow({
   function validateBeforeSubmit() {
     fieldErrors.value = {}
     const e = {}
+    const rk = String(registerKind.value || 'servicio')
     if (form.value.use_quick_client) {
+      if (rk === 'mantenimiento') {
+        e.company_id = ['El mantenimiento requiere empresa registrada; no aplica cliente puntual.']
+      }
       if (digitsOnly(form.value.quick_telefono).length < 7) {
         e.quick_telefono = ['Indica un teléfono con al menos 7 dígitos (identifica al cliente puntual).']
       }
@@ -167,9 +185,11 @@ export function useServiceRegisterFlow({
     if (!String(form.value.client_name || '').trim()) {
       e.client_name = ['Indica el nombre del cliente atendido.']
     }
-    const rk = String(registerKind.value || 'servicio')
     if ((rk === 'venta' || rk === 'alquiler') && !String(form.value.service_type || '').trim()) {
       form.value.service_type = rk === 'venta' ? 'Venta de equipo' : 'Alquiler de equipo'
+    }
+    if (rk === 'mantenimiento' && !String(form.value.service_type || '').trim()) {
+      form.value.service_type = 'Mantenimiento'
     }
     if (!String(form.value.service_type || '').trim()) {
       e.service_type = ['Indica el tipo de servicio (catálogo o texto libre).']
@@ -210,6 +230,19 @@ export function useServiceRegisterFlow({
         const days = Number(form.value.inventory_days)
         if (!Number.isFinite(days) || days < 1) {
           e.inventory_days = ['Indica los días de alquiler (mínimo 1).']
+        }
+      }
+    }
+    if (rk === 'mantenimiento') {
+      const lotId = Number(form.value.inventory_lot_id)
+      if (!Number.isInteger(lotId) || lotId <= 0) {
+        e.inventory_lot_id = ['Seleccione el equipo a intervenir para el mantenimiento.']
+      } else {
+        const lot = inventoryLots.value.find((x) => Number(x.id) === lotId)
+        if (!lot) {
+          e.inventory_lot_id = ['El equipo seleccionado no existe en el inventario cargado.']
+        } else if (!form.value.use_quick_client && Number(lot.tenant_company_id || 0) !== Number(form.value.company_id || 0)) {
+          e.inventory_lot_id = ['El equipo no pertenece a la empresa seleccionada.']
         }
       }
     }
@@ -320,15 +353,22 @@ export function useServiceRegisterFlow({
   async function refreshInventoryLots() {
     const k = String(registerKind.value || 'servicio')
     const needLots =
-      !isEmpleadoRegistro.value || k === 'venta' || k === 'alquiler'
+      !isEmpleadoRegistro.value || k === 'venta' || k === 'alquiler' || k === 'mantenimiento'
     if (!needLots) {
       inventoryLots.value = []
       return
     }
     try {
-      const res = await fetchInventoryLots({
-        per_page: 200,
-      })
+      const params = { per_page: 200 }
+      if (k === 'mantenimiento' && form.value.company_id) {
+        params.tenant_company_id = String(form.value.company_id)
+        if (isEmpleadoRegistro.value) {
+          params.for_maintenance = '1'
+        }
+      } else if (isEmpleadoRegistro.value) {
+        params.active_only = '1'
+      }
+      const res = await fetchInventoryLots(params)
       inventoryLots.value = res.data || []
     } catch {
       inventoryLots.value = []
@@ -366,9 +406,29 @@ export function useServiceRegisterFlow({
     await refreshInventoryLots()
   }
 
+  /** Desde hoja de vida (custodia): ?company_id=&inventory_lot_id= */
+  async function applyMaintenanceQueryFromRoute() {
+    const k = String(registerKind.value || 'servicio')
+    if (k !== 'mantenimiento') return
+    const q = route.query || {}
+    const rawCid = q.company_id ?? q.tenant_company_id
+    const rawLid = q.inventory_lot_id ?? q.lot_id
+    if (!rawCid && !rawLid) return
+    if (rawCid) {
+      const n = Number(rawCid)
+      if (Number.isInteger(n) && n > 0) form.value.company_id = String(n)
+    }
+    if (rawCid) await refreshInventoryLots()
+    if (rawLid) {
+      const n = Number(rawLid)
+      if (Number.isInteger(n) && n > 0) form.value.inventory_lot_id = String(n)
+    }
+  }
+
   onMounted(async () => {
     if (!panelOpenRef) {
       await loadInitialData()
+      await applyMaintenanceQueryFromRoute()
     }
   })
 
@@ -381,6 +441,7 @@ export function useServiceRegisterFlow({
           fieldErrors.value = {}
           resetFormToDefaults()
           await loadInitialData()
+          await applyMaintenanceQueryFromRoute()
         }
       },
       { flush: 'post', immediate: true }
@@ -429,6 +490,15 @@ export function useServiceRegisterFlow({
     }
   )
 
+  watch(
+    () => form.value.company_id,
+    async (cid, prev) => {
+      if (prev === undefined) return
+      if (String(registerKind.value || 'servicio') !== 'mantenimiento') return
+      await refreshInventoryLots()
+    }
+  )
+
   onUnmounted(() => {
     clearTimeout(toastTimer)
   })
@@ -460,12 +530,21 @@ export function useServiceRegisterFlow({
         description: form.value.description.trim(),
         amount: Number(form.value.amount),
       }
+      if (String(registerKind.value || 'servicio') === 'mantenimiento') {
+        payload.kind = 'mantenimiento'
+        payload.inventory_lot_id = Number(form.value.inventory_lot_id)
+      }
       if (form.value.use_quick_client) {
-        payload.quick_client = {
-          nombre: baseClient,
-          telefono: String(form.value.quick_telefono || '').trim(),
+        if (String(registerKind.value || 'servicio') !== 'mantenimiento') {
+          payload.quick_client = {
+            nombre: baseClient,
+            telefono: String(form.value.quick_telefono || '').trim(),
+          }
         }
       } else {
+        payload.company_id = Number(form.value.company_id)
+      }
+      if (String(registerKind.value || 'servicio') === 'mantenimiento' && !payload.company_id) {
         payload.company_id = Number(form.value.company_id)
       }
       const ls = Array.isArray(form.value.lines) ? form.value.lines : []
@@ -498,7 +577,7 @@ export function useServiceRegisterFlow({
             }
             const unit = Number(lot.unit_price || 0)
             const total = unit * qty
-            const lineDesc = `Equipo ${lot.name} (${lot.sku || 'sin SKU'}), cantidad ${qty}, precio unitario fijo ${unit.toFixed(2)}.`
+            const lineDesc = `Equipo ${lot.name} (${inventoryLotShortRef(lot)}), cantidad ${qty}, precio unitario fijo ${unit.toFixed(2)}.`
             opItems.push({
               custom_name: `Venta equipo: ${lot.name}`,
               amount: Number(total.toFixed(2)),
@@ -517,7 +596,7 @@ export function useServiceRegisterFlow({
             }
             const unit = Number(lot.unit_price || 0)
             const total = unit * qty * days
-            const lineDesc = `Equipo ${lot.name} (${lot.sku || 'sin SKU'}), cantidad ${qty}, días ${days}, tarifa diaria fija ${unit.toFixed(2)}.`
+            const lineDesc = `Equipo ${lot.name} (${inventoryLotShortRef(lot)}), cantidad ${qty}, días ${days}, tarifa diaria fija ${unit.toFixed(2)}.`
             opItems.push({
               custom_name: `Alquiler equipo: ${lot.name}`,
               amount: Number(total.toFixed(2)),

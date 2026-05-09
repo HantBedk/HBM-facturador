@@ -7,6 +7,7 @@ const route = useRoute()
 const isNotif = computed(() => route.name === 'admin-notificaciones-tecnicos')
 const isHistorial = computed(() => route.name === 'admin-config-historial')
 const isBillingAuto = computed(() => route.name === 'admin-config-billing-automation')
+const isMailNotif = computed(() => route.name === 'admin-config-mail-notifications')
 const isInventoryConfig = computed(() => route.name === 'admin-config-inventario')
 </script>
 
@@ -19,10 +20,10 @@ const isInventoryConfig = computed(() => route.name === 'admin-config-inventario
         class="w-full rounded-2xl border border-slate-700/55 bg-slate-900/45 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
         aria-label="Secciones de configuración"
       >
-        <div class="grid grid-cols-2 gap-1 sm:flex sm:flex-nowrap sm:gap-1">
+        <div class="flex flex-wrap gap-1">
           <RouterLink
             to="/admin/configuracion/notificaciones-tecnicos"
-            class="flex min-h-[2.75rem] min-w-0 items-center justify-center rounded-xl px-2 py-2.5 text-center text-sm font-medium leading-snug transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f172a] sm:flex-1 sm:px-3"
+            class="flex min-h-[2.75rem] min-w-[calc(50%-0.125rem)] flex-1 basis-[calc(50%-0.125rem)] items-center justify-center rounded-xl px-2 py-2.5 text-center text-sm font-medium leading-snug transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f172a] sm:min-w-0 sm:basis-0 sm:px-3"
             :class="
               isNotif
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25 sm:shadow-sm'
@@ -34,7 +35,7 @@ const isInventoryConfig = computed(() => route.name === 'admin-config-inventario
           </RouterLink>
           <RouterLink
             to="/admin/configuracion/historial"
-            class="flex min-h-[2.75rem] min-w-0 items-center justify-center rounded-xl px-2 py-2.5 text-center text-sm font-medium leading-snug transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f172a] sm:flex-1 sm:px-3"
+            class="flex min-h-[2.75rem] min-w-[calc(50%-0.125rem)] flex-1 basis-[calc(50%-0.125rem)] items-center justify-center rounded-xl px-2 py-2.5 text-center text-sm font-medium leading-snug transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f172a] sm:min-w-0 sm:basis-0 sm:px-3"
             :class="
               isHistorial
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25 sm:shadow-sm'
@@ -45,8 +46,20 @@ const isInventoryConfig = computed(() => route.name === 'admin-config-inventario
             Historial
           </RouterLink>
           <RouterLink
+            to="/admin/configuracion/correo-notificaciones"
+            class="flex min-h-[2.75rem] min-w-[calc(50%-0.125rem)] flex-1 basis-[calc(50%-0.125rem)] items-center justify-center rounded-xl px-2 py-2.5 text-center text-sm font-medium leading-snug transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f172a] sm:min-w-0 sm:basis-0 sm:px-3"
+            :class="
+              isMailNotif
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25 sm:shadow-sm'
+                : 'text-slate-400 hover:bg-slate-800/70 hover:text-white active:scale-[0.98] sm:hover:bg-slate-800/50'
+            "
+            :aria-current="isMailNotif ? 'page' : undefined"
+          >
+            Correo sistema
+          </RouterLink>
+          <RouterLink
             to="/admin/configuracion/inventario"
-            class="flex min-h-[2.75rem] min-w-0 items-center justify-center rounded-xl px-2 py-2.5 text-center text-sm font-medium leading-snug transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f172a] sm:flex-1 sm:px-3"
+            class="flex min-h-[2.75rem] min-w-[calc(50%-0.125rem)] flex-1 basis-[calc(50%-0.125rem)] items-center justify-center rounded-xl px-2 py-2.5 text-center text-sm font-medium leading-snug transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f172a] sm:min-w-0 sm:basis-0 sm:px-3"
             :class="
               isInventoryConfig
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25 sm:shadow-sm'
@@ -58,7 +71,7 @@ const isInventoryConfig = computed(() => route.name === 'admin-config-inventario
           </RouterLink>
           <RouterLink
             to="/admin/configuracion/facturacion-automatica"
-            class="flex min-h-[2.75rem] min-w-0 items-center justify-center rounded-xl px-2 py-2.5 text-center text-sm font-medium leading-snug transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f172a] sm:flex-1 sm:px-3"
+            class="flex min-h-[2.75rem] min-w-[calc(50%-0.125rem)] flex-1 basis-[calc(50%-0.125rem)] items-center justify-center rounded-xl px-2 py-2.5 text-center text-sm font-medium leading-snug transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f172a] sm:min-w-0 sm:basis-0 sm:px-3"
             :class="
               isBillingAuto
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25 sm:shadow-sm'

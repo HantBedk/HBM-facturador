@@ -23,6 +23,8 @@ const panelTitle = computed(() =>
     ? 'Registrar venta'
     : registerKind.value === 'alquiler'
       ? 'Registrar alquiler'
+      : registerKind.value === 'mantenimiento'
+        ? 'Registrar mantenimiento'
       : 'Registrar servicio'
 )
 const panelKicker = computed(() =>
@@ -30,6 +32,8 @@ const panelKicker = computed(() =>
     ? 'Nueva venta'
     : registerKind.value === 'alquiler'
       ? 'Nuevo alquiler'
+      : registerKind.value === 'mantenimiento'
+        ? 'Nuevo mantenimiento'
       : 'Nuevo servicio'
 )
 const fullPageTo = computed(() =>
@@ -38,15 +42,21 @@ const fullPageTo = computed(() =>
       ? '/empleado/registro-venta'
       : registerKind.value === 'alquiler'
         ? '/empleado/registro-alquiler'
+        : registerKind.value === 'mantenimiento'
+          ? '/empleado/registro-mantenimiento'
         : '/empleado/registro-servicio'
     : registerKind.value === 'venta'
       ? '/admin/servicios/nuevo-venta'
       : registerKind.value === 'alquiler'
         ? '/admin/servicios/nuevo-alquiler'
+        : registerKind.value === 'mantenimiento'
+          ? '/admin/servicios/nuevo-mantenimiento'
         : '/admin/servicios/nuevo'
 )
 const effectiveAllowInventoryCommercialOps = computed(() =>
-  registerKind.value === 'servicio' ? false : allowInventoryCommercialOps.value
+  registerKind.value === 'venta' || registerKind.value === 'alquiler'
+    ? allowInventoryCommercialOps.value
+    : false
 )
 
 const {
@@ -69,11 +79,19 @@ const {
   async onAdminAfterCreate(created) {
     emit('created', created)
     emit('close')
+    if (registerKind.value === 'mantenimiento') {
+      await router.push('/admin/mantenimientos')
+      return
+    }
     await router.push(`/admin/servicios/${created.id}`)
   },
   async onEmpleadoAfterCreate(created) {
     emit('created', created)
     emit('close')
+    if (registerKind.value === 'mantenimiento') {
+      await router.push({ name: 'emp-mantenimientos' })
+      return
+    }
     await router.push(`/empleado/servicio/${created.id}`)
   },
 })

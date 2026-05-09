@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Mail\InvoicePdfToCompanyMail;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\Service;
@@ -9,6 +10,7 @@ use App\Models\ServiceCatalog;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -26,6 +28,7 @@ class AdminInvoiceApiTest extends TestCase
             'factura_sigla' => 'TST',
             'nit' => '900111222-1',
             'estado' => Company::ESTADO_ACTIVO,
+            'correo' => 'facturas-empresa@test.local',
         ]);
 
         $empleado = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
@@ -352,5 +355,49 @@ class AdminInvoiceApiTest extends TestCase
             ->assertJsonPath('data.subtotal', '100000.00')
             ->assertJsonPath('data.total', '119000.00')
             ->assertJsonPath('data.iva_amount', '19000.00');
+    }
+
+    public function test_send_invoice_email_rejects_borrador(): void
+    {
+        $s = $this->seedInvoiceScenario();
+        Sanctum::actingAs($s['admin']);
+        Mail::fake();
+
+        $this->postJson('/api/admin/invoices/'.$s['invoice']->id.'/send-email')->assertStatus(422);
+
+        Mail::assertNothingOutgoing();
+    }
+
+    public function test_send_invoice_email_requires_valid_company_correo(): void
+    {
+        $s = $this->seedInvoiceScenario();
+        $s['company']->update(['correo' => '   ']);
+        $s['invoice']->update(['status' => Invoice::STATUS_APROBADA]);
+        Sanctum::actingAs($s['admin']);
+        Mail::fake();
+
+        $this->postJson('/api/admin/invoices/'.$s['invoice']->id.'/send-email')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['company']);
+
+        Mail::assertNothingOutgoing();
+    }
+
+    public function test_send_invoice_email_dispatches_pdf_mail(): void
+    {
+        $s = $this->seedInvoiceScenario();
+        $s['invoice']->update(['status' => Invoice::STATUS_APROBADA]);
+        Sanctum::actingAs($s['admin']);
+        Mail::fake();
+
+        $this->postJson('/api/admin/invoices/'.$s['invoice']->id.'/send-email')
+            ->assertOk()
+            ->assertJsonPath('sent_to', 'facturas-empresa@test.local');
+
+        Mail::assertSent(InvoicePdfToCompanyMail::class, function (InvoicePdfToCompanyMail $m) {
+            return $m->invoiceCode === 'T-FAC-001'
+                && str_contains($m->attachmentFilename, 'factura-')
+                && strlen($m->pdfBinary) > 100;
+        });
     }
 }

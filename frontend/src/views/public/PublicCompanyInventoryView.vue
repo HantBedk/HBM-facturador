@@ -148,7 +148,7 @@ onMounted(async () => {
 
       <section v-else class="card">
         <div class="flex items-center justify-between gap-2">
-          <h2 class="m-0 text-lg font-semibold text-white">Activos</h2>
+          <h2 class="m-0 text-lg font-semibold text-white">Equipos activos</h2>
           <button type="button" class="btn ghost btn-sm" @click="cerrarSesion">Salir</button>
         </div>
         <p v-if="errorMessage" class="err">{{ errorMessage }}</p>
@@ -158,7 +158,7 @@ onMounted(async () => {
           <li v-for="row in lots" :key="row.id" class="px-3 py-3 text-sm">
             <p class="m-0 font-medium text-white">{{ row.name }}</p>
             <p class="mt-1 text-xs text-slate-400">
-              Código: {{ row.sku || '—' }} · Cantidad: {{ row.quantity_available }} · Estado:
+              Código interno: {{ row.internal_code || '—' }} · Cantidad: {{ row.quantity_available }} · Estado:
               {{ lifecycleLabel(row.lifecycle_status) }}
             </p>
           </li>

@@ -4,6 +4,12 @@ import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import { RouterLink } from 'vue-router'
 import { publicApi, publicApiBlob } from '@/services/api.js'
 import { openPdfBlobInNewTab, triggerPdfDownload } from '@/utils/pdfBlob.js'
+import {
+  formatPublicInvoiceDate as formatDate,
+  formatPublicMoney as formatMoney,
+  pillClassForListStatus as pillClassForStatus,
+  publicInvoicePillClassFromStatusLabel,
+} from './publicInvoiceConsultHelpers.js'
 
 /** @type {import('vue').Ref<'consult' | 'list' | 'result'>} */
 const viewState = ref('consult')
@@ -107,38 +113,7 @@ const showPublicPaymentBreakdown = computed(() => {
 })
 
 function pillClass() {
-  const label = (payload.value?.invoice?.status_label || '').toLowerCase()
-  if (label.includes('pagad')) return 'pill pill--ok'
-  if (label.includes('parcial')) return 'pill pill--warn'
-  return 'pill pill--neutral'
-}
-
-function pillClassForStatus(status) {
-  if (status === 'pagada') return 'pill pill--ok'
-  if (status === 'parcialmente_pagada') return 'pill pill--warn'
-  return 'pill pill--neutral'
-}
-
-function formatMoney(value) {
-  const n = Number(value)
-  if (Number.isNaN(n)) return value
-  return new Intl.NumberFormat('es-CO', {
-    style: 'currency',
-    currency: 'COP',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n)
-}
-
-function formatDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso + (iso.length === 10 ? 'T12:00:00' : ''))
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('es-CO', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
+  return publicInvoicePillClassFromStatusLabel(payload.value?.invoice?.status_label)
 }
 
 function validateForm() {
@@ -269,36 +244,66 @@ async function verPdfEnPestaña() {
     <div class="bg no-print" aria-hidden="true" />
 
     <div class="stack">
-      <section class="search-card" aria-labelledby="titulo-consulta">
-        <h1 id="titulo-consulta" class="search-title">Consultar Factura</h1>
-        <p class="search-sub">
-          Escriba el <strong>código de la factura</strong> (ej. FAC-…) para ver el detalle, abrir o descargar el PDF, o el
-          <strong>NIT de su empresa</strong> (con o sin puntos o guiones) para listar todas las facturas disponibles. Sin
-          inicio de sesión.
-        </p>
-        <p class="search-hint muted">
-          Solo aparecen facturas ya <strong>aprobadas o enviadas</strong> (no borradores). Si acaba de generarse la
-          factura, el administrador debe aprobarla en el panel antes de que sea visible aquí.
-        </p>
-        <div class="search-row">
-          <label class="search-field search-field--grow">
-            <span class="search-label">Código de factura o NIT</span>
-            <input
-              v-model="query"
-              type="text"
-              autocomplete="off"
-              placeholder="FAC-260318-SYF o 900.111.222-9"
-              :class="{ 'input-invalid': fieldErrors.query }"
-              @keyup.enter="onConsult"
-            />
-            <span v-if="fieldErrors.query" class="field-err">{{ fieldErrors.query[0] }}</span>
-          </label>
-          <button type="button" class="btn-search" :disabled="loading" @click="onConsult">
-            {{ loading ? 'Consultando…' : 'Consultar' }}
-          </button>
-        </div>
-        <p v-if="errorMessage && viewState === 'consult'" class="alert" role="alert">{{ errorMessage }}</p>
-      </section>
+      <div class="consulta-hero">
+        <section class="search-card" aria-labelledby="titulo-consulta">
+          <h1 id="titulo-consulta" class="search-title">Consultar Factura</h1>
+          <p class="search-sub">
+            Escriba el <strong>código de la factura</strong> (ej. FAC-…) para ver el detalle, abrir o descargar el PDF, o el
+            <strong>NIT de su empresa</strong> (con o sin puntos o guiones) para listar todas las facturas disponibles. Sin
+            inicio de sesión.
+          </p>
+          <p class="search-hint muted">
+            Solo aparecen facturas ya <strong>aprobadas o enviadas</strong> (no borradores). Si acaba de generarse la
+            factura, el administrador debe aprobarla en el panel antes de que sea visible aquí.
+          </p>
+          <div class="search-row">
+            <label class="search-field search-field--grow">
+              <span class="search-label">Código de factura o NIT</span>
+              <input
+                v-model="query"
+                type="text"
+                autocomplete="off"
+                placeholder="FAC-260318-SYF o 900.111.222-9"
+                :class="{ 'input-invalid': fieldErrors.query }"
+                @keyup.enter="onConsult"
+              />
+              <span v-if="fieldErrors.query" class="field-err">{{ fieldErrors.query[0] }}</span>
+            </label>
+            <button type="button" class="btn-search" :disabled="loading" @click="onConsult">
+              {{ loading ? 'Consultando…' : 'Consultar' }}
+            </button>
+          </div>
+          <p v-if="errorMessage && viewState === 'consult'" class="alert" role="alert">{{ errorMessage }}</p>
+        </section>
+
+        <aside class="quick-actions no-print" aria-label="Otros accesos">
+          <p class="quick-actions-kicker">Otros accesos</p>
+          <RouterLink to="/login" class="quick-btn quick-btn--primary">
+            <span class="quick-btn-icon" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                <polyline points="10 17 15 12 10 7" />
+                <line x1="15" y1="12" x2="3" y2="12" />
+              </svg>
+            </span>
+            <span class="quick-btn-body">
+              <span class="quick-btn-title">Login</span>
+            </span>
+          </RouterLink>
+          <RouterLink to="/consulta-empresa" class="quick-btn quick-btn--primary">
+            <span class="quick-btn-icon" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                <line x1="12" y1="22.08" x2="12" y2="12" />
+              </svg>
+            </span>
+            <span class="quick-btn-body">
+              <span class="quick-btn-title">Consultar inventario</span>
+            </span>
+          </RouterLink>
+        </aside>
+      </div>
 
       <section v-if="viewState === 'list' && listResult" class="detail-card list-card">
         <h2 class="list-title">Facturas de la empresa</h2>
@@ -625,11 +630,6 @@ async function verPdfEnPestaña() {
         </div>
       </section>
 
-      <p class="foot no-print">
-        <RouterLink to="/consulta-empresa" class="link">Consultar inventario de mi empresa</RouterLink>
-        <span class="mx-2 text-slate-600">·</span>
-        <RouterLink to="/login" class="link">← Volver al acceso de personal interno</RouterLink>
-      </p>
     </div>
   </div>
 </template>
@@ -667,6 +667,146 @@ async function verPdfEnPestaña() {
   box-shadow:
     0 0 0 1px rgba(59, 130, 246, 0.08),
     0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+/* Tarjeta de consulta (mayor ancho) + columna estrecha de accesos (~¼ del ancho útil). */
+.consulta-hero {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  width: 100%;
+}
+
+@media (min-width: 900px) {
+  .consulta-hero {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+    gap: 1.25rem;
+  }
+}
+
+.quick-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem 0.75rem 1.1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.72) 0%, rgba(15, 23, 42, 0.42) 100%);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+  /* Coincide con el alto del card hermano (align-items: stretch del grid). */
+  height: 100%;
+  min-height: 0;
+}
+
+.quick-actions-kicker {
+  margin: 0 0 0.15rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+
+.quick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.55rem;
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 0.85rem 0.65rem;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.quick-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.55);
+}
+
+.quick-btn:hover {
+  transform: translateY(-1px);
+}
+
+.quick-btn--primary {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.22) 0%, rgba(29, 78, 216, 0.14) 100%);
+  color: #e2e8f0;
+}
+
+.quick-btn--primary:hover {
+  border-color: rgba(96, 165, 250, 0.7);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.32) 0%, rgba(29, 78, 216, 0.22) 100%);
+}
+
+.quick-btn--ghost {
+  border-color: rgba(100, 116, 139, 0.45);
+  background: rgba(15, 23, 42, 0.55);
+  color: #cbd5e1;
+}
+
+.quick-btn--ghost:hover {
+  border-color: rgba(148, 163, 184, 0.65);
+  background: rgba(30, 41, 59, 0.7);
+}
+
+.quick-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.7);
+  color: #93c5fd;
+}
+
+.quick-btn--ghost .quick-btn-icon {
+  color: #cbd5e1;
+  background: rgba(30, 41, 59, 0.7);
+}
+
+.quick-btn-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  line-height: 1.3;
+  gap: 0.15rem;
+}
+
+.quick-btn-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #f1f5f9;
+  letter-spacing: -0.005em;
+}
+
+.quick-btn--ghost .quick-btn-title {
+  color: #e2e8f0;
+}
+
+.quick-btn-sub {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  line-height: 1.35;
+  max-width: 100%;
+  /* Permite cortar palabras largas si el aside se vuelve muy estrecho. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .search-title {
@@ -1345,22 +1485,6 @@ async function verPdfEnPestaña() {
   margin-top: 1rem;
 }
 
-.foot {
-  margin: 0;
-  text-align: center;
-  padding-top: 0.5rem;
-}
-
-.link {
-  color: #7dd3fc;
-  text-decoration: none;
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-
-.link:hover {
-  text-decoration: underline;
-}
 </style>
 
 <style>

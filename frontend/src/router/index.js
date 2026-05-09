@@ -13,6 +13,7 @@ const AdminConfiguracionLayout = () => import('@/layouts/AdminConfiguracionLayou
 const AdminEmpleadoNotificacionesView = () => import('@/views/admin/AdminEmpleadoNotificacionesView.vue')
 const AdminHistorialMovimientosView = () => import('@/views/admin/AdminHistorialMovimientosView.vue')
 const AdminBillingAutomationView = () => import('@/views/admin/AdminBillingAutomationView.vue')
+const AdminMailNotificationsView = () => import('@/views/admin/AdminMailNotificationsView.vue')
 const AdminInventoryConfigView = () => import('@/views/admin/AdminInventoryConfigView.vue')
 const AdminEmpleadoPerfilView = () => import('@/views/admin/AdminEmpleadoPerfilView.vue')
 const EmpleadosListView = () => import('@/views/admin/EmpleadosListView.vue')
@@ -26,6 +27,7 @@ const ServiceCompleteAssignmentView = () => import('@/views/services/ServiceComp
 const ServiceDetailView = () => import('@/views/services/ServiceDetailView.vue')
 const ServiceEditView = () => import('@/views/services/ServiceEditView.vue')
 const InventoryView = () => import('@/views/inventory/InventoryView.vue')
+const InventoryAssetDetailView = () => import('@/views/inventory/InventoryAssetDetailView.vue')
 const PublicInvoiceConsultView = () => import('@/views/public/PublicInvoiceConsultView.vue')
 const PublicCompanyInventoryView = () => import('@/views/public/PublicCompanyInventoryView.vue')
 import { isAdminPanelRole } from '@/utils/roles.js'
@@ -58,12 +60,20 @@ const routes = [
       { path: '', name: 'admin-dashboard', component: AdminDashboardView },
       { path: 'servicios', name: 'admin-servicios', component: ServicesListView },
       {
+        path: 'mantenimientos',
+        name: 'admin-mantenimientos',
+        component: ServicesListView,
+        props: { defaultKind: 'mantenimiento' },
+      },
+      {
         path: 'catalogo-servicios',
         name: 'admin-catalogo-servicios',
         redirect: { name: 'admin-inventario' },
       },
       { path: 'inventario', name: 'admin-inventario', component: InventoryView },
+      { path: 'inventario/activo/:lotId(\\d+)', name: 'admin-inventario-activo-detalle', component: InventoryAssetDetailView, props: true },
       { path: 'servicios/nuevo', name: 'admin-servicios-nuevo', component: ServiceRegisterView },
+      { path: 'servicios/nuevo-mantenimiento', name: 'admin-servicios-nuevo-mantenimiento', component: ServiceRegisterView },
       { path: 'servicios/nuevo-venta', name: 'admin-servicios-nuevo-venta', component: ServiceRegisterView },
       { path: 'servicios/nuevo-alquiler', name: 'admin-servicios-nuevo-alquiler', component: ServiceRegisterView },
       { path: 'servicios/:id', name: 'admin-servicio-detalle', component: ServiceDetailView, props: true },
@@ -90,6 +100,12 @@ const routes = [
         props: (route) => ({ companyId: route.params.companyId }),
       },
       {
+        path: 'empresas/:companyId(\\d+)/inventario/activo/:lotId(\\d+)',
+        name: 'admin-empresa-inventario-activo-detalle',
+        component: InventoryAssetDetailView,
+        props: true,
+      },
+      {
         path: 'configuracion',
         component: AdminConfiguracionLayout,
         redirect: { name: 'admin-notificaciones-tecnicos' },
@@ -112,6 +128,11 @@ const routes = [
             path: 'facturacion-automatica',
             name: 'admin-config-billing-automation',
             component: AdminBillingAutomationView,
+          },
+          {
+            path: 'correo-notificaciones',
+            name: 'admin-config-mail-notifications',
+            component: AdminMailNotificationsView,
           },
           {
             path: 'inventario',
@@ -170,10 +191,18 @@ const routes = [
       { path: '', name: 'empleado-dashboard', component: EmpleadoDashboardView },
       { path: 'historial', redirect: { name: 'empleado-dashboard' } },
       { path: 'registro-servicio', name: 'emp-registro-servicio', component: ServiceRegisterView },
+      { path: 'registro-mantenimiento', name: 'emp-registro-mantenimiento', component: ServiceRegisterView },
       { path: 'registro-venta', name: 'emp-registro-venta', component: ServiceRegisterView },
       { path: 'registro-alquiler', name: 'emp-registro-alquiler', component: ServiceRegisterView },
       { path: 'listado-servicios', name: 'emp-listado-servicios', component: ServicesListView },
+      {
+        path: 'mantenimientos',
+        name: 'emp-mantenimientos',
+        component: ServicesListView,
+        props: { defaultKind: 'mantenimiento' },
+      },
       { path: 'inventario', name: 'empleado-inventario', component: InventoryView },
+      { path: 'inventario/activo/:lotId(\\d+)', name: 'empleado-inventario-activo-detalle', component: InventoryAssetDetailView, props: true },
       { path: 'servicio/:id(\\d+)', name: 'emp-servicio-detalle', component: ServiceDetailView, props: true },
       {
         path: 'servicio/:id(\\d+)/completar-asignacion',

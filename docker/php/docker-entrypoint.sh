@@ -28,6 +28,11 @@ if [ -f /var/www/html/composer.json ] && [ ! -f /var/www/html/vendor/autoload.ph
   composer install --no-interaction --prefer-dist --optimize-autoloader
 fi
 
+# public/storage -> storage/app/public (fotos de servicio, adjuntos de inventario). --force corrige enlaces rotos (p. ej. bind mount Windows).
+if [ -f /var/www/html/artisan ] && [ -f /var/www/html/vendor/autoload.php ]; then
+  php /var/www/html/artisan storage:link --force || echo "[entrypoint] ADVERTENCIA: storage:link falló; ejecute manualmente php artisan storage:link --force"
+fi
+
 # Sincroniza esquema al iniciar (idempotente, no destructivo) y permite seeder opcional.
 # Variables:
 # - HBM_AUTO_DB_SYNC=true|false (default: true)

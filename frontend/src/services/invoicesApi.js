@@ -116,6 +116,14 @@ export function deleteInvoicePayment(invoiceId, paymentId) {
  * @param {{ preview?: boolean }} [opts] preview=true → borrador (marca de agua); oficial sin query.
  * @returns {Promise<Blob>}
  */
+/** Envía el PDF oficial al correo de la empresa (ficha en directorio). Solo factura no borrador. */
+export function sendInvoiceEmailToCompany(id) {
+  return api(`/admin/invoices/${id}/send-email`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+}
+
 export async function downloadInvoicePdfBlob(id, opts = {}) {
   const preview = Boolean(opts.preview)
   const q = preview ? '?preview=1' : ''

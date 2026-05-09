@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -7,6 +7,11 @@ import {
   FALLBACK_BANKS,
   FALLBACK_DOCUMENT_TYPES,
 } from '@/constants/empleadoPerfilCatalogs.js'
+import {
+  COLOMBIA_DEPARTAMENTOS,
+  COLOMBIA_MUNICIPIOS,
+  OTRO_CIUDAD_CODIGO,
+} from '@/constants/colombiaGeografia.js'
 import { cancelarCorreoSolicitud, solicitarCambioCorreo } from '@/services/empleadoCorreoApi.js'
 import { fetchEmpleadoPerfilForm, saveEmpleadoPerfil } from '@/services/empleadoPerfilApi.js'
 import { isEmpleadoPerfilIncomplete, validateEmpleadoPerfilForm } from '@/utils/empleadoPerfil.js'
@@ -47,7 +52,99 @@ const form = ref({
   cuenta_numero: '',
 })
 
+/** Estado del selector geográfico (no se envía al backend; sólo dirige los <select>). */
+const departamentoSelect = ref('')
+const municipioSelect = ref('')
+const ciudadOtra = ref('')
+const departamentoOtro = ref('')
+
 const bankCodes = computed(() => banks.value.map((b) => b.codigo))
+
+const departamentosCatalog = COLOMBIA_DEPARTAMENTOS
+
+const departamentoActualCodigo = computed(() => {
+  if (!departamentoSelect.value || departamentoSelect.value === OTRO_CIUDAD_CODIGO) return ''
+  return departamentoSelect.value
+})
+
+const municipiosCatalog = computed(() => {
+  const code = departamentoActualCodigo.value
+  if (!code) return []
+  return COLOMBIA_MUNICIPIOS[code] || []
+})
+
+const isDepartamentoOtro = computed(() => departamentoSelect.value === OTRO_CIUDAD_CODIGO)
+const isMunicipioOtro = computed(
+  () => municipioSelect.value === OTRO_CIUDAD_CODIGO || (departamentoSelect.value && !municipiosCatalog.value.length),
+)
+
+/** Aplica al `form` los valores definitivos según el modo (catálogo vs «Otro»). */
+function syncDepartamentoMunicipioToForm() {
+  if (isDepartamentoOtro.value) {
+    form.value.departamento = departamentoOtro.value.trim()
+  } else {
+    const dep = departamentosCatalog.find((d) => d.codigo === departamentoSelect.value)
+    form.value.departamento = dep ? dep.nombre : ''
+  }
+
+  if (isMunicipioOtro.value) {
+    form.value.ciudad = ciudadOtra.value.trim()
+  } else if (municipioSelect.value) {
+    form.value.ciudad = municipioSelect.value
+  } else {
+    form.value.ciudad = ''
+  }
+}
+
+/** Reconstruye los selects a partir del valor recibido del backend (texto libre). */
+function hydrateGeografia(departamentoTxt, ciudadTxt) {
+  const depTxt = String(departamentoTxt || '').trim()
+  const cityTxt = String(ciudadTxt || '').trim()
+
+  const depMatch = depTxt
+    ? departamentosCatalog.find((d) => d.nombre.toLowerCase() === depTxt.toLowerCase())
+    : null
+
+  if (depMatch) {
+    departamentoSelect.value = depMatch.codigo
+    departamentoOtro.value = ''
+  } else if (depTxt) {
+    departamentoSelect.value = OTRO_CIUDAD_CODIGO
+    departamentoOtro.value = depTxt
+  } else {
+    departamentoSelect.value = ''
+    departamentoOtro.value = ''
+  }
+
+  const lista = depMatch ? COLOMBIA_MUNICIPIOS[depMatch.codigo] || [] : []
+  if (cityTxt && lista.some((m) => m.toLowerCase() === cityTxt.toLowerCase())) {
+    municipioSelect.value = lista.find((m) => m.toLowerCase() === cityTxt.toLowerCase())
+    ciudadOtra.value = ''
+  } else if (cityTxt) {
+    municipioSelect.value = OTRO_CIUDAD_CODIGO
+    ciudadOtra.value = cityTxt
+  } else {
+    municipioSelect.value = ''
+    ciudadOtra.value = ''
+  }
+
+  syncDepartamentoMunicipioToForm()
+}
+
+function onDepartamentoChange() {
+  municipioSelect.value = ''
+  ciudadOtra.value = ''
+  if (!isDepartamentoOtro.value) departamentoOtro.value = ''
+  syncDepartamentoMunicipioToForm()
+}
+
+function onMunicipioChange() {
+  if (!isMunicipioOtro.value) ciudadOtra.value = ''
+  syncDepartamentoMunicipioToForm()
+}
+
+watch(ciudadOtra, syncDepartamentoMunicipioToForm)
+watch(departamentoOtro, syncDepartamentoMunicipioToForm)
 
 const canSave = computed(() => {
   if (loading.value) return false
@@ -74,6 +171,7 @@ onMounted(async () => {
       cuenta_tipo: p.cuenta_tipo || '',
       cuenta_numero: p.cuenta_numero || '',
     }
+    hydrateGeografia(p.departamento || '', p.ciudad || '')
   } catch (e) {
     globalError.value = e.data?.message || e.message || 'No se pudo cargar el formulario.'
   } finally {
@@ -279,25 +377,55 @@ async function cancelarSolicitudCorreo() {
             <p v-if="fieldErrors.telefono" class="mt-1 text-sm text-red-400">{{ fieldErrors.telefono[0] }}</p>
           </div>
           <div>
-            <label class="mb-1.5 block text-xs font-medium text-slate-400">Ciudad de residencia <span class="text-red-400">*</span></label>
-            <input
-              v-model="form.ciudad"
-              type="text"
-              autocomplete="address-level2"
+            <label class="mb-1.5 block text-xs font-medium text-slate-400">Departamento <span class="text-red-400">*</span></label>
+            <select
+              v-model="departamentoSelect"
               required
-              class="w-full rounded-xl border border-slate-600/80 bg-[#0d1219] px-4 py-3 text-slate-100 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
-            />
-            <p v-if="fieldErrors.ciudad" class="mt-1 text-sm text-red-400">{{ fieldErrors.ciudad[0] }}</p>
-          </div>
-          <div>
-            <label class="mb-1.5 block text-xs font-medium text-slate-400">Departamento (opcional)</label>
-            <input
-              v-model="form.departamento"
-              type="text"
               autocomplete="address-level1"
-              class="w-full rounded-xl border border-slate-600/80 bg-[#0d1219] px-4 py-3 text-slate-100 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+              class="perfil-select w-full rounded-xl border border-slate-600/80 bg-[#0d1219] px-4 py-3 text-slate-100 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+              @change="onDepartamentoChange"
+            >
+              <option value="" disabled>Seleccione departamento…</option>
+              <option v-for="d in departamentosCatalog" :key="d.codigo" :value="d.codigo">{{ d.nombre }}</option>
+              <option :value="OTRO_CIUDAD_CODIGO">Otro departamento…</option>
+            </select>
+            <input
+              v-if="isDepartamentoOtro"
+              v-model="departamentoOtro"
+              type="text"
+              maxlength="120"
+              required
+              placeholder="Escribe el nombre del departamento"
+              class="mt-2 w-full rounded-xl border border-slate-600/80 bg-[#0d1219] px-4 py-3 text-slate-100 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
             />
             <p v-if="fieldErrors.departamento" class="mt-1 text-sm text-red-400">{{ fieldErrors.departamento[0] }}</p>
+          </div>
+          <div>
+            <label class="mb-1.5 block text-xs font-medium text-slate-400">Municipio / ciudad de residencia <span class="text-red-400">*</span></label>
+            <select
+              v-model="municipioSelect"
+              required
+              autocomplete="address-level2"
+              :disabled="!departamentoSelect"
+              class="perfil-select w-full rounded-xl border border-slate-600/80 bg-[#0d1219] px-4 py-3 text-slate-100 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30 disabled:opacity-60"
+              @change="onMunicipioChange"
+            >
+              <option value="" disabled>
+                {{ departamentoSelect ? 'Seleccione municipio…' : 'Primero seleccione el departamento' }}
+              </option>
+              <option v-for="m in municipiosCatalog" :key="m" :value="m">{{ m }}</option>
+              <option v-if="departamentoSelect" :value="OTRO_CIUDAD_CODIGO">Otro municipio…</option>
+            </select>
+            <input
+              v-if="isMunicipioOtro"
+              v-model="ciudadOtra"
+              type="text"
+              maxlength="120"
+              required
+              placeholder="Escribe el nombre del municipio"
+              class="mt-2 w-full rounded-xl border border-slate-600/80 bg-[#0d1219] px-4 py-3 text-slate-100 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+            />
+            <p v-if="fieldErrors.ciudad" class="mt-1 text-sm text-red-400">{{ fieldErrors.ciudad[0] }}</p>
           </div>
         </div>
       </section>

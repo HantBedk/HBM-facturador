@@ -47,6 +47,13 @@ class AppSetting extends Model
     /** Técnicos pueden registrar alquiler de inventario como servicio (boolean en JSON). */
     public const KEY_EMPLEADO_INVENTORY_ALQUILER_ENABLED = 'empleado_inventory_alquiler_enabled';
 
+    /**
+     * Remitente para correos transaccionales (OTP inventario, facturas, recuperación clave, etc.).
+     * Valor JSON: { "address": "noreply@dominio.com", "name": "Nombre visible" }.
+     * Si `address` está vacío o no es un email válido, se usa MAIL_FROM_* del .env.
+     */
+    public const KEY_MAIL_NOTIFICATIONS_FROM = 'mail_notifications_from';
+
     protected $fillable = [
         'key',
         'value',

@@ -204,6 +204,7 @@ const totalDisplay = computed(() => {
 
 /** Valor sentinela al final del &lt;select&gt; (no es ID de empresa). */
 const QUICK_CLIENT_OPTION = '__quick_client__'
+const quickClientAllowed = computed(() => props.registerKind !== 'mantenimiento')
 
 const companySelectValue = computed(() => {
   if (props.modelValue.use_quick_client) return QUICK_CLIENT_OPTION
@@ -216,6 +217,7 @@ function onCompanySelectChange(ev) {
   if (props.billingLocked) return
   const v = ev.target.value
   if (v === QUICK_CLIENT_OPTION) {
+    if (!quickClientAllowed.value) return
     patch({ use_quick_client: true, company_id: '' })
   } else if (v) {
     patch({ use_quick_client: false, company_id: Number(v) })
@@ -319,7 +321,7 @@ const filteredOperationLots = computed(() => {
   const rows = operationLots.value
   if (!q) return rows
   return rows.filter((lot) => {
-    const blob = `${lot.name || ''} ${lot.sku || ''}`.toLowerCase()
+    const blob = `${lot.name || ''} ${lot.internal_code || ''} ${lot.serial_number || ''}`.toLowerCase()
     return blob.includes(q)
   })
 })
@@ -446,10 +448,20 @@ watch(
 watch(
   () => props.registerKind,
   (k) => {
+    if (k === 'mantenimiento' && props.modelValue.use_quick_client) {
+      patch({ use_quick_client: false, quick_telefono: '' })
+    }
     if (k === 'venta' || k === 'alquiler') {
       patch({
         inventory_operation_type: k,
         inventory_lot_id: '',
+        inventory_quantity: 1,
+        inventory_days: 1,
+        inventory_sale_items: [],
+      })
+    } else if (k === 'mantenimiento') {
+      patch({
+        inventory_operation_type: 'servicio',
         inventory_quantity: 1,
         inventory_days: 1,
         inventory_sale_items: [],
@@ -469,6 +481,15 @@ const showCommercialInventoryShell = computed(
 const showCommercialTypeSwitcher = computed(
   () => props.registerKind === 'servicio' && props.allowInventoryCommercialOps
 )
+const isMaintenanceMode = computed(() => props.registerKind === 'mantenimiento')
+const maintenanceLots = computed(() => {
+  const companyId = Number(props.modelValue.company_id || 0)
+  return props.inventoryLots.filter((lot) => {
+    if (Number(lot.tenant_company_id || 0) !== companyId) return false
+    if (!lot.is_active) return false
+    return String(lot.lifecycle_status || 'activo') === 'activo'
+  })
+})
 
 /** Aclara titular económico (owner del lote) vs ejecutor del registro en operaciones de inventario. */
 const showInventoryOwnerExecutorBanner = computed(
@@ -560,7 +581,7 @@ watch(
         >
           <option value="" disabled>Seleccionar…</option>
           <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
-          <option :value="QUICK_CLIENT_OPTION" class="text-amber-200">
+          <option v-if="quickClientAllowed" :value="QUICK_CLIENT_OPTION" class="text-amber-200">
             Cliente sin registro
           </option>
         </select>
@@ -675,8 +696,34 @@ watch(
         <span class="step-badge" aria-hidden="true">2</span>
         <template v-if="registerKind === 'venta'">Venta de equipo</template>
         <template v-else-if="registerKind === 'alquiler'">Alquiler de equipo</template>
+        <template v-else-if="registerKind === 'mantenimiento'">Mantenimiento</template>
         <template v-else>Conceptos cobrados</template>
       </h2>
+
+    <div
+      v-if="isMaintenanceMode"
+      class="rounded-2xl border border-slate-700/60 bg-slate-900/30 p-3"
+    >
+      <p class="mb-2 text-xs text-slate-400">
+        Seleccione el equipo de la empresa para vincular el mantenimiento facturable y la trazabilidad en hoja de vida.
+      </p>
+      <select
+        :value="inner.inventory_lot_id ? String(inner.inventory_lot_id) : ''"
+        :disabled="disabled || !inner.company_id"
+        class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white outline-none focus:border-sky-500 disabled:opacity-50"
+        @change="patch({ inventory_lot_id: $event.target.value })"
+      >
+        <option value="" disabled>Seleccionar equipo de inventario…</option>
+        <option v-for="lot in maintenanceLots" :key="lot.id" :value="String(lot.id)">
+          {{ lot.name }} · {{ lot.internal_code || lot.serial_number || 'sin código' }}
+        </option>
+      </select>
+      <p v-if="!inner.company_id" class="mt-2 text-xs text-slate-500">Primero seleccione una empresa.</p>
+      <p v-else-if="!maintenanceLots.length" class="mt-2 text-xs text-slate-500">
+        La empresa no tiene equipos activos disponibles en inventario.
+      </p>
+      <p v-if="fieldErrors.inventory_lot_id" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.inventory_lot_id[0] }}</p>
+    </div>
 
     <!-- Venta / alquiler (admin con selector, o ruta dedicada) -->
     <div

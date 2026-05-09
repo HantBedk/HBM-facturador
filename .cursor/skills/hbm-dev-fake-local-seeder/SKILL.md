@@ -14,6 +14,7 @@ description: >-
 ## Alcance
 
 - **Inventario interno versionado (Git):** `InventoryInternalDemoSeeder` + trait `Concerns/SeedsInventoryInternalDemo.php`. Se ejecuta al correr `DatabaseSeeder`; también: `php artisan db:seed --class=Database\\Seeders\\InventoryInternalDemoSeeder`.
+- **Custodia empresa + servicios con lote (Git):** `CompanyCustodyAndMaintenanceDemoSeeder` — lotes `FAKE-TENANT-DEMO-*` en custodia para **Ferretería SYF** (`factura_sigla` SYF) y servicios `DEMO-MAINT-SYF-01` (mantenimiento) / `DEMO-SVC-LOT-SYF-01` (servicio) enlazados a `FAKE-LOCAL-001`. Correo SYF para OTP del portal: `portal-inventario-syf@hbm.local`; NIT normalizado para pruebas manuales: `9001112223` (equivale a `900111222-3`).
 - **Dataset local opcional (Gitignore):** `DevFakeDataLocalSeeder.php` — servicios, facturas y demás; reutiliza el mismo trait para inventario.
 - **Ejecución típica del seeder local completo:** desde `backend/`: `php artisan db:seed --class=Database\\Seeders\\DevFakeDataLocalSeeder`
 - **Prerrequisito:** esquema migrado; conviene haber corrido antes `DatabaseSeeder` o `EnsureDevLoginSeeder` para compañías/usuarios base si hacen falta en el entorno.
@@ -32,8 +33,11 @@ Al cambiar modelos, APIs o pantallas, revisar y ampliar el seeder para incluir *
 3. **Catálogo de servicios (`service_catalog`):** ítems con `iva_percent` y `technician_discount_percent` cuando existan en el esquema; estado activo.
 4. **Servicios (`services`):** mezcla empresa / mostrador (`company_id` null); parte de ellos con `catalog_id`; fechas dispersas; algunos con `assignment_status` (`awaiting_completion`, `rejected`) y al menos uno con `technician_paid_at` si el panel lo muestra.
 5. **Facturas (`invoices`):** borrador con servicios; aprobada (mostrador); **parcialmente pagada** con fila en `payments`; opcional **enviada** con `sent_at`; totales alineados con la suma de servicios vinculados.
-6. **Inventario:** lotes con SKU bajo prefijo acordado (p. ej. `FAKE-LOCAL-*`); antes de recrear, borrar en orden hijos (movimientos, líneas de venta/alquiler) para no dejar huérfanos; incluir ventas, alquiler activo, alquiler cerrado con devolución, lotes inactivos/stock cero para filtros UI.
-7. **Ajustes (`app_settings`):** si el frontend depende de claves JSON (p. ej. `inventory_locations`), sembrar solo si no existe fila, para no pisar la configuración manual del desarrollador.
+6. **Inventario interno:** lotes `FAKE-LOCAL-*` con columnas de **custodia** (`serial_number`, `asset_type`, `brand`, `model`, `site_label`, fechas de garantía/compra/custodia, `responsible_*`); estados **`lifecycle_status`** (`activo`, `reparacion`, `baja` con `decommission_*`, `vendido` con stock 0); `allow_sale` / `allow_rental` donde aplique; ventas, alquiler activo y cerrado con devolución; **solicitud pendiente** en `inventory_lifecycle_transition_requests` (p. ej. baja sobre un UPS); **adjunto** en `inventory_lot_attachments` con archivo real bajo `storage/app/public` (disk `public`).
+7. **Inventario en custodia (tenant):** lotes con `tenant_company_id` = empresa cliente (SKU dedicados, p. ej. `FAKE-TENANT-DEMO-*`), sin precios en API pública; empresa con **`correo`** informado para flujo OTP del portal.
+8. **Servicios (`kind`, `inventory_lot_id`):** al menos un **`mantenimiento`** y un **`servicio`** vinculados al mismo lote interno de prueba para listados y formularios.
+9. **Catálogo (`service_catalog`):** `iva_percent` y `technician_discount_percent` alineados con facturación y descuentos a técnico.
+10. **Ajustes (`app_settings`):** si el frontend depende de claves JSON (p. ej. `inventory_locations`), sembrar solo si no existe fila, para no pisar la configuración manual del desarrollador.
 
 ## Convenciones de implementación
 

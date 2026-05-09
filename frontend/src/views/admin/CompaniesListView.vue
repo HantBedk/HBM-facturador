@@ -17,6 +17,15 @@ import { fetchServiceCatalogActive, fetchServices } from '@/services/servicesApi
 import { useUiDialogStore } from '@/stores/uiDialog'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import { tableAriaSort, tableSortIndicator } from '@/utils/tableSort.js'
+import {
+  formatDate,
+  formatServiceDate,
+  moneyCOP,
+  MONTH_NAMES,
+  normalizeFacturaSigla,
+  prevCalendarMonth,
+  serviceStatusLabel,
+} from './companiesListHelpers.js'
 
 const uiDialog = useUiDialogStore()
 
@@ -140,28 +149,6 @@ const {
 
 const directoryPageTitle = 'Empresas registradas'
 
-const MONTH_NAMES = [
-  'Enero',
-  'Febrero',
-  'Marzo',
-  'Abril',
-  'Mayo',
-  'Junio',
-  'Julio',
-  'Agosto',
-  'Septiembre',
-  'Octubre',
-  'Noviembre',
-  'Diciembre',
-]
-
-function prevCalendarMonth() {
-  const d = new Date()
-  d.setDate(1)
-  d.setMonth(d.getMonth() - 1)
-  return { year: d.getFullYear(), month: d.getMonth() + 1 }
-}
-
 const dashboardYearOptions = computed(() => {
   const y = new Date().getFullYear()
   return [y, y - 1, y - 2]
@@ -173,28 +160,6 @@ const dashboardPeriodTitle = computed(() => {
   const name = MONTH_NAMES[(p.month || 1) - 1] || ''
   return `${name} ${p.year}`
 })
-
-function moneyCOP(v) {
-  const n = Number(v)
-  if (Number.isNaN(n)) return String(v ?? '—')
-  return new Intl.NumberFormat('es-CO', {
-    style: 'currency',
-    currency: 'COP',
-    maximumFractionDigits: 0,
-  }).format(n)
-}
-
-function serviceStatusLabel(status) {
-  const m = { activo: 'Activo', corregido: 'Corregido', eliminado: 'Eliminado' }
-  return m[status] ?? status ?? '—'
-}
-
-function formatServiceDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso + (String(iso).length === 10 ? 'T12:00:00' : ''))
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
-}
 
 function openCompanyPanel(row) {
   companyPanelCompany.value = row
@@ -690,20 +655,9 @@ function closeModal() {
 
 const modalTitle = computed(() => (modalMode.value === 'create' ? 'Nueva empresa' : 'Editar empresa'))
 
-function normalizeFacturaSigla(s) {
-  return (s ?? '').toString().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3)
-}
-
 const deleteExpectedSigla = computed(() =>
   deleteCompanyTarget.value ? normalizeFacturaSigla(deleteCompanyTarget.value.factura_sigla) : ''
 )
-
-function formatDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
-}
 
 async function onSubmitModal() {
   modalError.value = ''

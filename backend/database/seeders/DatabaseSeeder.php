@@ -19,6 +19,8 @@ class DatabaseSeeder extends Seeder
                 'nit' => '900111222-3',
                 'nombre' => 'Ferretería SYF',
                 'estado' => Company::ESTADO_ACTIVO,
+                /** Correo para pruebas del portal público inventario (NIT + OTP). */
+                'correo' => 'portal-inventario-syf@hbm.local',
             ]
         );
 
@@ -89,6 +91,8 @@ class DatabaseSeeder extends Seeder
                 [
                     'description' => $row['description'],
                     'base_price' => $row['base_price'],
+                    'iva_percent' => 19,
+                    'technician_discount_percent' => 10,
                     'status' => ServiceCatalog::STATUS_ACTIVO,
                 ]
             );
@@ -96,5 +100,6 @@ class DatabaseSeeder extends Seeder
 
         $this->call(DemoPublicInvoiceSeeder::class);
         $this->call(InventoryInternalDemoSeeder::class);
+        $this->call(CompanyCustodyAndMaintenanceDemoSeeder::class);
     }
 }

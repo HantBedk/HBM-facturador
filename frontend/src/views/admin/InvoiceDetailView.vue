@@ -8,6 +8,7 @@ import {
   downloadInvoicePdfBlob,
   fetchAdminInvoice,
   patchInvoiceStatus,
+  sendInvoiceEmailToCompany,
 } from '@/services/invoicesApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
@@ -108,6 +109,16 @@ const hasRegisteredCompany = computed(() => {
 const canEdit = computed(() => invoice.value?.status === 'borrador' && hasRegisteredCompany.value)
 const canApprove = computed(() => invoice.value?.status === 'borrador' && hasRegisteredCompany.value)
 const canSend = computed(() => invoice.value?.status === 'aprobada')
+
+const sendEmailBusy = ref(false)
+
+const canEmailPdfToCompany = computed(() => {
+  const inv = invoice.value
+  if (!inv || inv.status === 'borrador') return false
+  const c = inv.company
+  if (!c?.correo || String(c.correo).trim() === '') return false
+  return true
+})
 
 /** Pagos solo tras ENVIADA (ETAPA 5); abonos hasta cubrir total. */
 const balanceNum = computed(() => {
@@ -248,6 +259,30 @@ async function onPdfOfficialDownload() {
   }
 }
 
+async function onSendInvoiceEmail() {
+  if (!canEmailPdfToCompany.value) return
+  const ok = await uiDialog.confirm({
+    title: 'Enviar factura por correo',
+    message: `Se enviará el PDF oficial a ${invoice.value.company.correo} (correo registrado en la empresa). ¿Continuar?`,
+    confirmLabel: 'Enviar',
+  })
+  if (!ok) return
+  actionError.value = ''
+  sendEmailBusy.value = true
+  try {
+    const r = await sendInvoiceEmailToCompany(id.value)
+    await uiDialog.alert({
+      title: 'Correo enviado',
+      message: r.message || 'Factura enviada.',
+    })
+  } catch (e) {
+    const msg = e.data?.errors?.company?.[0] || e.data?.message || e.message || 'No se pudo enviar el correo.'
+    actionError.value = msg
+  } finally {
+    sendEmailBusy.value = false
+  }
+}
+
 async function onDeleteInvoice() {
   const ok = await uiDialog.confirm({
     title: 'Eliminar factura',
@@ -297,6 +332,15 @@ async function onDeleteInvoice() {
         <template v-else>
           <button type="button" class="btn secondary" @click="onPdfOfficialView">Ver PDF</button>
           <button type="button" class="btn secondary" @click="onPdfOfficialDownload">Descargar PDF</button>
+          <button
+            v-if="canEmailPdfToCompany"
+            type="button"
+            class="btn secondary"
+            :disabled="sendEmailBusy"
+            @click="onSendInvoiceEmail"
+          >
+            {{ sendEmailBusy ? 'Enviando…' : 'Enviar por correo a empresa' }}
+          </button>
         </template>
         <RouterLink v-if="canEdit" class="btn primary" :to="`/admin/facturas/${invoice.id}/editar`">Editar borrador</RouterLink>
         <button v-if="canDeleteInvoice" type="button" class="btn danger" @click="onDeleteInvoice">Eliminar factura</button>

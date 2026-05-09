@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\ServiceResource;
 use App\Models\AppSetting;
 use App\Models\Company;
+use App\Models\InventoryAuditEvent;
+use App\Models\InventoryLot;
 use App\Models\PanelNotification;
 use App\Models\Service;
 use App\Models\ServiceCatalog;
@@ -13,14 +15,14 @@ use App\Models\ServiceItem;
 use App\Models\ServicePhoto;
 use App\Models\User;
 use App\Services\ActivityLogger;
-use App\Support\ActivityAmountNarrative;
 use App\Services\PanelNotificationDispatcher;
-use App\Support\PhoneNormalizer;
-use App\Services\TechnicianAbonoNotifier;
 use App\Services\ServiceCodeGenerator;
+use App\Services\TechnicianAbonoNotifier;
+use App\Support\ActivityAmountNarrative;
 use App\Support\CatalogPricing;
 use App\Support\DecimalMath;
 use App\Support\Pagination;
+use App\Support\PhoneNormalizer;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -37,7 +39,11 @@ class ServiceController extends Controller
 
         $user = $request->user();
         $q = Service::query()
-            ->with(['company', 'user'])
+            ->with([
+                'company',
+                'user',
+                'inventoryLot:id,name,description,serial_number,sku,tenant_company_id,lifecycle_status',
+            ])
             ->withCount('invoices')
             ->withCount('items')
             ->withSum('items', 'technician_line_amount')
@@ -56,6 +62,12 @@ class ServiceController extends Controller
 
         if ($request->filled('company_id')) {
             $q->where('company_id', $request->integer('company_id'));
+        }
+        if ($request->filled('kind')) {
+            $q->where('kind', (string) $request->input('kind'));
+        }
+        if ($request->filled('inventory_lot_id')) {
+            $q->where('inventory_lot_id', $request->integer('inventory_lot_id'));
         }
 
         if ($user->isAdminEquipo() && $request->filled('user_id')) {
@@ -81,7 +93,16 @@ class ServiceController extends Controller
                 $w->where('description', 'like', $term)
                     ->orWhere('client_name', 'like', $term)
                     ->orWhere('service_type', 'like', $term)
-                    ->orWhere('code', 'like', $term);
+                    ->orWhere('code', 'like', $term)
+                    ->orWhereHas('inventoryLot', function ($lotQ) use ($term) {
+                        $lotQ->where('name', 'like', $term)
+                            ->orWhere('serial_number', 'like', $term)
+                            ->orWhere('sku', 'like', $term)
+                            ->orWhere('description', 'like', $term)
+                            ->orWhere('brand', 'like', $term)
+                            ->orWhere('model', 'like', $term)
+                            ->orWhere('site_label', 'like', $term);
+                    });
             });
         }
 
@@ -160,6 +181,8 @@ class ServiceController extends Controller
         $user = $request->user();
         $rules = [
             'company_id' => ['nullable', 'integer', 'exists:companies,id'],
+            'inventory_lot_id' => ['nullable', 'integer', 'exists:inventory_lots,id'],
+            'kind' => ['nullable', 'string', 'in:servicio,mantenimiento'],
             'quick_client' => ['nullable', 'array'],
             'quick_client.nombre' => ['nullable', 'string', 'max:255'],
             'quick_client.telefono' => ['nullable', 'string', 'max:32'],
@@ -173,6 +196,7 @@ class ServiceController extends Controller
         ];
 
         $data = $request->validate($rules);
+        $kind = (string) ($data['kind'] ?? Service::KIND_SERVICIO);
 
         $qcNombre = isset($data['quick_client']['nombre']) ? trim((string) $data['quick_client']['nombre']) : '';
         $qcTel = isset($data['quick_client']['telefono']) ? trim((string) $data['quick_client']['telefono']) : '';
@@ -262,6 +286,34 @@ class ServiceController extends Controller
             }
         }
 
+        $inventoryLotId = isset($data['inventory_lot_id']) && $data['inventory_lot_id'] !== null
+            ? (int) $data['inventory_lot_id']
+            : null;
+        $inventoryLot = null;
+        if ($kind === Service::KIND_MANTENIMIENTO) {
+            if ($companyId === null) {
+                throw ValidationException::withMessages([
+                    'company_id' => ['Para mantenimiento debe seleccionar una empresa cliente.'],
+                ]);
+            }
+            if ($inventoryLotId === null) {
+                throw ValidationException::withMessages([
+                    'inventory_lot_id' => ['Para mantenimiento debe seleccionar un equipo de inventario.'],
+                ]);
+            }
+            $inventoryLot = InventoryLot::query()->findOrFail($inventoryLotId);
+            if ((int) ($inventoryLot->tenant_company_id ?? 0) !== (int) $companyId) {
+                throw ValidationException::withMessages([
+                    'inventory_lot_id' => ['El equipo seleccionado no pertenece a la empresa indicada.'],
+                ]);
+            }
+            if (! $inventoryLot->is_active) {
+                throw ValidationException::withMessages([
+                    'inventory_lot_id' => ['El equipo seleccionado está inactivo para mantenimiento.'],
+                ]);
+            }
+        }
+
         // Fecha de servicio (día contable): siempre la del servidor; no aceptar valor del cliente.
         $serviceDate = Carbon::now(config('app.timezone'))->startOfDay();
 
@@ -310,12 +362,16 @@ class ServiceController extends Controller
             $firstCatalogId,
             $clientTelefono,
             $contactPhoneKey,
+            $kind,
+            $inventoryLotId,
         ) {
             $service = Service::create([
                 'code' => $code,
                 'company_id' => $companyId,
+                'inventory_lot_id' => $inventoryLotId,
                 'user_id' => $user->id,
                 'catalog_id' => $firstCatalogId,
+                'kind' => $kind,
                 'client_name' => $data['client_name'],
                 'client_telefono' => $clientTelefono,
                 'contact_phone_key' => $contactPhoneKey,
@@ -361,6 +417,10 @@ class ServiceController extends Controller
 
         $service->load(['company', 'user', 'photos', 'catalog:id,name', 'items.catalogSuggestion']);
 
+        if ($kind === Service::KIND_MANTENIMIENTO && $inventoryLot !== null) {
+            $this->auditInventoryMaintenanceEvent($request, $inventoryLot, $service);
+        }
+
         app(PanelNotificationDispatcher::class)->notifyAdmins(
             PanelNotification::TYPE_SERVICE_CREATED,
             'Nuevo servicio '.$service->code.' registrado ('.($service->company?->nombre ?? $service->client_name ?? 'cliente').').',
@@ -379,6 +439,28 @@ class ServiceController extends Controller
         return (new ServiceResource($service))->response()->setStatusCode(201);
     }
 
+    private function auditInventoryMaintenanceEvent(Request $request, InventoryLot $lot, Service $service): void
+    {
+        InventoryAuditEvent::query()->create([
+            'tenant_company_id' => $lot->tenant_company_id,
+            'entity_type' => 'inventory_lot',
+            'entity_id' => (int) $lot->id,
+            'action' => 'maintenance_service_linked',
+            'actor_user_id' => $request->user()?->id,
+            'request_id' => $request->header('X-Request-Id'),
+            'ip_address' => $request->ip(),
+            'user_agent' => substr((string) $request->userAgent(), 0, 500),
+            'before' => null,
+            'after' => [
+                'service_id' => (int) $service->id,
+                'service_code' => (string) $service->code,
+                'kind' => (string) ($service->kind ?? Service::KIND_SERVICIO),
+                'note' => 'Evento de hoja de vida sin precio (mantenimiento facturable).',
+            ],
+            'occurred_at' => now(),
+        ]);
+    }
+
     public function show(Service $service): ServiceResource
     {
         $this->authorize('view', $service);
@@ -390,6 +472,7 @@ class ServiceController extends Controller
             'photos',
             'catalog:id,name',
             'items.catalogSuggestion',
+            'inventoryLot:id,name,description,serial_number,sku,tenant_company_id,lifecycle_status',
             'invoices' => function ($rel) {
                 $rel->select('invoices.id', 'invoices.code');
             },

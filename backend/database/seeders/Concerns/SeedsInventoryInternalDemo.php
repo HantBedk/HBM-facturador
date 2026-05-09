@@ -3,7 +3,9 @@
 namespace Database\Seeders\Concerns;
 
 use App\Models\AppSetting;
+use App\Models\InventoryLifecycleTransitionRequest;
 use App\Models\InventoryLot;
+use App\Models\InventoryLotAttachment;
 use App\Models\InventoryMovement;
 use App\Models\InventoryRental;
 use App\Models\InventoryRentalLine;
@@ -12,6 +14,7 @@ use App\Models\InventorySaleLine;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 trait SeedsInventoryInternalDemo
 {
@@ -65,6 +68,20 @@ trait SeedsInventoryInternalDemo
                 'quantity_available' => 25,
                 'unit_price' => 2850000,
                 'is_active' => true,
+                'serial_number' => 'SN-DMO-001',
+                'mac_address' => 'A4:83:E7:12:34:56',
+                'asset_type' => 'Computador portátil',
+                'asset_subtype' => 'Oficina',
+                'brand' => 'Dell',
+                'model' => 'Latitude 5420',
+                'site_label' => 'Sede central',
+                'area_label' => 'Administración',
+                'physical_condition' => 'Bueno',
+                'warranty_until' => Carbon::now()->addMonths(8)->format('Y-m-d'),
+                'purchase_date' => Carbon::now()->subYear()->format('Y-m-d'),
+                'custody_received_at' => Carbon::now()->subMonths(10)->format('Y-m-d'),
+                'responsible_name' => 'Coordinación TI demo',
+                'responsible_role' => 'TI',
                 'description' => $this->inventoryDemoLotDescription($faker, '260115-A1B2', 'Dell', 'Oficina administrativa', 'Bueno', 'Equipo portátil estándar para pruebas de listado.'),
             ]),
             $this->createInventoryDemoLot([
@@ -74,6 +91,12 @@ trait SeedsInventoryInternalDemo
                 'quantity_available' => 12,
                 'unit_price' => 620000,
                 'is_active' => true,
+                'serial_number' => 'SN-MON-LG-002',
+                'asset_type' => 'Monitor',
+                'brand' => 'LG',
+                'model' => '24MK430H',
+                'site_label' => 'Taller',
+                'physical_condition' => 'Bueno',
                 'description' => $this->inventoryDemoLotDescription($faker, '260115-C3D4', 'LG', 'Taller', 'Bueno', 'Monitores para puestos de diagnóstico.'),
             ]),
             $this->createInventoryDemoLot([
@@ -112,6 +135,17 @@ trait SeedsInventoryInternalDemo
                 'quantity_available' => 0,
                 'unit_price' => 800000,
                 'is_active' => false,
+                'allow_sale' => false,
+                'allow_rental' => false,
+                'lifecycle_status' => InventoryLot::LIFECYCLE_BAJA,
+                'lifecycle_status_changed_at' => Carbon::now()->subMonths(6),
+                'decommission_reason' => 'Obsolescencia — retiro de parque (demo seeder).',
+                'decommissioned_at' => Carbon::now()->subMonths(6),
+                'decommissioned_by_user_id' => $admin->id,
+                'serial_number' => 'SN-HP-006-RET',
+                'asset_type' => 'PC de escritorio',
+                'brand' => 'HP',
+                'model' => 'EliteDesk 800',
                 'description' => $this->inventoryDemoLotDescription($faker, '240901-X9Y0', 'HP', 'Archivo', 'Fuera de servicio', 'Retirado por obsolescencia; solo para pestaña Bajas.'),
             ]),
             $this->createInventoryDemoLot([
@@ -121,6 +155,16 @@ trait SeedsInventoryInternalDemo
                 'quantity_available' => 1,
                 'unit_price' => 350000,
                 'is_active' => false,
+                'allow_sale' => false,
+                'allow_rental' => false,
+                'lifecycle_status' => InventoryLot::LIFECYCLE_BAJA,
+                'lifecycle_status_changed_at' => Carbon::now()->subMonths(3),
+                'decommission_reason' => 'Daño irreparable de fusor (demo seeder).',
+                'decommissioned_at' => Carbon::now()->subMonths(3),
+                'decommissioned_by_user_id' => $admin->id,
+                'serial_number' => 'SN-SAM-PRN-007',
+                'asset_type' => 'Impresora',
+                'brand' => 'Samsung',
                 'description' => $this->inventoryDemoLotDescription($faker, '250210-M1N2', 'Samsung', 'Taller', 'Fuera de servicio', 'Pieza no reparable; stock congelado.'),
             ]),
             $this->createInventoryDemoLot([
@@ -130,6 +174,16 @@ trait SeedsInventoryInternalDemo
                 'quantity_available' => 4,
                 'unit_price' => 280000,
                 'is_active' => true,
+                'allow_sale' => false,
+                'allow_rental' => false,
+                'lifecycle_status' => InventoryLot::LIFECYCLE_REPARACION,
+                'lifecycle_status_changed_at' => Carbon::now()->subDays(4),
+                'repair_reason' => 'Punta desgastada y temperatura inestable (demo).',
+                'serial_number' => 'SN-YIHUA-008',
+                'asset_type' => 'Herramienta',
+                'brand' => 'Yihua',
+                'model' => '878D',
+                'site_label' => 'Taller',
                 'description' => $this->inventoryDemoLotDescription($faker, '260201-P3Q4', 'Yihua', 'Taller', 'Requiere mantenimiento', 'Revisión de punta y calibración pendiente.'),
             ]),
             $this->createInventoryDemoLot([
@@ -159,7 +213,70 @@ trait SeedsInventoryInternalDemo
                 'quantity_available' => 100,
                 'unit_price' => 28000,
                 'is_active' => true,
+                'asset_type' => 'Consumible',
+                'brand' => 'Arctic',
+                'model' => 'MX-4 4g',
                 'description' => $this->inventoryDemoLotDescription($faker, '260119-V9W0', 'Arctic', 'Taller', 'Nuevo', 'Consumible para ventas de volumen.'),
+            ]),
+            $this->createInventoryDemoLot([
+                'sku' => $p.'012',
+                'owner_user_id' => $t1->id,
+                'name' => 'Estación de trabajo CAD (reparación)',
+                'quantity_available' => 1,
+                'unit_price' => 5200000,
+                'is_active' => true,
+                'allow_sale' => false,
+                'allow_rental' => false,
+                'lifecycle_status' => InventoryLot::LIFECYCLE_REPARACION,
+                'lifecycle_status_changed_at' => Carbon::now()->subDays(9),
+                'repair_reason' => 'GPU con artefactos bajo carga; pendiente diagnóstico profundo.',
+                'serial_number' => 'SN-CAD-WS-012',
+                'asset_type' => 'Workstation',
+                'brand' => 'Lenovo',
+                'model' => 'ThinkStation P350',
+                'site_label' => 'Diseño',
+                'physical_condition' => 'Regular',
+                'description' => 'Equipo en taller para revisión de placa (demo seeder).',
+            ]),
+            $this->createInventoryDemoLot([
+                'sku' => $p.'013',
+                'owner_user_id' => $t2->id,
+                'name' => 'Tablet Samsung (vendida — stock cero)',
+                'quantity_available' => 0,
+                'unit_price' => 890000,
+                'is_active' => false,
+                'allow_sale' => false,
+                'allow_rental' => false,
+                'lifecycle_status' => InventoryLot::LIFECYCLE_VENDIDO,
+                'lifecycle_status_changed_at' => Carbon::now()->subDays(20),
+                'serial_number' => 'SN-TAB-SAM-013',
+                'asset_type' => 'Tablet',
+                'brand' => 'Samsung',
+                'model' => 'Galaxy Tab S9',
+                'description' => 'Lote agotado por venta total; estado lifecycle vendido (demo).',
+            ]),
+            $this->createInventoryDemoLot([
+                'sku' => $p.'014',
+                'owner_user_id' => $t3->id,
+                'name' => 'Firewall Fortinet (custodia extendida)',
+                'quantity_available' => 2,
+                'unit_price' => 2100000,
+                'is_active' => true,
+                'serial_number' => 'SN-FTNT-FW-014',
+                'mac_address' => '00:0C:29:AB:CD:EF',
+                'asset_type' => 'Seguridad perimetral',
+                'asset_subtype' => 'Firewall',
+                'brand' => 'Fortinet',
+                'model' => 'FortiGate 60F',
+                'site_label' => 'Cuarto de equipos',
+                'area_label' => 'Red WAN',
+                'physical_condition' => 'Bueno',
+                'warranty_until' => Carbon::now()->addYear()->format('Y-m-d'),
+                'purchase_date' => Carbon::now()->subMonths(14)->format('Y-m-d'),
+                'custody_received_at' => Carbon::now()->subMonths(14)->format('Y-m-d'),
+                'responsible_name' => 'Ing. Red Demo',
+                'responsible_role' => 'Infraestructura',
+                'description' => 'Activo con ficha de custodia completa para pruebas de detalle en UI.',
             ]),
         ];
 
@@ -277,6 +394,54 @@ trait SeedsInventoryInternalDemo
             'note' => 'Alta inicial demo inventario (NAS)',
             'created_at' => Carbon::now()->subDays(30),
         ]);
+
+        $this->seedInventoryDemoLifecycleRequestsAndAttachments($admin, $t0, $bySku, $p);
+    }
+
+    /**
+     * Solicitud de transición pendiente + adjunto mínimo en disco público (pruebas de adjuntos / hoja de vida).
+     */
+    private function seedInventoryDemoLifecycleRequestsAndAttachments(User $admin, User $requestedBy, $bySku, string $p): void
+    {
+        $ups = $bySku[$p.'009'];
+
+        InventoryLifecycleTransitionRequest::query()->updateOrCreate(
+            [
+                'inventory_lot_id' => $ups->id,
+                'status' => InventoryLifecycleTransitionRequest::STATUS_PENDING,
+                'target_status' => InventoryLifecycleTransitionRequest::TARGET_BAJA,
+            ],
+            [
+                'tenant_company_id' => null,
+                'requested_by_user_id' => $requestedBy->id,
+                'reason' => 'Solicitud demo: retiro por fin de vida útil de baterías (seeder).',
+                'required_approvals' => 2,
+                'resolved_at' => null,
+                'resolved_by_user_id' => null,
+                'resolution_note' => null,
+            ]
+        );
+
+        $laptop = $bySku[$p.'001'];
+        $disk = Storage::disk('public');
+        $relative = 'inventory_lot_attachments/demo-seed/'.$laptop->id.'/ficha-demo.txt';
+        if (! $disk->exists($relative)) {
+            $disk->put($relative, "Ficha técnica de prueba (generada por InventoryInternalDemoSeeder).\nLote ID: {$laptop->id}\n");
+        }
+
+        InventoryLotAttachment::query()->updateOrCreate(
+            [
+                'inventory_lot_id' => $laptop->id,
+                'original_filename' => 'ficha-demo.txt',
+            ],
+            [
+                'path' => $relative,
+                'mime_type' => 'text/plain',
+                'size_bytes' => strlen($disk->get($relative)),
+                'uploaded_by_user_id' => $admin->id,
+                'inventory_audit_event_id' => null,
+            ]
+        );
     }
 
     private function deletePreviousInventoryDemoLots(): void
@@ -320,9 +485,36 @@ trait SeedsInventoryInternalDemo
 
     private function createInventoryDemoLot(array $attrs): InventoryLot
     {
+        $defaults = [
+            'tenant_company_id' => null,
+            'lifecycle_status' => InventoryLot::LIFECYCLE_ACTIVO,
+            'lifecycle_status_changed_at' => null,
+            'repair_reason' => null,
+            'repair_resolution' => null,
+            'decommission_reason' => null,
+            'decommissioned_at' => null,
+            'decommissioned_by_user_id' => null,
+            'allow_sale' => true,
+            'allow_rental' => false,
+            'serial_number' => null,
+            'mac_address' => null,
+            'asset_type' => null,
+            'asset_subtype' => null,
+            'brand' => null,
+            'model' => null,
+            'site_label' => null,
+            'area_label' => null,
+            'physical_condition' => null,
+            'warranty_until' => null,
+            'purchase_date' => null,
+            'custody_received_at' => null,
+            'responsible_name' => null,
+            'responsible_role' => null,
+        ];
+
         $attrs['tenant_company_id'] = null;
 
-        return InventoryLot::query()->create($attrs);
+        return InventoryLot::query()->create(array_merge($defaults, $attrs));
     }
 
     /**

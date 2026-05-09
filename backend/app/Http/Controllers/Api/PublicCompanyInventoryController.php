@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Company;
 use App\Models\InventoryLot;
+use App\Support\InventoryLotInternalCode;
+use App\Support\InventoryLotWarrantyLabels;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -129,21 +131,60 @@ class PublicCompanyInventoryController extends Controller
                 'id',
                 'name',
                 'sku',
+                'serial_number',
+                'description',
+                'asset_type',
+                'asset_subtype',
+                'brand',
+                'model',
+                'site_label',
+                'area_label',
+                'physical_condition',
+                'warranty_until',
+                'purchase_date',
+                'custody_received_at',
+                'responsible_name',
+                'responsible_role',
                 'quantity_available',
                 'lifecycle_status',
                 'is_active',
                 'created_at',
             ]);
 
-        $data = $rows->map(fn (InventoryLot $lot) => [
-            'id' => $lot->id,
-            'name' => $lot->name,
-            'sku' => $lot->sku,
-            'quantity_available' => (int) $lot->quantity_available,
-            'lifecycle_status' => (string) ($lot->lifecycle_status ?? InventoryLot::LIFECYCLE_ACTIVO),
-            'is_active' => (bool) $lot->is_active,
-            'created_at' => $lot->created_at?->toIso8601String(),
-        ])->values()->all();
+        $data = $rows->map(function (InventoryLot $lot) {
+            $sem = InventoryLotWarrantyLabels::semaphore($lot->warranty_until);
+
+            return [
+                'id' => $lot->id,
+                'name' => $lot->name,
+                'internal_code' => InventoryLotInternalCode::resolve(
+                    $lot->description,
+                    $lot->sku,
+                    (int) $lot->id,
+                    $lot->serial_number,
+                ),
+                'serial_number' => $lot->serial_number,
+                'description' => $lot->description,
+                'asset_type' => $lot->asset_type,
+                'asset_subtype' => $lot->asset_subtype,
+                'brand' => $lot->brand,
+                'model' => $lot->model,
+                'site_label' => $lot->site_label,
+                'area_label' => $lot->area_label,
+                'physical_condition' => $lot->physical_condition,
+                'warranty_until' => $lot->warranty_until?->format('Y-m-d'),
+                'warranty_semaphore' => $sem,
+                'warranty_semaphore_label' => InventoryLotWarrantyLabels::labelEs($sem),
+                'purchase_date' => $lot->purchase_date?->format('Y-m-d'),
+                'custody_received_at' => $lot->custody_received_at?->format('Y-m-d'),
+                'responsible_name' => $lot->responsible_name,
+                'responsible_role' => $lot->responsible_role,
+                'quantity_available' => (int) $lot->quantity_available,
+                'lifecycle_status' => (string) ($lot->lifecycle_status ?? InventoryLot::LIFECYCLE_ACTIVO),
+                'is_active' => (bool) $lot->is_active,
+                'created_at' => $lot->created_at?->toIso8601String(),
+            ];
+        })->values()->all();
 
         return response()->json(['data' => $data]);
     }

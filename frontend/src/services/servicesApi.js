@@ -133,6 +133,12 @@ export function createService(payload, photoFiles = []) {
     fd.append('service_type', String(payload.service_type ?? ''))
     fd.append('description', String(payload.description ?? ''))
     fd.append('amount', String(payload.amount))
+    if (payload.kind != null && payload.kind !== '') {
+      fd.append('kind', String(payload.kind))
+    }
+    if (payload.inventory_lot_id != null && payload.inventory_lot_id !== '') {
+      fd.append('inventory_lot_id', String(payload.inventory_lot_id))
+    }
     if (hasItems) {
       fd.append('items', JSON.stringify(payload.items))
     } else if (payload.catalog_id != null && payload.catalog_id !== '') {

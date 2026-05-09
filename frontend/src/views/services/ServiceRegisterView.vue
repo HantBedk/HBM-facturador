@@ -34,6 +34,8 @@ const registerKind = computed(() => {
 
   if (n === 'emp-registro-alquiler' || n === 'admin-servicios-nuevo-alquiler') return 'alquiler'
 
+  if (n === 'emp-registro-mantenimiento' || n === 'admin-servicios-nuevo-mantenimiento') return 'mantenimiento'
+
   return 'servicio'
 
 })
@@ -45,6 +47,8 @@ const pageTitle = computed(() => {
   if (registerKind.value === 'venta') return 'Registrar venta de equipo'
 
   if (registerKind.value === 'alquiler') return 'Registrar alquiler de equipo'
+
+  if (registerKind.value === 'mantenimiento') return 'Registrar mantenimiento'
 
   return 'Registrar servicio'
 
@@ -89,22 +93,28 @@ const {
   panelOpenRef: null,
 
   async onAdminAfterCreate() {
+    if (registerKind.value === 'mantenimiento') {
+      await router.push(`${basePrefix.value}/mantenimientos`)
+      return
+    }
     await router.push(`${basePrefix.value}/servicios`)
-
   },
 
   async onEmpleadoAfterCreate() {
-
     await new Promise((r) => setTimeout(r, 450))
-
+    if (registerKind.value === 'mantenimiento') {
+      await router.push({ name: 'emp-mantenimientos' })
+      return
+    }
     await router.push({ name: 'empleado-dashboard' })
-
   },
 
 })
 
 const effectiveAllowInventoryCommercialOps = computed(() =>
-  registerKind.value === 'servicio' ? false : allowInventoryCommercialOps.value
+  registerKind.value === 'venta' || registerKind.value === 'alquiler'
+    ? allowInventoryCommercialOps.value
+    : false
 )
 
 </script>

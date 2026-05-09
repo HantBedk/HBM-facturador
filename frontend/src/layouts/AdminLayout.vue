@@ -162,6 +162,17 @@ async function salir() {
           </div>
           <span>Servicios</span>
         </RouterLink>
+        <RouterLink
+          to="/admin/mantenimientos"
+          :class="['group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors', route.path.includes('mantenimiento') ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20' : 'text-slate-300 hover:bg-slate-800/50 hover:text-white']"
+        >
+          <div :class="['flex items-center justify-center p-1', route.path.includes('mantenimiento') ? 'text-white' : 'text-teal-400 group-hover:text-teal-300']">
+            <svg class="h-[1.15rem] w-[1.15rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.341A8 8 0 118.659 4.572M12 8v4l3 3" />
+            </svg>
+          </div>
+          <span>Mantenimientos</span>
+        </RouterLink>
 
         <RouterLink
           to="/admin/inventario"
@@ -266,6 +277,9 @@ async function salir() {
           </RouterLink>
           <RouterLink to="/admin/servicios" :class="['group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors', route.path.startsWith('/admin/servicios') ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20' : 'text-slate-300 hover:bg-slate-800/50 hover:text-white']">
             <span>Servicios</span>
+          </RouterLink>
+          <RouterLink to="/admin/mantenimientos" :class="['group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors', route.path.includes('mantenimiento') ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20' : 'text-slate-300 hover:bg-slate-800/50 hover:text-white']">
+            <span>Mantenimientos</span>
           </RouterLink>
           <RouterLink to="/admin/inventario" :class="['group flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-[0.95rem] transition-colors', route.path.startsWith('/admin/inventario') ? 'bg-blue-600 font-bold shadow-md shadow-blue-600/20' : 'text-slate-300 hover:bg-slate-800/50 hover:text-white']">
             <span>Inventario interno</span>

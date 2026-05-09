@@ -7,7 +7,7 @@ alwaysApply: true
 
 ## Obligatorio en cada tarea
 
-1. Listar skills aplicables en `.cursor/skills/` cuyo nombre o descripción coincida con el módulo (inventario, facturas, OTP, BD segura, seeder local).
+1. Listar skills aplicables en `.cursor/skills/` cuyo nombre o descripción coincida con el módulo (inventario, facturas, OTP, BD segura, seeder local, **refactor seguro / optimización** → `hbm-safe-refactor-optimize`).
 2. Leer el `SKILL.md` relevante y seguir sus pasos/checklists cuando existan.
 3. Si la regla es nueva y se repetirá (multi-tenant, portal público, stock/lifecycle), crear o actualizar una skill con `create-skill` y documentar convenciones ahí, no solo en código suelto.
 4. Respetar `.cursor/rules/hbm-database-safety.mdc` y skill `hbm-safe-db-ops` para migraciones y datos.

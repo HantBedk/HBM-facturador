@@ -1,4 +1,4 @@
-import { api } from '@/services/api.js'
+import { api, apiBaseUrl, getToken } from '@/services/api.js'
 
 function qs(params) {
   const q = new URLSearchParams()
@@ -14,6 +14,10 @@ export function fetchInventoryLots(params = {}) {
   return api(`/inventory/lots${qs(params)}`)
 }
 
+export function fetchInventoryLot(id, params = {}) {
+  return api(`/inventory/lots/${id}${qs(params)}`)
+}
+
 /** Solo rol técnico. Respuesta: { data: { venta_enabled, alquiler_enabled } }. */
 export function fetchEmpleadoCommercialInventorySettings() {
   return api('/inventory/empleado-commercial-settings')
@@ -21,6 +25,11 @@ export function fetchEmpleadoCommercialInventorySettings() {
 
 export function createInventoryLot(body) {
   return api('/inventory/lots', { method: 'POST', body: JSON.stringify(body) })
+}
+
+/** @param {FormData} formData file, tenant_company_id, dry_run (0|1) */
+export function importInventoryLotsCsv(formData) {
+  return api('/inventory/lots/import', { method: 'POST', body: formData })
 }
 
 export function updateInventoryLot(id, body, params = {}) {
@@ -48,6 +57,46 @@ export function approveInventoryLifecycleRequest(requestId, body) {
 
 export function fetchInventoryAuditEvents(params = {}) {
   return api(`/inventory/audit-events${qs(params)}`)
+}
+
+export function fetchInventoryMovements(params = {}) {
+  return api(`/inventory/movements${qs(params)}`)
+}
+
+export function fetchInventoryLotAttachments(lotId, params = {}) {
+  return api(`/inventory/lots/${lotId}/attachments${qs(params)}`)
+}
+
+/** @param {Record<string, string|number|undefined>} [meta] inventory_audit_event_id opcional (evento de hoja de vida). */
+export function uploadInventoryLotAttachment(lotId, file, params = {}, meta = {}) {
+  const fd = new FormData()
+  fd.append('file', file)
+  if (meta.inventory_audit_event_id != null && String(meta.inventory_audit_event_id).trim() !== '') {
+    fd.append('inventory_audit_event_id', String(meta.inventory_audit_event_id))
+  }
+  return api(`/inventory/lots/${lotId}/attachments${qs(params)}`, { method: 'POST', body: fd })
+}
+
+export function deleteInventoryLotAttachment(lotId, attachmentId, params = {}) {
+  return api(`/inventory/lots/${lotId}/attachments/${attachmentId}${qs(params)}`, { method: 'DELETE' })
+}
+
+/** PDF hoja de vida (auth). */
+export async function downloadInventoryLotLifecycleSheetPdf(lotId, params = {}) {
+  const q = qs(params)
+  const res = await fetch(`${apiBaseUrl()}/api/inventory/lots/${lotId}/lifecycle-sheet${q}`, {
+    headers: {
+      Authorization: `Bearer ${getToken()}`,
+      Accept: 'application/pdf',
+    },
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.message || `Error ${res.status}`)
+  }
+  const ab = await res.arrayBuffer()
+  const mime = (res.headers.get('Content-Type') || 'application/pdf').split(';')[0].trim().toLowerCase()
+  return new Blob([ab], { type: mime || 'application/pdf' })
 }
 
 export function fetchInventorySales(params = {}) {

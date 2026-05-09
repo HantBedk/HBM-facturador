@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\AdminCompanyRecurringServiceController;
 use App\Http\Controllers\Api\AdminDashboardController;
 use App\Http\Controllers\Api\AdminExportController;
 use App\Http\Controllers\Api\AdminInvoiceController;
+use App\Http\Controllers\Api\AdminMailNotificationsSettingsController;
 use App\Http\Controllers\Api\AdminInventoryHolderSettingsController;
 use App\Http\Controllers\Api\AdminInventoryLocationSettingsController;
 use App\Http\Controllers\Api\AdminPanelNotificationController;
@@ -28,13 +29,16 @@ use App\Http\Controllers\Api\EmpleadoPasswordController;
 use App\Http\Controllers\Api\EmpleadoPerfilController;
 use App\Http\Controllers\Api\EmployeeHistorialController;
 use App\Http\Controllers\Api\HealthController;
+use App\Http\Controllers\Api\InventoryLotAttachmentController;
 use App\Http\Controllers\Api\InventoryLotController;
+use App\Http\Controllers\Api\InventoryLotLifecycleSheetController;
 use App\Http\Controllers\Api\InventoryHolderOptionController;
 use App\Http\Controllers\Api\InventoryLocationOptionController;
 use App\Http\Controllers\Api\InventoryOwnerAccrualController;
 use App\Http\Controllers\Api\InventoryAuditEventController;
 use App\Http\Controllers\Api\InventoryLifecycleController;
 use App\Http\Controllers\Api\InventoryEmpleadoCommercialSettingsController;
+use App\Http\Controllers\Api\InventoryMovementController;
 use App\Http\Controllers\Api\InventoryRentalController;
 use App\Http\Controllers\Api\InventorySaleController;
 use App\Http\Controllers\Api\PublicInvoiceController;
@@ -67,6 +71,12 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::get('/auth/me', [AuthController::class, 'me']);
 
     Route::get('/inventory/lots', [InventoryLotController::class, 'index']);
+    Route::get('/inventory/lots/{inventory_lot}', [InventoryLotController::class, 'show']);
+    Route::get('/inventory/lots/{inventory_lot}/lifecycle-sheet', InventoryLotLifecycleSheetController::class);
+    Route::get('/inventory/lots/{inventory_lot}/attachments', [InventoryLotAttachmentController::class, 'index']);
+    Route::post('/inventory/lots/{inventory_lot}/attachments', [InventoryLotAttachmentController::class, 'store']);
+    Route::delete('/inventory/lots/{inventory_lot}/attachments/{attachment}', [InventoryLotAttachmentController::class, 'destroy']);
+    Route::get('/inventory/movements', InventoryMovementController::class);
     Route::get('/inventory/empleado-commercial-settings', InventoryEmpleadoCommercialSettingsController::class);
     Route::get('/inventory/location-options', InventoryLocationOptionController::class);
     Route::get('/inventory/holder-options', InventoryHolderOptionController::class);
@@ -79,6 +89,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
     Route::post('/inventory/lots/{inventory_lot}/lifecycle/report', [InventoryLifecycleController::class, 'report']);
     Route::middleware('role:admin,super_admin')->group(function () {
         Route::post('/inventory/lots', [InventoryLotController::class, 'store']);
+        Route::post('/inventory/lots/import', [InventoryLotController::class, 'importLots']);
         Route::patch('/inventory/lots/{inventory_lot}', [InventoryLotController::class, 'update']);
         Route::delete('/inventory/lots/{inventory_lot}', [InventoryLotController::class, 'destroy']);
         Route::get('/inventory/owner-accruals', InventoryOwnerAccrualController::class);
@@ -115,6 +126,8 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::put('/admin/settings/empleado-notificaciones', [AdminEmpleadoNotificacionSettingsController::class, 'update']);
         Route::get('/admin/settings/billing-automation', [AdminBillingAutomationController::class, 'show']);
         Route::put('/admin/settings/billing-automation', [AdminBillingAutomationController::class, 'update']);
+        Route::get('/admin/settings/mail-notifications', [AdminMailNotificationsSettingsController::class, 'show']);
+        Route::put('/admin/settings/mail-notifications', [AdminMailNotificationsSettingsController::class, 'update']);
         Route::get('/admin/settings/inventory-locations', [AdminInventoryLocationSettingsController::class, 'show']);
         Route::put('/admin/settings/inventory-locations', [AdminInventoryLocationSettingsController::class, 'update']);
         Route::get('/admin/settings/inventory-holders', [AdminInventoryHolderSettingsController::class, 'show']);
@@ -150,6 +163,8 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::get('/admin/invoices', [AdminInvoiceController::class, 'index']);
         Route::post('/admin/invoices', [AdminInvoiceController::class, 'store']);
         Route::get('/admin/invoices/{invoice}/pdf', [AdminInvoiceController::class, 'pdf']);
+        Route::post('/admin/invoices/{invoice}/send-email', [AdminInvoiceController::class, 'sendEmailToCompany'])
+            ->middleware('throttle:20,1');
         Route::patch('/admin/invoices/{invoice}/status', [AdminInvoiceController::class, 'updateStatus']);
         Route::post('/admin/invoices/{invoice}/payments', [AdminInvoiceController::class, 'storePayment']);
         Route::delete('/admin/invoices/{invoice}/payments/{payment}', [AdminInvoiceController::class, 'destroyPayment']);

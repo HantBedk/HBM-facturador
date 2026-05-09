@@ -1,16 +1,37 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import AdminServiceDetailPanel from '@/components/admin/AdminServiceDetailPanel.vue'
 import AdminServiceRegisterPanel from '@/components/admin/AdminServiceRegisterPanel.vue'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
-import { downloadAdminExportCsv } from '@/services/invoicesApi.js'
+import { createInvoice, downloadAdminExportCsv } from '@/services/invoicesApi.js'
 import { fetchEmpleadoCommercialInventorySettings } from '@/services/inventoryApi.js'
 import { archiveService, fetchCompanies, fetchEmpleados, fetchServices } from '@/services/servicesApi.js'
+import { useUiDialogStore } from '@/stores/uiDialog'
+import {
+  SORT_DEFAULT_DIR,
+  adminInvoiceDetailPath,
+  canAdminQuickMaintenanceInvoiceDraft as quickMaintInvoiceDraftAllowed,
+  clip,
+  detectSavTypeByCode,
+  equipmentCellLabel,
+  estadoLabel,
+  formatServiceListDate,
+  money,
+  parseServiceDatePeriod,
+  rowInventoryDetailTo as inventoryLotRouteFromServiceRow,
+  serviceDetailPath,
+  serviceEditPath,
+} from './servicesListHelpers.js'
 
 const auth = useAuthStore()
+const uiDialog = useUiDialogStore()
 const router = useRouter()
+const route = useRoute()
+const props = defineProps({
+  defaultKind: { type: String, default: '' },
+})
 
 const companies = ref([])
 const empleados = ref([])
@@ -21,6 +42,8 @@ const loading = ref(false)
 const exportBusy = ref(false)
 const error = ref('')
 const archivingId = ref(null)
+/** Admin: creación de borrador de factura desde fila de mantenimiento. */
+const invoiceDraftBusyId = ref(null)
 
 /** Modal eliminar servicio: confirmación escribiendo código de factura o de servicio. */
 const deleteModalOpen = ref(false)
@@ -61,7 +84,7 @@ const deleteUsesInvoiceCode = computed(() => Boolean(deleteTarget.value?.invoice
 const filters = ref({
   company_id: '',
   user_id: '',
-  sav_type: '',
+  sav_type: props.defaultKind || '',
   service_date_from: '',
   service_date_to: '',
   q: '',
@@ -71,43 +94,47 @@ const filters = ref({
 })
 
 const isAdmin = computed(() => isAdminPanelRole(auth.user?.rol))
+const isMaintenanceListing = computed(
+  () =>
+    props.defaultKind === 'mantenimiento' ||
+    route.name === 'admin-mantenimientos' ||
+    route.name === 'emp-mantenimientos'
+)
+/** Columna equipo: listado dedicado o filtro «Mantenimiento». */
+const showEquipmentColumn = computed(
+  () => isMaintenanceListing.value || filters.value.sav_type === 'mantenimiento'
+)
 /** Técnico: editar / eliminar propios servicios (misma columna que admin). */
 const showServiceActions = computed(
   () => isAdmin.value || auth.user?.rol === 'empleado'
 )
 /** Empleado: sin columna Fecha (sigue existiendo en servidor para facturación). */
-const tableColspan = computed(() => (isAdmin.value ? 9 : showServiceActions.value ? 7 : 6))
-
-/** Columnas ordenables (coinciden con `sort` en la API). */
-const SORT_DEFAULT_DIR = {
-  code: 'asc',
-  service_date: 'desc',
-  company_nombre: 'asc',
-  client_name: 'asc',
-  description: 'asc',
-  user_nombre: 'asc',
-  amount: 'desc',
-  status: 'asc',
-}
+const tableColspan = computed(() => {
+  const extra = showEquipmentColumn.value ? 1 : 0
+  if (isAdmin.value) return 9 + extra
+  if (showServiceActions.value) return 7 + extra
+  return 6 + extra
+})
 
 const sortKey = ref('')
 const sortDir = ref('desc')
 
-const listTitle = computed(() => (isAdmin.value ? 'Listado SAV' : 'Mis SAV'))
+const listTitle = computed(() => {
+  if (isMaintenanceListing.value) return isAdmin.value ? 'Mantenimientos' : 'Mis mantenimientos'
+  return isAdmin.value ? 'Listado SAV' : 'Mis SAV'
+})
 
 const empleadoCommercial = ref({ venta: false, alquiler: false })
 
 function detailPath(id) {
-  return isAdmin.value ? `/admin/servicios/${id}` : `/empleado/servicio/${id}`
+  return serviceDetailPath(id, isAdmin.value)
 }
 
 function editPath(id) {
-  return isAdmin.value ? `/admin/servicios/${id}/editar` : `/empleado/servicio/${id}/editar`
+  return serviceEditPath(id, isAdmin.value)
 }
 
-function invoiceDetailPath(invoiceId) {
-  return `/admin/facturas/${invoiceId}`
-}
+const invoiceDetailPath = adminInvoiceDetailPath
 
 function openDeleteModal(s) {
   if (s.status === 'eliminado' || archivingId.value != null) return
@@ -198,6 +225,7 @@ async function load() {
     if (filters.value.service_date_to) params.service_date_to = filters.value.service_date_to
     if (filters.value.q.trim()) params.q = filters.value.q.trim()
     if (!isAdmin.value && filters.value.assignment_pending) params.assignment_pending = true
+    if (filters.value.sav_type === 'mantenimiento') params.kind = 'mantenimiento'
     if (sortKey.value) {
       params.sort = sortKey.value
       params.sort_dir = sortDir.value
@@ -277,6 +305,16 @@ watch(
   () => scheduleFilterLoad()
 )
 
+watch(
+  isMaintenanceListing,
+  (on) => {
+    if (on && filters.value.sav_type !== 'mantenimiento') {
+      filters.value.sav_type = 'mantenimiento'
+    }
+  },
+  { immediate: true }
+)
+
 function goPage(p) {
   filters.value.page = p
   load()
@@ -307,36 +345,52 @@ function openRow(id, ev) {
   router.push(detailPath(id))
 }
 
-function money(v) {
-  const n = Number(v)
-  if (Number.isNaN(n)) return v
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
+function rowInventoryDetailTo(s) {
+  return inventoryLotRouteFromServiceRow(s, isAdmin.value)
 }
 
-function clip(s, n = 72) {
-  if (!s) return '—'
-  return s.length > n ? `${s.slice(0, n)}…` : s
+function canAdminQuickMaintenanceInvoiceDraft(s) {
+  return quickMaintInvoiceDraftAllowed(s, isAdmin.value)
 }
 
-function detectSavTypeByCode(code) {
-  const c = String(code || '').toUpperCase().trim()
-  if (c.startsWith('VENT')) return 'venta'
-  if (c.startsWith('ALQ')) return 'alquiler'
-  return 'servicio'
+async function onQuickMaintenanceInvoiceDraft(s) {
+  const per = parseServiceDatePeriod(s.service_date)
+  if (!per || !canAdminQuickMaintenanceInvoiceDraft(s) || invoiceDraftBusyId.value != null) return
+  const ok = await uiDialog.confirm({
+    title: 'Crear borrador de factura',
+    message:
+      `Se creará un borrador del periodo ${per.month}/${per.year} con el mantenimiento ${s.code}. ` +
+      'Revise el detalle del servicio si necesita corregir importes antes.',
+    confirmLabel: 'Crear borrador',
+    cancelLabel: 'Cancelar',
+  })
+  if (!ok) return
+  invoiceDraftBusyId.value = s.id
+  try {
+    const inv = await createInvoice({
+      company_id: s.company_id,
+      period_year: per.year,
+      period_month: per.month,
+      service_ids: [s.id],
+    })
+    await load()
+    await router.push({ name: 'admin-factura-detalle', params: { id: String(inv.id) } })
+  } catch (e) {
+    const parts = []
+    if (e.data?.errors && typeof e.data.errors === 'object') {
+      for (const v of Object.values(e.data.errors)) {
+        if (Array.isArray(v)) parts.push(...v)
+        else if (v != null) parts.push(String(v))
+      }
+    }
+    const msg = parts.length ? parts.join('\n') : e.message || 'No se pudo crear el borrador.'
+    await uiDialog.alert({ title: 'No se pudo crear el borrador', message: msg })
+  } finally {
+    invoiceDraftBusyId.value = null
+  }
 }
 
-function formatDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso + (iso.length === 10 ? 'T12:00:00' : ''))
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
-}
-
-/** Etiqueta de estado para la tabla (API usa slugs en minúsculas). */
-function estadoLabel(status) {
-  const m = { activo: 'Activo', corregido: 'Corregido', eliminado: 'Eliminado' }
-  return m[status] ?? status ?? '—'
-}
+const formatDate = formatServiceListDate
 
 const pageSummary = computed(() => {
   const m = meta.value
@@ -347,7 +401,7 @@ const pageSummary = computed(() => {
 const filteredRows = computed(() => {
   const wanted = String(filters.value.sav_type || '')
   if (!wanted) return rows.value
-  return rows.value.filter((s) => detectSavTypeByCode(s.code) === wanted)
+  return rows.value.filter((s) => detectSavTypeByCode(s) === wanted)
 })
 
 async function exportServicesCsv() {
@@ -360,6 +414,9 @@ async function exportServicesCsv() {
     if (filters.value.user_id) params.user_id = filters.value.user_id
     if (filters.value.service_date_from) params.service_date_from = filters.value.service_date_from
     if (filters.value.service_date_to) params.service_date_to = filters.value.service_date_to
+    if (filters.value.q.trim()) params.q = filters.value.q.trim()
+    if (filters.value.sav_type === 'mantenimiento') params.kind = 'mantenimiento'
+    if (filters.value.sav_type === 'servicio') params.kind = 'servicio'
     const { blob, filename } = await downloadAdminExportCsv('/admin/export/services', params)
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
@@ -398,30 +455,42 @@ async function exportServicesCsv() {
           {{ exportBusy ? 'Exportando…' : 'Exportar CSV (Excel)' }}
         </button>
         <template v-if="isAdmin">
-          <button type="button" class="btn primary register-btn" @click="openRegisterPanel('servicio')">+ Servicio</button>
-          <button type="button" class="btn secondary register-btn" @click="openRegisterPanel('venta')">+ Venta</button>
-          <button type="button" class="btn secondary register-btn" @click="openRegisterPanel('alquiler')">+ Alquiler</button>
+          <template v-if="isMaintenanceListing">
+            <button type="button" class="btn primary register-btn" @click="openRegisterPanel('mantenimiento')">+ Mantenimiento</button>
+          </template>
+          <template v-else>
+            <button type="button" class="btn primary register-btn" @click="openRegisterPanel('servicio')">+ Servicio</button>
+            <button type="button" class="btn secondary register-btn" @click="openRegisterPanel('mantenimiento')">+ Mantenimiento</button>
+            <button type="button" class="btn secondary register-btn" @click="openRegisterPanel('venta')">+ Venta</button>
+            <button type="button" class="btn secondary register-btn" @click="openRegisterPanel('alquiler')">+ Alquiler</button>
+          </template>
         </template>
         <template v-else>
-          <button type="button" class="btn primary register-btn" @click="openRegisterPanel('servicio')">+ Servicio</button>
-          <button
-            type="button"
-            class="btn secondary register-btn"
-            :disabled="!empleadoCommercial.venta"
-            :title="empleadoCommercial.venta ? 'Registrar venta' : 'Venta no habilitada por administración'"
-            @click="openRegisterPanel('venta')"
-          >
-            + Venta
-          </button>
-          <button
-            type="button"
-            class="btn secondary register-btn"
-            :disabled="!empleadoCommercial.alquiler"
-            :title="empleadoCommercial.alquiler ? 'Registrar alquiler' : 'Alquiler no habilitado por administración'"
-            @click="openRegisterPanel('alquiler')"
-          >
-            + Alquiler
-          </button>
+          <template v-if="isMaintenanceListing">
+            <button type="button" class="btn primary register-btn" @click="openRegisterPanel('mantenimiento')">+ Mantenimiento</button>
+          </template>
+          <template v-else>
+            <button type="button" class="btn primary register-btn" @click="openRegisterPanel('servicio')">+ Servicio</button>
+            <button type="button" class="btn secondary register-btn" @click="openRegisterPanel('mantenimiento')">+ Mantenimiento</button>
+            <button
+              type="button"
+              class="btn secondary register-btn"
+              :disabled="!empleadoCommercial.venta"
+              :title="empleadoCommercial.venta ? 'Registrar venta' : 'Venta no habilitada por administración'"
+              @click="openRegisterPanel('venta')"
+            >
+              + Venta
+            </button>
+            <button
+              type="button"
+              class="btn secondary register-btn"
+              :disabled="!empleadoCommercial.alquiler"
+              :title="empleadoCommercial.alquiler ? 'Registrar alquiler' : 'Alquiler no habilitado por administración'"
+              @click="openRegisterPanel('alquiler')"
+            >
+              + Alquiler
+            </button>
+          </template>
         </template>
       </div>
     </header>
@@ -445,9 +514,10 @@ async function exportServicesCsv() {
       </label>
       <label>
         <span>Tipo SAV</span>
-        <select v-model="filters.sav_type">
+        <select v-model="filters.sav_type" :disabled="isMaintenanceListing">
           <option value="">Todos</option>
           <option value="servicio">Servicio</option>
+          <option value="mantenimiento">Mantenimiento</option>
           <option value="venta">Venta</option>
           <option value="alquiler">Alquiler</option>
         </select>
@@ -513,6 +583,7 @@ async function exportServicesCsv() {
                   Descripción<span class="sort-ind" aria-hidden="true">{{ sortIndicator('description') }}</span>
                 </button>
               </th>
+              <th v-if="showEquipmentColumn" scope="col" class="col-equipo">Equipo</th>
               <th v-if="isAdmin" scope="col" :aria-sort="thAriaSort('user_nombre')">
                 <button type="button" class="th-sort" @click="toggleSort('user_nombre')">
                   Técnico<span class="sort-ind" aria-hidden="true">{{ sortIndicator('user_nombre') }}</span>
@@ -580,11 +651,41 @@ async function exportServicesCsv() {
               <td>{{ s.company?.nombre || '—' }}</td>
               <td>{{ s.client_name || '—' }}</td>
               <td class="desc">{{ clip(s.description) }}</td>
+              <td v-if="showEquipmentColumn" class="col-equipo">
+                <RouterLink
+                  v-if="rowInventoryDetailTo(s) && s.inventory_lot"
+                  class="link-equipo"
+                  :to="rowInventoryDetailTo(s)"
+                  title="Ver hoja de vida del activo"
+                  @click.stop
+                >
+                  {{ equipmentCellLabel(s) }}
+                </RouterLink>
+                <span v-else class="muted">{{ equipmentCellLabel(s) }}</span>
+              </td>
               <td v-if="isAdmin">{{ s.empleado?.nombre || '—' }}</td>
               <td class="num">{{ money(s.amount) }}</td>
               <td><span class="pill" :data-st="s.status">{{ estadoLabel(s.status) }}</span></td>
               <td v-if="showServiceActions" class="actions-col" @click.stop>
                 <div class="actions-icons">
+                  <button
+                    v-if="canAdminQuickMaintenanceInvoiceDraft(s)"
+                    type="button"
+                    class="icon-act"
+                    :disabled="invoiceDraftBusyId != null"
+                    title="Crear borrador de factura con este mantenimiento"
+                    aria-label="Crear borrador de factura"
+                    @click="onQuickMaintenanceInvoiceDraft(s)"
+                  >
+                    <svg class="icon-svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      />
+                    </svg>
+                  </button>
                   <RouterLink
                     v-if="!(s.assignment_status === 'awaiting_completion' && !isAdmin)"
                     class="icon-act"
@@ -788,6 +889,22 @@ async function exportServicesCsv() {
   color: #94a3b8;
   max-width: min(48rem, 100%);
   line-height: 1.45;
+}
+
+.col-equipo {
+  max-width: 13.5rem;
+  font-size: 0.8125rem;
+  vertical-align: top;
+}
+
+.link-equipo {
+  color: #7dd3fc;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.link-equipo:hover {
+  text-decoration: underline;
 }
 
 .banner {

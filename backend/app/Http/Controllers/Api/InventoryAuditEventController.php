@@ -5,12 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\InventoryAuditEvent;
 use App\Support\Pagination;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class InventoryAuditEventController extends Controller
 {
-    public function __invoke(Request $request): AnonymousResourceCollection
+    public function __invoke(Request $request): JsonResponse
     {
         if (! $request->user()->isAdminEquipo()) {
             abort(403);
@@ -27,6 +27,7 @@ class InventoryAuditEventController extends Controller
 
         $q = InventoryAuditEvent::query()
             ->with(['actor:id,nombre,correo', 'tenantCompany:id,nombre,nit'])
+            ->orderByDesc('occurred_at')
             ->orderByDesc('id')
             ->when($validated['tenant_company_id'] ?? null, fn ($q, $v) => $q->where('tenant_company_id', (int) $v))
             ->when($validated['entity_type'] ?? null, fn ($q, $v) => $q->where('entity_type', $v))
@@ -39,6 +40,6 @@ class InventoryAuditEventController extends Controller
             $q->whereNull('tenant_company_id');
         }
 
-        return $q->paginate(Pagination::perPage($request))->withQueryString();
+        return response()->json($q->paginate(Pagination::perPage($request))->withQueryString());
     }
 }

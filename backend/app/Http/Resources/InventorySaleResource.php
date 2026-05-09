@@ -43,7 +43,7 @@ class InventorySaleResource extends JsonResource
                         'lot' => $line->relationLoaded('lot') && $line->lot ? [
                             'id' => $line->lot->id,
                             'name' => $line->lot->name,
-                            'sku' => $line->lot->sku,
+                            'internal_code' => $line->lot->internal_code,
                         ] : null,
                     ];
                 })->values()->all();
