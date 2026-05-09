@@ -8,7 +8,7 @@ use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Support\HtmlString;
 
-class InvoicePdfToCompanyMail extends Mailable
+class MaintenanceCompanyNotifyMail extends Mailable
 {
     /**
      * @param  array<int, Attachment>  $attachmentsList

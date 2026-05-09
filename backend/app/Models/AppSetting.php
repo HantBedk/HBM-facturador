@@ -54,6 +54,31 @@ class AppSetting extends Model
      */
     public const KEY_MAIL_NOTIFICATIONS_FROM = 'mail_notifications_from';
 
+    /**
+     * PDF opcional de bienvenida para nuevas empresas (se adjunta al correo si está configurado y es legible).
+     * JSON: { "relative_path": "mail-company-welcome/uuid.pdf", "original_filename": "Contrato.pdf" }.
+     */
+    public const KEY_MAIL_COMPANY_WELCOME_PDF = 'mail_company_welcome_pdf';
+
+    /** PDF opcional adicional al enviar factura por correo (p. ej. condiciones de pago). */
+    public const KEY_MAIL_INVOICE_SUPPLEMENT_PDF = 'mail_invoice_supplement_pdf';
+
+    /** PDF opcional al notificar mantenimiento a la empresa. */
+    public const KEY_MAIL_MAINTENANCE_SUPPLEMENT_PDF = 'mail_maintenance_supplement_pdf';
+
+    /**
+     * Plantillas de asunto y cuerpo (texto plano) para correos del sistema.
+     * JSON: welcome_subject, welcome_body, invoice_to_company_subject, invoice_to_company_body.
+     * Placeholders: {{nombre_empresa}}, {{codigo_factura}} (este solo en factura).
+     */
+    public const KEY_MAIL_NOTIFICATION_TEMPLATES = 'mail_notification_templates';
+
+    /**
+     * Configuración SMTP editable desde panel (se guardan secretos cifrados).
+     * JSON: mailer, host, port, encryption, username, password_encrypted, resend_api_key_encrypted.
+     */
+    public const KEY_MAIL_RUNTIME_TRANSPORT = 'mail_runtime_transport';
+
     protected $fillable = [
         'key',
         'value',

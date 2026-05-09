@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Mail\InvoicePdfToCompanyMail;
+use App\Models\AppSetting;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\Service;
@@ -11,6 +12,7 @@ use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -395,9 +397,54 @@ class AdminInvoiceApiTest extends TestCase
             ->assertJsonPath('sent_to', 'facturas-empresa@test.local');
 
         Mail::assertSent(InvoicePdfToCompanyMail::class, function (InvoicePdfToCompanyMail $m) {
-            return $m->invoiceCode === 'T-FAC-001'
-                && str_contains($m->attachmentFilename, 'factura-')
-                && strlen($m->pdfBinary) > 100;
+            return str_contains($m->subjectLine, 'T-FAC-001')
+                && str_contains((string) $m->htmlBody, 'consulta-factura')
+                && count($m->attachmentsList) >= 1;
+        });
+    }
+
+    public function test_send_invoice_email_uses_custom_message_template(): void
+    {
+        AppSetting::setJsonValue(AppSetting::KEY_MAIL_NOTIFICATION_TEMPLATES, [
+            'welcome_subject' => '',
+            'welcome_body' => '',
+            'invoice_to_company_subject' => 'DOC {{codigo_factura}}',
+            'invoice_to_company_body' => 'Empresa={{nombre_empresa}} Codigo={{codigo_factura}}',
+        ]);
+
+        $s = $this->seedInvoiceScenario();
+        $s['invoice']->update(['status' => Invoice::STATUS_APROBADA]);
+        Sanctum::actingAs($s['admin']);
+        Mail::fake();
+
+        $this->postJson('/api/admin/invoices/'.$s['invoice']->id.'/send-email')->assertOk();
+
+        Mail::assertSent(InvoicePdfToCompanyMail::class, function (InvoicePdfToCompanyMail $m) {
+            return $m->subjectLine === 'DOC T-FAC-001'
+                && str_contains((string) $m->htmlBody, 'Empresa=Empresa Test')
+                && str_contains((string) $m->htmlBody, 'Codigo=T-FAC-001');
+        });
+    }
+
+    public function test_send_invoice_email_attaches_supplement_pdf_when_configured(): void
+    {
+        Storage::fake('local');
+        $supPath = 'mail-invoice-supplement/extra.pdf';
+        Storage::disk('local')->put($supPath, '%PDF-1.4 extra');
+        AppSetting::setJsonValue(AppSetting::KEY_MAIL_INVOICE_SUPPLEMENT_PDF, [
+            'relative_path' => $supPath,
+            'original_filename' => 'Anexo.pdf',
+        ]);
+
+        $s = $this->seedInvoiceScenario();
+        $s['invoice']->update(['status' => Invoice::STATUS_APROBADA]);
+        Sanctum::actingAs($s['admin']);
+        Mail::fake();
+
+        $this->postJson('/api/admin/invoices/'.$s['invoice']->id.'/send-email')->assertOk();
+
+        Mail::assertSent(InvoicePdfToCompanyMail::class, function (InvoicePdfToCompanyMail $m) {
+            return count($m->attachmentsList) === 2;
         });
     }
 }

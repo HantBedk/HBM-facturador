@@ -14,6 +14,11 @@ export function fetchAdminCompanies(params = {}) {
   return api(`/admin/companies${s ? `?${s}` : ''}`).then((r) => r.data)
 }
 
+/** @returns {Promise<{ welcome_pdf_ready: boolean }>} */
+export function fetchWelcomeMailAttachmentReady() {
+  return api('/admin/companies/welcome-mail-attachment-ready')
+}
+
 /**
  * @param {{
  *   nombre: string,

@@ -14,6 +14,9 @@
 #   .\HBM.ps1 -SoloMigrar   → Docker + solo migrate (sin seeders), sin Vite
 #   .\HBM.ps1 -SoloMigra    → alias de -SoloMigrar
 #
+# Tabla users vacía (sin login): doble clic HBM-UsuariosDev.cmd o:
+#   docker compose exec -T laravel php artisan hbm:ensure-dev-users
+#
 # Tras git pull con migraciones nuevas (solo esquema, sin resembrar):
 #   docker compose exec laravel php artisan hbm:sync --migrate-only
 #   # o: docker compose exec laravel php artisan migrate --force

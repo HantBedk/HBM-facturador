@@ -2,21 +2,25 @@
 
 namespace App\Mail;
 
+use App\Models\Company;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Support\HtmlString;
 
-class InvoicePdfToCompanyMail extends Mailable
+class CompanyWelcomeMail extends Mailable
 {
     /**
-     * @param  array<int, Attachment>  $attachmentsList
+     * @param  non-empty-string|null  $absolutePdfPath  Ruta absoluta al PDF opcional de bienvenida.
+     * @param  non-empty-string|null  $attachmentFilename  Nombre del adjunto; null si no hay PDF.
      */
     public function __construct(
+        public Company $company,
+        public ?string $absolutePdfPath,
+        public ?string $attachmentFilename,
         public string $subjectLine,
         public HtmlString $htmlBody,
-        public array $attachmentsList,
     ) {}
 
     public function envelope(): Envelope
@@ -38,6 +42,14 @@ class InvoicePdfToCompanyMail extends Mailable
      */
     public function attachments(): array
     {
-        return $this->attachmentsList;
+        if ($this->absolutePdfPath === null || $this->attachmentFilename === null || $this->attachmentFilename === '') {
+            return [];
+        }
+
+        return [
+            Attachment::fromPath($this->absolutePdfPath)
+                ->as($this->attachmentFilename)
+                ->withMime('application/pdf'),
+        ];
     }
 }

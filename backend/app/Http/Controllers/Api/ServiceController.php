@@ -15,6 +15,7 @@ use App\Models\ServiceItem;
 use App\Models\ServicePhoto;
 use App\Models\User;
 use App\Services\ActivityLogger;
+use App\Services\MaintenanceCompanyMailDispatcher;
 use App\Services\PanelNotificationDispatcher;
 use App\Services\ServiceCodeGenerator;
 use App\Services\TechnicianAbonoNotifier;
@@ -419,6 +420,10 @@ class ServiceController extends Controller
 
         if ($kind === Service::KIND_MANTENIMIENTO && $inventoryLot !== null) {
             $this->auditInventoryMaintenanceEvent($request, $inventoryLot, $service);
+        }
+
+        if ($kind === Service::KIND_MANTENIMIENTO) {
+            app(MaintenanceCompanyMailDispatcher::class)->sendIfApplicable($service);
         }
 
         app(PanelNotificationDispatcher::class)->notifyAdmins(

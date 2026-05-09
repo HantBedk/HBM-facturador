@@ -5,10 +5,12 @@ namespace Tests\Feature;
 use App\Models\Company;
 use App\Models\InventoryAuditEvent;
 use App\Models\InventoryLot;
+use App\Mail\MaintenanceCompanyNotifyMail;
 use App\Models\Service;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -79,6 +81,53 @@ class ServiceMaintenanceTest extends TestCase
         $detail->assertJsonPath('data.inventory_lot.id', $lot->id);
         $detail->assertJsonPath('data.inventory_lot.name', 'Laptop mantenimiento');
         $this->assertSame('EMT-A000001', $detail->json('data.inventory_lot.internal_code'));
+    }
+
+    public function test_maintenance_sends_email_when_company_has_correo(): void
+    {
+        Mail::fake();
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        $company = Company::query()->create([
+            'nombre' => 'Empresa Con Correo',
+            'factura_sigla' => 'ECC',
+            'nit' => '901-ECC',
+            'correo' => 'cliente-mantto@test.local',
+            'estado' => Company::ESTADO_ACTIVO,
+        ]);
+        $lot = InventoryLot::query()->create([
+            'owner_user_id' => $admin->id,
+            'tenant_company_id' => $company->id,
+            'name' => 'Servidor rack',
+            'sku' => 'ECC-B000001',
+            'description' => 'Activo',
+            'quantity_available' => 1,
+            'unit_price' => '0.00',
+            'is_active' => true,
+            'allow_sale' => false,
+            'allow_rental' => false,
+            'lifecycle_status' => InventoryLot::LIFECYCLE_ACTIVO,
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $this->postJson('/api/services', [
+            'company_id' => $company->id,
+            'kind' => Service::KIND_MANTENIMIENTO,
+            'inventory_lot_id' => $lot->id,
+            'client_name' => 'Empresa Con Correo',
+            'service_type' => 'Mantenimiento correctivo',
+            'description' => 'Reemplazo de ventilador y pruebas.',
+            'items' => [[
+                'custom_name' => 'Mantenimiento correctivo',
+                'amount' => 80000,
+                'line_description' => 'Mano de obra y repuesto.',
+            ]],
+        ])->assertCreated();
+
+        Mail::assertSent(MaintenanceCompanyNotifyMail::class, function (MaintenanceCompanyNotifyMail $m) {
+            return str_contains($m->subjectLine, 'Servidor rack')
+                && str_contains((string) $m->htmlBody, 'Reemplazo de ventilador');
+        });
     }
 
     public function test_maintenance_rejects_lot_from_other_company(): void

@@ -1,7 +1,7 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { publicApi, publicApiBlob } from '@/services/api.js'
 import { openPdfBlobInNewTab, triggerPdfDownload } from '@/utils/pdfBlob.js'
 import {
@@ -13,6 +13,8 @@ import {
 
 /** @type {import('vue').Ref<'consult' | 'list' | 'result'>} */
 const viewState = ref('consult')
+const route = useRoute()
+
 /** Texto único: código de factura (FAC-…) o NIT de empresa */
 const query = ref('')
 const payload = ref(null)
@@ -115,6 +117,13 @@ const showPublicPaymentBreakdown = computed(() => {
 function pillClass() {
   return publicInvoicePillClassFromStatusLabel(payload.value?.invoice?.status_label)
 }
+
+onMounted(() => {
+  const c = route.query.codigo ?? route.query.code
+  if (c != null && String(c).trim() !== '') {
+    query.value = String(c).trim()
+  }
+})
 
 function validateForm() {
   fieldErrors.value = {}
@@ -674,7 +683,8 @@ async function verPdfEnPestaña() {
   display: grid;
   gap: 1.25rem;
   grid-template-columns: 1fr;
-  align-items: stretch;
+  /* Aside arriba: no se estira al alto del card, así los botones mantienen su tamaño natural. */
+  align-items: start;
   width: 100%;
 }
 
@@ -694,9 +704,6 @@ async function verPdfEnPestaña() {
   border: 1px solid rgba(59, 130, 246, 0.22);
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.72) 0%, rgba(15, 23, 42, 0.42) 100%);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
-  /* Coincide con el alto del card hermano (align-items: stretch del grid). */
-  height: 100%;
-  min-height: 0;
 }
 
 .quick-actions-kicker {
@@ -715,9 +722,9 @@ async function verPdfEnPestaña() {
   justify-content: center;
   text-align: center;
   gap: 0.55rem;
-  flex: 1 1 0;
-  min-height: 0;
-  padding: 0.85rem 0.65rem;
+  /* Tamaño fijo: sin flex-grow para que la altura no dependa del card hermano. */
+  flex: 0 0 auto;
+  padding: 1rem 0.65rem;
   border-radius: 12px;
   border: 1px solid transparent;
   text-decoration: none;

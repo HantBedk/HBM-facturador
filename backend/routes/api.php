@@ -104,6 +104,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
 
     Route::middleware('role:admin,super_admin')->group(function () {
         Route::get('/admin/companies', [AdminCompanyController::class, 'index']);
+        Route::get('/admin/companies/welcome-mail-attachment-ready', [AdminCompanyController::class, 'welcomeMailAttachmentReady']);
         Route::post('/admin/companies', [AdminCompanyController::class, 'store']);
         Route::put('/admin/companies/{company}', [AdminCompanyController::class, 'update']);
         Route::patch('/admin/companies/{company}/estado', [AdminCompanyController::class, 'updateEstado']);
@@ -126,8 +127,13 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::put('/admin/settings/empleado-notificaciones', [AdminEmpleadoNotificacionSettingsController::class, 'update']);
         Route::get('/admin/settings/billing-automation', [AdminBillingAutomationController::class, 'show']);
         Route::put('/admin/settings/billing-automation', [AdminBillingAutomationController::class, 'update']);
+        Route::get('/admin/settings/mail-notifications/unlock-status', [AdminMailNotificationsSettingsController::class, 'unlockStatus']);
+        Route::post('/admin/settings/mail-notifications/unlock', [AdminMailNotificationsSettingsController::class, 'unlock']);
         Route::get('/admin/settings/mail-notifications', [AdminMailNotificationsSettingsController::class, 'show']);
         Route::put('/admin/settings/mail-notifications', [AdminMailNotificationsSettingsController::class, 'update']);
+        Route::post('/admin/settings/mail-notifications/test-send', [AdminMailNotificationsSettingsController::class, 'sendTestMail']);
+        Route::post('/admin/settings/mail-notifications/template-pdf', [AdminMailNotificationsSettingsController::class, 'uploadTemplatePdf']);
+        Route::delete('/admin/settings/mail-notifications/template-pdf', [AdminMailNotificationsSettingsController::class, 'deleteTemplatePdf']);
         Route::get('/admin/settings/inventory-locations', [AdminInventoryLocationSettingsController::class, 'show']);
         Route::put('/admin/settings/inventory-locations', [AdminInventoryLocationSettingsController::class, 'update']);
         Route::get('/admin/settings/inventory-holders', [AdminInventoryHolderSettingsController::class, 'show']);

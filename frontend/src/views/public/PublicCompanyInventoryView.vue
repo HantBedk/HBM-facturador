@@ -103,6 +103,10 @@ function cerrarSesion() {
   code.value = ''
 }
 
+function volverFormulario() {
+  step.value = 'form'
+}
+
 onMounted(async () => {
   if (hasToken.value) {
     step.value = 'list'
@@ -113,63 +117,128 @@ onMounted(async () => {
 
 <template>
   <div class="page">
-    <div class="bg" aria-hidden="true" />
-    <div class="wrap">
-      <header class="hdr">
-        <p class="kicker">Consulta segura</p>
-        <h1>Inventario por empresa</h1>
-        <p class="lead">
-          Ingrese el NIT y el correo corporativo registrado en HBM. Recibirá un código para ver el estado de sus activos
-          (sin precios).
-        </p>
-      </header>
+    <div class="bg no-print" aria-hidden="true" />
 
-      <section v-if="step === 'form'" class="card">
-        <label class="lbl"> NIT </label>
-        <input v-model="nit" type="text" class="inp" autocomplete="organization" placeholder="Ej. 901.234.567-8" />
-        <label class="lbl mt-3"> Correo electrónico </label>
-        <input v-model="email" type="email" class="inp" autocomplete="email" placeholder="correo@empresa.com" />
-        <p v-if="errorMessage" class="err">{{ errorMessage }}</p>
-        <button type="button" class="btn primary mt-4 w-full" :disabled="loading || !nit.trim() || !email.trim()" @click="requestOtp">
-          {{ loading ? 'Enviando…' : 'Enviar código' }}
-        </button>
-      </section>
+    <div class="stack">
+      <div class="consulta-hero">
+        <section class="search-card" aria-labelledby="titulo-inv">
+          <template v-if="step === 'form'">
+            <h1 id="titulo-inv" class="search-title">Inventario por empresa</h1>
+            <p class="search-sub">
+              Ingrese el <strong>NIT</strong> y el <strong>correo corporativo</strong> registrado en HBM. Recibirá un código para ver el estado de sus activos
+              <strong>sin precios</strong>.
+            </p>
 
-      <section v-else-if="step === 'otp'" class="card">
-        <p class="muted text-sm">Revise su bandeja (y spam). Introduzca el código de 6 dígitos.</p>
-        <label class="lbl mt-2"> Código </label>
-        <input v-model="code" type="text" maxlength="6" inputmode="numeric" class="inp mono" placeholder="______" />
-        <p v-if="errorMessage" class="err">{{ errorMessage }}</p>
-        <button type="button" class="btn primary mt-4 w-full" :disabled="loading || code.trim().length !== 6" @click="verifyOtp">
-          {{ loading ? 'Verificando…' : 'Consultar inventario' }}
-        </button>
-        <button type="button" class="btn ghost mt-2 w-full" @click="step = 'form'">Volver</button>
-      </section>
+            <div class="inv-fields">
+              <label class="search-field">
+                <span class="search-label">NIT</span>
+                <input v-model="nit" type="text" autocomplete="organization" placeholder="Ej. 901.234.567-8" />
+              </label>
+              <label class="search-field">
+                <span class="search-label">Correo electrónico</span>
+                <input v-model="email" type="email" autocomplete="email" placeholder="correo@empresa.com" />
+              </label>
+            </div>
+            <p v-if="errorMessage" class="alert" role="alert">{{ errorMessage }}</p>
+            <button
+              type="button"
+              class="btn-search btn-search--block"
+              :disabled="loading || !nit.trim() || !email.trim()"
+              @click="requestOtp"
+            >
+              {{ loading ? 'Enviando…' : 'Enviar código' }}
+            </button>
+          </template>
 
-      <section v-else class="card">
-        <div class="flex items-center justify-between gap-2">
-          <h2 class="m-0 text-lg font-semibold text-white">Equipos activos</h2>
-          <button type="button" class="btn ghost btn-sm" @click="cerrarSesion">Salir</button>
+          <template v-else-if="step === 'otp'">
+            <h1 id="titulo-inv" class="search-title">Verificar código</h1>
+            <p class="search-sub">
+              Revise su bandeja (y spam). Introduzca el <strong>código de 6 dígitos</strong> enviado al correo indicado.
+            </p>
+
+            <div class="inv-fields">
+              <label class="search-field">
+                <span class="search-label">Código</span>
+                <input
+                  v-model="code"
+                  type="text"
+                  maxlength="6"
+                  inputmode="numeric"
+                  class="mono"
+                  autocomplete="one-time-code"
+                  placeholder="______"
+                />
+              </label>
+            </div>
+            <p v-if="errorMessage" class="alert" role="alert">{{ errorMessage }}</p>
+            <button
+              type="button"
+              class="btn-search btn-search--block"
+              :disabled="loading || code.trim().length !== 6"
+              @click="verifyOtp"
+            >
+              {{ loading ? 'Verificando…' : 'Consultar inventario' }}
+            </button>
+            <button type="button" class="btn-ghost-block" @click="volverFormulario">Volver</button>
+          </template>
+
+          <template v-else>
+            <h1 id="titulo-inv" class="search-title">Inventario por empresa</h1>
+            <p class="search-sub">
+              Sesión activa. A continuación aparecen sus equipos <strong>sin precios</strong>. Puede cerrar sesión cuando termine.
+            </p>
+            <button type="button" class="btn-ghost-block btn-ghost-block--narrow" @click="cerrarSesion">Cerrar sesión</button>
+          </template>
+        </section>
+
+        <aside class="quick-actions no-print" aria-label="Otros accesos">
+          <p class="quick-actions-kicker">Otros accesos</p>
+          <RouterLink to="/login" class="quick-btn quick-btn--primary">
+            <span class="quick-btn-icon" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                <polyline points="10 17 15 12 10 7" />
+                <line x1="15" y1="12" x2="3" y2="12" />
+              </svg>
+            </span>
+            <span class="quick-btn-body">
+              <span class="quick-btn-title">Login</span>
+            </span>
+          </RouterLink>
+          <RouterLink to="/consulta-factura" class="quick-btn quick-btn--primary">
+            <span class="quick-btn-icon" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+                <polyline points="10 9 9 9 8 9" />
+              </svg>
+            </span>
+            <span class="quick-btn-body">
+              <span class="quick-btn-title">Consultar factura</span>
+            </span>
+          </RouterLink>
+        </aside>
+      </div>
+
+      <section v-if="step === 'list'" class="detail-card">
+        <div class="list-head">
+          <h2 class="list-title">Equipos</h2>
         </div>
-        <p v-if="errorMessage" class="err">{{ errorMessage }}</p>
-        <div v-if="loading" class="muted py-6 text-center">Cargando…</div>
-        <div v-else-if="!lots.length" class="muted py-6 text-center">No hay equipos registrados para esta empresa.</div>
-        <ul v-else class="mt-3 divide-y divide-slate-700/80 rounded-xl border border-slate-700/60 bg-[#0f141c]">
-          <li v-for="row in lots" :key="row.id" class="px-3 py-3 text-sm">
-            <p class="m-0 font-medium text-white">{{ row.name }}</p>
-            <p class="mt-1 text-xs text-slate-400">
+        <p v-if="errorMessage" class="alert" role="alert">{{ errorMessage }}</p>
+        <div v-if="loading" class="muted inv-loading">Cargando…</div>
+        <div v-else-if="!lots.length" class="muted inv-empty">No hay equipos registrados para esta empresa.</div>
+        <ul v-else class="inv-ul">
+          <li v-for="row in lots" :key="row.id" class="inv-li">
+            <p class="inv-li-name">{{ row.name }}</p>
+            <p class="inv-li-meta">
               Código interno: {{ row.internal_code || '—' }} · Cantidad: {{ row.quantity_available }} · Estado:
               {{ lifecycleLabel(row.lifecycle_status) }}
             </p>
           </li>
         </ul>
       </section>
-
-      <p class="foot">
-        <RouterLink to="/consulta-factura" class="link">Consultar factura</RouterLink>
-        <span class="mx-2 text-slate-600">·</span>
-        <RouterLink to="/login" class="link">Acceso interno</RouterLink>
-      </p>
     </div>
   </div>
 </template>
@@ -181,169 +250,329 @@ onMounted(async () => {
   color: #e8f1ff;
   padding: 2rem 1rem 3rem;
 }
+
 .bg {
   position: fixed;
   inset: 0;
   background: linear-gradient(165deg, #0a0e18 0%, #0f172a 40%, #0c1222 100%);
   z-index: 0;
 }
-.wrap {
+
+.stack {
   position: relative;
   z-index: 1;
-  max-width: 520px;
   margin: 0 auto;
+  max-width: 1100px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
-.hdr .kicker {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #38bdf8;
-  margin: 0 0 0.35rem;
+
+.consulta-hero {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: 1fr;
+  /* Aside arriba: no se estira al alto del card izquierdo, así los botones
+     mantienen el mismo tamaño que en /consulta-factura aunque el card crezca. */
+  align-items: start;
+  width: 100%;
 }
-.hdr h1 {
-  font-size: 1.5rem;
+
+@media (min-width: 900px) {
+  .consulta-hero {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+    gap: 1.25rem;
+  }
+}
+
+.search-card {
+  border-radius: 12px;
+  padding: 1.25rem 1.35rem 1.35rem;
+  background: rgba(19, 26, 43, 0.92);
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  box-shadow:
+    0 0 0 1px rgba(59, 130, 246, 0.08),
+    0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.search-title {
+  margin: 0;
+  font-size: 1.15rem;
   font-weight: 700;
-  margin: 0 0 0.5rem;
+  color: #fff;
+  letter-spacing: -0.02em;
 }
-.lead {
-  margin: 0 0 1.25rem;
-  font-size: 0.9rem;
+
+.search-sub {
+  margin: 0.45rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
   color: #94a3b8;
-  line-height: 1.45;
 }
-.card {
-  border-radius: 1rem;
-  border: 1px solid rgba(51, 65, 85, 0.55);
-  background: rgba(15, 23, 42, 0.55);
-  padding: 1.25rem 1.35rem;
+
+.search-sub strong {
+  color: #cbd5e1;
+  font-weight: 600;
 }
-.lbl {
+
+.inv-fields {
+  margin-top: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.search-field {
+  display: block;
+}
+
+.search-label {
   display: block;
   font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #94a3b8;
+  letter-spacing: 0.04em;
+  color: #fff;
+  margin-bottom: 0.35rem;
 }
-.inp {
-  margin-top: 0.35rem;
+
+.search-field input {
   width: 100%;
-  border-radius: 0.75rem;
-  border: 1px solid rgba(51, 65, 85, 0.9);
-  background: #0b1220;
-  padding: 0.65rem 0.85rem;
-  color: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid rgba(100, 116, 139, 0.55);
+  background: rgba(8, 12, 24, 0.9);
+  color: #f1f5f9;
+  padding: 0.55rem 0.75rem;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.search-field input:focus {
   outline: none;
+  border-color: rgba(59, 130, 246, 0.65);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
 }
-.inp:focus {
-  border-color: rgba(56, 189, 248, 0.65);
-  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.15);
-}
-.inp.mono {
-  letter-spacing: 0.25em;
+
+.search-field input.mono {
+  letter-spacing: 0.22em;
   font-variant-numeric: tabular-nums;
 }
-.btn {
-  border-radius: 0.85rem;
-  padding: 0.65rem 1rem;
-  font-weight: 600;
-  border: 1px solid transparent;
-  cursor: pointer;
-}
-.btn.primary {
-  background: linear-gradient(90deg, #0ea5e9, #2563eb);
-  color: white;
-}
-.btn.primary:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.btn.ghost {
-  background: transparent;
-  border-color: rgba(71, 85, 105, 0.85);
-  color: #cbd5e1;
-}
-.btn-sm {
-  padding: 0.35rem 0.65rem;
-  font-size: 0.8rem;
-}
-.err {
-  margin-top: 0.75rem;
-  font-size: 0.85rem;
-  color: #fca5a5;
-}
-.muted {
-  color: #64748b;
-}
-.foot {
-  margin-top: 2rem;
-  text-align: center;
-  font-size: 0.85rem;
-}
-.link {
-  color: #38bdf8;
-  text-decoration: none;
-}
-.link:hover {
-  text-decoration: underline;
-}
-.mt-3 {
-  margin-top: 0.75rem;
-}
-.mt-4 {
-  margin-top: 1rem;
-}
-.w-full {
-  width: 100%;
-}
-.flex {
-  display: flex;
-}
-.m-0 {
-  margin: 0;
-}
-.text-lg {
-  font-size: 1.05rem;
-}
-.font-semibold {
-  font-weight: 600;
-}
-.items-center {
-  align-items: center;
-}
-.justify-between {
-  justify-content: space-between;
-}
-.gap-2 {
-  gap: 0.5rem;
-}
-.text-sm {
+
+.alert {
+  margin: 1rem 0 0;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(127, 29, 29, 0.35);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  color: #fecaca;
   font-size: 0.875rem;
 }
-.text-xs {
-  font-size: 0.75rem;
+
+.btn-search {
+  margin-top: 1rem;
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 1.35rem;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
 }
-.text-white {
+
+.btn-search--block {
+  display: block;
+  width: 100%;
+}
+
+.btn-search:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.btn-search:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.btn-ghost-block {
+  margin-top: 0.65rem;
+  width: 100%;
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  border: 1px solid rgba(100, 116, 139, 0.55);
+  background: rgba(30, 41, 59, 0.55);
+  color: #e2e8f0;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.btn-ghost-block:hover {
+  border-color: rgba(148, 163, 184, 0.65);
+  background: rgba(51, 65, 85, 0.55);
+}
+
+.btn-ghost-block--narrow {
+  margin-top: 1rem;
+  max-width: 14rem;
+}
+
+.quick-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem 0.75rem 1.1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.72) 0%, rgba(15, 23, 42, 0.42) 100%);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+}
+
+.quick-actions-kicker {
+  margin: 0 0 0.15rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+
+.quick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.55rem;
+  /* Tamaño fijo: sin flex-grow para que la altura no dependa del card hermano. */
+  flex: 0 0 auto;
+  padding: 1rem 0.65rem;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.quick-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.55);
+}
+
+.quick-btn:hover {
+  transform: translateY(-1px);
+}
+
+.quick-btn--primary {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.22) 0%, rgba(29, 78, 216, 0.14) 100%);
+  color: #e2e8f0;
+}
+
+.quick-btn--primary:hover {
+  border-color: rgba(96, 165, 250, 0.7);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.32) 0%, rgba(29, 78, 216, 0.22) 100%);
+}
+
+.quick-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.7);
+  color: #93c5fd;
+}
+
+.quick-btn-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.quick-btn-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #f1f5f9;
+  letter-spacing: -0.005em;
+}
+
+.detail-card {
+  border-radius: 12px;
+  padding: 1.35rem 1.25rem 1.5rem;
+  background: rgba(17, 24, 39, 0.94);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  box-shadow:
+    0 0 0 1px rgba(59, 130, 246, 0.12),
+    0 0 48px rgba(37, 99, 235, 0.12),
+    0 20px 50px rgba(0, 0, 0, 0.4);
+}
+
+.list-head {
+  margin-bottom: 0.75rem;
+}
+
+.list-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
   color: #fff;
 }
-.py-6 {
-  padding-top: 1.5rem;
-  padding-bottom: 1.5rem;
-}
-.text-center {
+
+.inv-loading,
+.inv-empty {
+  padding: 1.5rem 0;
   text-align: center;
+  font-size: 0.9rem;
 }
-.mx-2 {
-  margin-left: 0.5rem;
-  margin-right: 0.5rem;
+
+.inv-ul {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  border-radius: 12px;
+  border: 1px solid rgba(71, 85, 105, 0.45);
+  overflow: hidden;
 }
-.text-slate-600 {
-  color: #475569;
+
+.inv-li {
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.35);
+  background: rgba(10, 15, 28, 0.45);
 }
-.mt-1 {
-  margin-top: 0.25rem;
+
+.inv-li:last-child {
+  border-bottom: none;
 }
-.mt-2 {
-  margin-top: 0.5rem;
+
+.inv-li-name {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #f8fafc;
+}
+
+.inv-li-meta {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  line-height: 1.45;
+}
+
+.muted {
+  color: #94a3b8;
 }
 </style>

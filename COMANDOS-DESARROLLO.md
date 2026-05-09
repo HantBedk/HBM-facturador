@@ -17,6 +17,7 @@ Los de Vite desde la carpeta **`frontend`**.
 |--------|------------------|
 | `docker compose up -d` | Arranca MySQL, PHP (Laravel), Nginx (API en **8080**), Adminer. |
 | `.\HBM.ps1 -Levantar` o `HBM.cmd -Levantar` o `HBM-Levantar.cmd` | Sube Docker **sin** migraciones ni seeders; luego `npm install` + `npm run dev` (front en **5173**). **Recomendado día a día** si no quieres tocar la BD. |
+| **`HBM-UsuariosDev.cmd`** (doble clic) o `docker compose exec -T laravel php artisan hbm:ensure-dev-users` | Si **`users` está vacía**, crea admin / super_admin / empleado demo (`EnsureDevLoginSeeder`). No borra datos. |
 | `.\HBM.ps1` | Docker + `hbm:sync` (migrate + seeders según reglas del proyecto) + Vite. Útil tras clonar o cuando quieres sincronizar BD y front de una vez. |
 | `.\HBM.ps1 -Build` | Igual que `.\HBM.ps1` pero reconstruye imágenes Docker antes del `up`. |
 | `cd frontend` → `npm install` → `npm run dev` | Solo el front con hot reload (**http://localhost:5173**). Requiere API arriba (Docker o backend en 8080). |
@@ -42,7 +43,8 @@ Si el puerto **5173** está ocupado por Vite local, puedes levantar solo backend
 | Comando | Para qué sirve |
 |--------|------------------|
 | `docker compose exec laravel php artisan db:seed --force` | Ejecuta **`DatabaseSeeder`** (empresas demo, usuarios, catálogo, `DemoPublicInvoiceSeeder`, etc.). Puede **actualizar** filas que coincidan con claves del seed. |
-| `docker compose exec laravel php artisan db:seed --class="Database\Seeders\EnsureDevLoginSeeder" --force` | Solo **usuarios de login** si hace falta (tabla `users` vacía o lógica del seeder). Más seguro que el seeder completo. |
+| `docker compose exec laravel php artisan db:seed --class="Database\Seeders\EnsureDevLoginSeeder" --force` | Igual que `hbm:ensure-dev-users` (solo usuarios si `users` está vacía). |
+| `docker compose exec laravel php artisan hbm:ensure-dev-users` | Atajo con mensaje claro; mismo seeder que la fila anterior. |
 | `docker compose exec laravel php artisan hbm:sync --demo --force` | Migrate + **fuerza** `DatabaseSeeder` completo (demo explícito). |
 | `docker compose exec laravel php artisan hbm:sync --force --no-interaction` | Migrate + `EnsureDevLoginSeeder` + `DatabaseSeeder` **solo si no hay empresas** en `companies` (o con `--demo`). |
 

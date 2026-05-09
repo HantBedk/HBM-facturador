@@ -14,6 +14,8 @@ use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Services\InvoiceCodeGenerator;
 use App\Services\InvoicePublicAccessService;
+use App\Services\MailNotificationTemplatesService;
+use App\Services\MailTemplatePdfService;
 use App\Services\PanelNotificationDispatcher;
 use App\Support\ActivityAmountNarrative;
 use App\Support\InvoicePdfPayload;
@@ -24,6 +26,7 @@ use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
@@ -456,11 +459,28 @@ class AdminInvoiceController extends Controller
             ], 500);
         }
 
+        $tpl = app(MailNotificationTemplatesService::class);
+        $pdfExtra = app(MailTemplatePdfService::class);
+        $companyNombre = (string) $invoice->company->nombre;
+        $consultUrl = $tpl->invoicePublicConsultUrl($invoice->code);
+
+        $attachments = [
+            Attachment::fromData(fn () => $binary, $filename)->withMime('application/pdf'),
+        ];
+        $supMeta = $pdfExtra->meta(MailTemplatePdfService::KIND_INVOICE_SUPPLEMENT);
+        $supPath = $pdfExtra->absolutePath(MailTemplatePdfService::KIND_INVOICE_SUPPLEMENT);
+        if ($supMeta !== null && $supPath !== null && is_readable($supPath)) {
+            $supFn = basename($supMeta['original_filename']);
+            if (! str_ends_with(strtolower($supFn), '.pdf')) {
+                $supFn .= '.pdf';
+            }
+            $attachments[] = Attachment::fromPath($supPath)->as($supFn)->withMime('application/pdf');
+        }
+
         Mail::to($correo)->send(new InvoicePdfToCompanyMail(
-            $invoice->code,
-            (string) $invoice->company->nombre,
-            $binary,
-            $filename,
+            $tpl->invoiceToCompanySubjectRendered($invoice, $companyNombre),
+            $tpl->invoiceToCompanyBodyHtml($invoice, $companyNombre, $consultUrl),
+            $attachments,
         ));
 
         ActivityLogger::log(

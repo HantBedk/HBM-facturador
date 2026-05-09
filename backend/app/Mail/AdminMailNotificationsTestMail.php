@@ -3,25 +3,25 @@
 namespace App\Mail;
 
 use Illuminate\Mail\Mailable;
-use Illuminate\Mail\Mailables\Attachment;
+use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Support\HtmlString;
 
-class InvoicePdfToCompanyMail extends Mailable
+/** Correo de diagnóstico SMTP/remitente desde el panel de notificaciones (solo admin). */
+class AdminMailNotificationsTestMail extends Mailable
 {
-    /**
-     * @param  array<int, Attachment>  $attachmentsList
-     */
     public function __construct(
+        public string $fromAddress,
+        public string $fromDisplayName,
         public string $subjectLine,
-        public HtmlString $htmlBody,
-        public array $attachmentsList,
+        public string $htmlBody,
     ) {}
 
     public function envelope(): Envelope
     {
         return new Envelope(
+            from: new Address($this->fromAddress, $this->fromDisplayName),
             subject: $this->subjectLine,
         );
     }
@@ -29,15 +29,7 @@ class InvoicePdfToCompanyMail extends Mailable
     public function content(): Content
     {
         return new Content(
-            htmlString: $this->htmlBody,
+            htmlString: new HtmlString($this->htmlBody),
         );
-    }
-
-    /**
-     * @return array<int, Attachment>
-     */
-    public function attachments(): array
-    {
-        return $this->attachmentsList;
     }
 }

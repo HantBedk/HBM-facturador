@@ -5,6 +5,7 @@ import {
   createCompany,
   createCompanyRecurringService,
   deleteCompany,
+  fetchWelcomeMailAttachmentReady,
   deleteCompanyRecurringService,
   fetchAdminCompanies,
   fetchCompanyMonthlyDashboard,
@@ -673,6 +674,29 @@ async function onSubmitModal() {
       estado: form.value.estado,
     }
     if (modalMode.value === 'create') {
+      if (payload.correo) {
+        try {
+          const st = await fetchWelcomeMailAttachmentReady()
+          if (!st.welcome_pdf_ready) {
+            const ok = await uiDialog.confirm({
+              title: 'Bienvenida sin PDF adjunto',
+              message:
+                'No hay PDF de bienvenida configurado o el archivo no está disponible. Se creará la empresa y se enviará el correo de bienvenida solo con el texto de la plantilla (sin adjunto). ¿Continuar?',
+              confirmLabel: 'Crear y enviar',
+              cancelLabel: 'Volver',
+            })
+            if (!ok) {
+              saving.value = false
+              return
+            }
+          }
+        } catch (e) {
+          modalError.value =
+            e.data?.message || e.message || 'No se pudo comprobar si hay PDF de bienvenida.'
+          saving.value = false
+          return
+        }
+      }
       await createCompany(payload)
     } else {
       await updateCompany(editingId.value, payload)

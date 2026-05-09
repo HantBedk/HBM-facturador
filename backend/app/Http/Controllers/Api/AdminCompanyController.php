@@ -4,15 +4,20 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\CompanyResource;
+use App\Mail\CompanyWelcomeMail;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\Service;
 use App\Models\ServiceCatalogSuggestion;
+use App\Services\MailNotificationTemplatesService;
+use App\Services\MailTemplatePdfService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -49,6 +54,24 @@ class AdminCompanyController extends Controller
         return CompanyResource::collection($q->get());
     }
 
+    /**
+     * Indica si el PDF de bienvenida está listo para adjuntar (configuración + archivo legible).
+     * Sirve al panel para advertir al admin antes de crear una empresa con correo.
+     */
+    public function welcomeMailAttachmentReady(): JsonResponse
+    {
+        $pdf = app(MailTemplatePdfService::class);
+        if (! $pdf->configured(MailTemplatePdfService::KIND_WELCOME)) {
+            return response()->json(['welcome_pdf_ready' => false]);
+        }
+
+        $path = $pdf->absolutePath(MailTemplatePdfService::KIND_WELCOME);
+        $meta = $pdf->meta(MailTemplatePdfService::KIND_WELCOME);
+        $ready = $path !== null && $meta !== null && is_readable($path);
+
+        return response()->json(['welcome_pdf_ready' => $ready]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -71,6 +94,8 @@ class AdminCompanyController extends Controller
             'correo' => isset($data['correo']) && $data['correo'] !== '' ? trim($data['correo']) : null,
             'estado' => $data['estado'] ?? Company::ESTADO_ACTIVO,
         ]);
+
+        $this->trySendCompanyWelcomeMail($company);
 
         return (new CompanyResource($company))->response()->setStatusCode(201);
     }
@@ -253,6 +278,49 @@ class AdminCompanyController extends Controller
         $n = is_numeric($value) ? (float) $value : 0.0;
 
         return number_format($n, 2, '.', '');
+    }
+
+    private function trySendCompanyWelcomeMail(Company $company): void
+    {
+        $correo = $company->correo;
+        if ($correo === null || trim($correo) === '') {
+            return;
+        }
+
+        $absolutePath = null;
+        $attachName = null;
+        $pdf = app(MailTemplatePdfService::class);
+        if ($pdf->configured(MailTemplatePdfService::KIND_WELCOME)) {
+            $path = $pdf->absolutePath(MailTemplatePdfService::KIND_WELCOME);
+            $meta = $pdf->meta(MailTemplatePdfService::KIND_WELCOME);
+            if ($path !== null && $meta !== null && is_readable($path)) {
+                $attachName = basename($meta['original_filename']);
+                if (! str_ends_with(strtolower($attachName), '.pdf')) {
+                    $attachName .= '.pdf';
+                }
+                $absolutePath = $path;
+            } else {
+                Log::warning('company_welcome_pdf_missing_or_unreadable', [
+                    'company_id' => $company->id,
+                ]);
+            }
+        }
+
+        try {
+            $tpl = app(MailNotificationTemplatesService::class);
+            Mail::to($correo)->send(new CompanyWelcomeMail(
+                $company,
+                $absolutePath,
+                $attachName,
+                $tpl->welcomeSubjectRendered($company),
+                $tpl->welcomeBodyHtml($company),
+            ));
+        } catch (\Throwable $e) {
+            Log::warning('company_welcome_mail_failed', [
+                'company_id' => $company->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function assertNombreUnique(string $nombre, ?int $ignoreId = null): void
