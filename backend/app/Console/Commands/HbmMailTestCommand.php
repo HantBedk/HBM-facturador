@@ -28,9 +28,15 @@ class HbmMailTestCommand extends Command
         }
 
         $subjectOpt = $this->option('subject');
-        $subject = (is_string($subjectOpt) && trim($subjectOpt) !== '')
-            ? trim($subjectOpt)
-            : '['.config('app.name').'] Prueba de correo HBM (CLI)';
+        if (is_string($subjectOpt) && trim($subjectOpt) !== '') {
+            $subject = trim($subjectOpt);
+        } else {
+            $subject = 'Prueba de correo (CLI)';
+            $app = trim((string) config('app.name', ''));
+            if ($app !== '') {
+                $subject = '['.$app.'] '.$subject;
+            }
+        }
         $plain = 'Correo de prueba (artisan hbm:mail-test) generado el '
             .now()->timezone(config('app.timezone'))->toIso8601String()."\n\n"
             .'Este mensaje usa el mismo SMTP que bienvenida de empresa, envío de factura y avisos de mantenimiento.';

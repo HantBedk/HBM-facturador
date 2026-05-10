@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Models\AppSetting;
 use App\Models\CompanyRecurringService;
+use App\Services\SystemOrganizationProfileService;
 use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
@@ -46,7 +47,10 @@ class AppServiceProvider extends ServiceProvider
                 return;
             }
             $name = trim((string) ($row->value['name'] ?? ''));
-            $event->message->from(new Address($addr, $name !== '' ? $name : (string) config('app.name', 'HBM')));
+            if ($name === '') {
+                $name = app(SystemOrganizationProfileService::class)->displayNameForMail();
+            }
+            $event->message->from(new Address($addr, $name));
         });
     }
 }

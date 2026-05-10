@@ -32,33 +32,50 @@ class MailNotificationTemplatesService
 
     public const PH_NOMBRE_SISTEMA = '{{nombre_sistema}}';
 
-    public const DEFAULT_WELCOME_SUBJECT = 'Bienvenida, {{nombre_empresa}} — {{nombre_sistema}}';
+    public const DEFAULT_WELCOME_SUBJECT = 'Bienvenidos a {{nombre_sistema}} {{nombre_empresa}}';
 
-    public const DEFAULT_WELCOME_BODY = "Estimados,\n\n"
-        ."Nos complace dar la bienvenida a {{nombre_empresa}} en {{nombre_sistema}}.\n\n"
-        ."Somos su aliado en mantenimiento y soporte técnico: procesos claros, seguimiento responsable y comunicación directa cuando nos necesite. Queremos que se sienta respaldado desde el primer día.\n\n"
-        ."Si este correo incluye un documento PDF, allí encontrará condiciones generales, alcance y lineamientos que dan transparencia y previsibilidad a nuestra relación.\n\n"
-        ."Este mensaje y la dirección desde la que lo enviamos son su canal oficial con nosotros. Ante cualquier duda o solicitud, responda a este mismo correo; trataremos su consulta con prioridad.\n\n"
-        ."Gracias por confiar en {{nombre_sistema}}.";
+    public const DEFAULT_WELCOME_BODY = "Hola {{nombre_empresa}},\n\n"
+        ."Es un gusto darles la bienvenida a {{nombre_sistema}}.\n\n"
+        ."A partir de este momento, cuentan con nuestro respaldo como su aliado estratégico en mantenimiento, soporte técnico y gestión operativa, con un enfoque basado en atención oportuna, procesos claros y acompañamiento constante.\n\n"
+        ."Nuestro compromiso es brindar soluciones ágiles, seguimiento responsable y una comunicación directa que les permita operar con tranquilidad y confianza, sabiendo que tendrán un equipo disponible cuando lo necesiten.\n\n"
+        ."Adjunto a este correo encontrarán el documento PDF con las condiciones generales del servicio, el alcance de nuestra gestión y los lineamientos establecidos para garantizar transparencia, organización y previsibilidad en nuestra relación comercial.\n\n"
+        ."Este correo electrónico, junto con esta dirección de contacto, será nuestro canal oficial de comunicación. Para cualquier solicitud, novedad o inquietud, pueden responder directamente a este mismo mensaje y atenderemos su requerimiento con la prioridad correspondiente.\n\n"
+        ."Agradecemos la confianza depositada en {{nombre_sistema}} y esperamos construir una relación sólida, eficiente y de largo plazo.\n\n"
+        ."Cordialmente,\n"
+        .'Equipo de {{nombre_sistema}}';
 
     public const DEFAULT_INVOICE_SUBJECT = 'Factura {{codigo_factura}} — {{mes_facturado}}';
 
-    public const DEFAULT_INVOICE_BODY = "Le enviamos la factura del periodo {{mes_facturado}} ({{periodo_facturado}}).\n\n"
-        ."Código: {{codigo_factura}}\n"
+    public const DEFAULT_INVOICE_BODY = "Hola {{nombre_empresa}},\n"
+        ."Esperamos que se encuentren muy bien.\n"
+        ."Queremos agradecerles por confiar en nuestros servicios y permitirnos ser parte del soporte y crecimiento tecnológico de su empresa.\n"
+        ."Por medio de este correo les enviamos la factura correspondiente al período de {{mes_facturado}} ({{periodo_facturado}}).\n\n"
+        ."Información de la factura\n"
+        ."Código de factura: {{codigo_factura}}\n"
         ."Empresa: {{nombre_empresa}}\n\n"
-        ."Puede consultar el detalle en línea en:\n{{enlace_consulta_factura}}\n\n"
-        .'Adjunto va el PDF oficial de la factura.';
+        ."Adjunto a este correo encontrarán el PDF oficial de la factura, donde podrán revisar de forma detallada los servicios prestados, valores correspondientes y toda la información relacionada con la facturación del período.\n"
+        ."En caso de que el archivo PDF presente inconvenientes para abrirse, también podrán consultar, visualizar y descargar la factura directamente desde nuestra página web utilizando el número de factura indicado anteriormente o ingresando al siguiente enlace:\n"
+        ."{{enlace_consulta_factura}}\n\n"
+        ."Este acceso les permitirá validar toda la información de forma rápida y segura.\n"
+        ."Agradecemos nuevamente su confianza y preferencia.\n"
+        ."Para cualquier duda, soporte o aclaración sobre la factura, pueden responder directamente a este mismo correo y con gusto les atenderemos.\n\n"
+        ."Cordialmente,\n"
+        .'Equipo de {{nombre_sistema}}';
 
     public const DEFAULT_MAINTENANCE_SUBJECT = 'Mantenimiento registrado — {{nombre_equipo}} ({{nombre_empresa}})';
 
-    public const DEFAULT_MAINTENANCE_BODY = "Le informamos que se registró un mantenimiento al equipo bajo su custodia.\n\n"
+    public const DEFAULT_MAINTENANCE_BODY = "Hola {{nombre_empresa}},\n\n"
+        ."Le informamos que se registró un mantenimiento al equipo bajo su custodia.\n\n"
         ."Empresa: {{nombre_empresa}}\n"
         ."Equipo: {{nombre_equipo}}\n"
         ."Referencia de servicio: {{codigo_servicio}}\n"
         ."Tipo: {{tipo_servicio}}\n"
         ."Fecha: {{fecha_mantenimiento}}\n\n"
         ."Detalle del trabajo:\n{{descripcion}}\n\n"
-        .'Si aplica, adjuntamos documentación complementaria.';
+        ."Si aplica, adjuntamos documentación complementaria al correo.\n\n"
+        ."Para cualquier consulta puede responder a este mismo mensaje.\n\n"
+        ."Cordialmente,\n"
+        .'Equipo de {{nombre_sistema}}';
 
     /**
      * @return array<string, string>
@@ -124,7 +141,7 @@ class MailNotificationTemplatesService
 
     /**
      * Valor para {{nombre_sistema}} en bienvenida, factura y mantenimiento:
-     * nombre comercial o razón social (Configuración → Empresa sistema), si no APP_NAME.
+     * nombre comercial o razón social (Empresa sistema), si no el nombre comercial del remitente en Correo del sistema.
      */
     public function nombreSistemaParaPlaceholders(): string
     {
@@ -133,7 +150,22 @@ class MailNotificationTemplatesService
             return $org;
         }
 
-        return (string) config('app.name', 'HBM');
+        $panelName = $this->mailNotificationsStoredFromDisplayName();
+        if ($panelName !== '') {
+            return $panelName;
+        }
+
+        return '';
+    }
+
+    private function mailNotificationsStoredFromDisplayName(): string
+    {
+        $row = AppSetting::query()->where('key', AppSetting::KEY_MAIL_NOTIFICATIONS_FROM)->first();
+        if ($row === null || ! is_array($row->value)) {
+            return '';
+        }
+
+        return trim((string) ($row->value['name'] ?? ''));
     }
 
     public function invoiceToCompanySubjectRendered(Invoice $invoice, string $companyName): string

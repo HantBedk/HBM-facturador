@@ -487,9 +487,11 @@ onMounted(init)
             <strong class="text-slate-300">razón social</strong>
             de
             <RouterLink to="/admin/configuracion/empresa-sistema" class="text-sky-400 hover:underline">Empresa sistema</RouterLink>.
-            Si esos datos están vacíos, se usa
-            <code class="rounded bg-slate-800 px-1">APP_NAME</code>
-            del servidor.
+            Si esos datos están vacíos, se usa el
+            <strong class="text-slate-300">nombre comercial del remitente</strong>
+            que guarda al conectar Gmail (mismo valor que el encabezado «De» del correo). Si todo está vacío,
+            <span v-pre class="font-mono text-slate-300">{{nombre_sistema}}</span>
+            quedará sin texto en el mensaje.
           </p>
           <p>
             <span v-pre class="font-mono text-slate-300">{{nombre_empresa}}</span>
@@ -537,9 +539,9 @@ onMounted(init)
           <p class="text-xs text-slate-500">
             El valor de
             <span v-pre class="whitespace-nowrap">{{nombre_sistema}}</span>
-            en todas las plantillas (bienvenida, factura, mantenimiento) sale de
+            en todas las plantillas (bienvenida, factura, mantenimiento) sale primero de
             <RouterLink to="/admin/configuracion/empresa-sistema" class="text-sky-400 hover:underline">Empresa sistema</RouterLink>
-            (nombre comercial o razón social); si están vacíos, de APP_NAME.
+            ; si no hay datos, del nombre comercial del remitente al conectar Gmail.
           </p>
           <label class="block text-sm">
             <span class="text-slate-400">Asunto</span>
@@ -859,13 +861,13 @@ onMounted(init)
                 />
               </label>
               <label class="block text-sm">
-                <span class="text-slate-400">Nombre visible</span>
+                <span class="text-slate-400">Nombre comercial</span>
                 <input
                   v-model="fromName"
                   type="text"
                   maxlength="120"
                   class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
-                  placeholder="Ej. Facturación HBM"
+                  placeholder="Nombre visible para el destinatario; respaldo del marcador nombre_sistema en plantillas"
                 />
               </label>
             </div>

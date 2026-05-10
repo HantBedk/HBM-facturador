@@ -156,6 +156,28 @@ class AdminMailNotificationsSettingsTest extends TestCase
         $this->assertDatabaseMissing('app_settings', ['key' => AppSetting::KEY_MAIL_RUNTIME_TRANSPORT]);
     }
 
+    public function test_save_smtp_rejects_when_no_organization_or_commercial_name(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        Sanctum::actingAs($admin);
+        $this->unlockMailNotificationsFor($admin);
+
+        $verifier = \Mockery::mock(SmtpConnectionVerifier::class);
+        $verifier->shouldReceive('verify')->once()->andReturn(true);
+        $this->app->instance(SmtpConnectionVerifier::class, $verifier);
+
+        $this->putJson('/api/admin/settings/mail-notifications', [
+            'smtp_host' => 'smtp.gmail.com',
+            'smtp_port' => 587,
+            'smtp_encryption' => 'tls',
+            'smtp_username' => 'cuenta@gmail.com',
+            'smtp_password' => 'app-password-16chars',
+            'from_address' => 'cuenta@gmail.com',
+            'from_name' => '',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors(['from_name']);
+    }
+
     public function test_admin_can_save_gmail_smtp_from_panel(): void
     {
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);

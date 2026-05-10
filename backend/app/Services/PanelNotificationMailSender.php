@@ -32,7 +32,8 @@ class PanelNotificationMailSender
             throw new \InvalidArgumentException('Indique un correo remitente válido en Correo del sistema o MAIL_FROM_ADDRESS en .env.');
         }
         if ($fromName === '') {
-            $fromName = (string) config('app.name', 'HBM');
+            $org = app(SystemOrganizationProfileService::class)->displayNameForMail();
+            $fromName = $org !== '' ? $org : '';
         }
 
         $this->outgoingMail->send(new MailMessage(

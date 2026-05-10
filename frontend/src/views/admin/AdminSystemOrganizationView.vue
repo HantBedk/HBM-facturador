@@ -169,7 +169,7 @@ onUnmounted(revokeLogoPreview)
       <p class="mt-1 text-sm text-slate-400">
         Datos de su empresa operadora (facturador): distintos de las empresas cliente del directorio. Se usan como respaldo del nombre en
         <RouterLink to="/admin/configuracion/correo-notificaciones" class="text-sky-400 hover:underline">correos</RouterLink>
-        <span v-pre> (sustituye {{nombre_sistema}} en correos de bienvenida, factura y mantenimiento).</span>
+        <span v-pre> (sustituye {{nombre_sistema}} en correos; si falta aquí, se usa el nombre comercial del remitente al conectar Gmail).</span>
       </p>
     </div>
 

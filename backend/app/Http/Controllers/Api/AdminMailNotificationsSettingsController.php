@@ -12,6 +12,7 @@ use App\Services\AdminMailSettingsUnlockService;
 use App\Services\MailRuntimeSettingsService;
 use App\Services\MailNotificationTemplatesService;
 use App\Services\MailTemplatePdfService;
+use App\Services\SystemOrganizationProfileService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -27,6 +28,7 @@ class AdminMailNotificationsSettingsController extends Controller
         private readonly OutgoingMailSender $outgoingMail,
         private readonly MailRuntimeSettingsService $runtimeSmtp,
         private readonly SmtpConnectionVerifier $smtpVerifier,
+        private readonly SystemOrganizationProfileService $organizationProfile,
     ) {}
 
     public function unlockStatus(Request $request): JsonResponse
@@ -139,6 +141,7 @@ class AdminMailNotificationsSettingsController extends Controller
                         'smtp_password' => [$hint],
                     ]);
                 }
+                $this->assertSmtpSaveHasCommercialIdentity($data);
             }
             $this->runtimeSmtp->persistFromForm($data);
         }
@@ -344,9 +347,37 @@ class AdminMailNotificationsSettingsController extends Controller
     private function effectiveName(string $stored): string
     {
         if (trim($stored) !== '') {
-            return $stored;
+            return trim($stored);
+        }
+        $org = $this->organizationProfile->displayNameForMail();
+        if ($org !== '') {
+            return $org;
         }
 
-        return (string) config('mail.from.name', '');
+        return trim((string) config('mail.from.name', ''));
+    }
+
+    /**
+     * Al guardar SMTP con credenciales válidas debe existir nombre de marca: Empresa sistema o nombre comercial del remitente en el mismo guardado o ya guardado.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertSmtpSaveHasCommercialIdentity(array $data): void
+    {
+        $org = $this->organizationProfile->displayNameForMail();
+        $row = AppSetting::query()->where('key', AppSetting::KEY_MAIL_NOTIFICATIONS_FROM)->first();
+        $stored = is_array($row?->value) ? $row->value : [];
+        $storedName = trim((string) ($stored['name'] ?? ''));
+        $pendingName = array_key_exists('from_name', $data)
+            ? trim((string) ($data['from_name'] ?? ''))
+            : $storedName;
+
+        if ($org !== '' || $pendingName !== '') {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'from_name' => ['Indique el nombre comercial del remitente o complete nombre comercial o razón social en Configuración → Empresa sistema.'],
+        ]);
     }
 }
