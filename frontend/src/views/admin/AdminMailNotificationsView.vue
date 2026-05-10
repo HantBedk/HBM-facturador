@@ -11,6 +11,9 @@ import {
 } from '@/services/adminMailNotificationsApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
 
+/** Ocultar UI de «Correo de prueba» sin borrar el código (reactivar cuando haga falta). */
+const SHOW_MAIL_TEST_SECTION = false
+
 const checkingGate = ref(true)
 const gateLocked = ref(true)
 const gatePassword = ref('')
@@ -393,7 +396,10 @@ onMounted(init)
                 El envío usa credenciales guardadas de forma cifrada en el servidor. No se muestran correo ni contraseña en pantalla.
               </p>
               <p class="text-xs text-slate-500">
-                Use «Enviar prueba» abajo para comprobar el envío. Si cambia la clave en Google, use Reconfigurar.
+                <template v-if="SHOW_MAIL_TEST_SECTION">
+                  Use «Enviar prueba» abajo para comprobar el envío. Si cambia la clave en Google, use Reconfigurar.
+                </template>
+                <template v-else>Si cambia la clave en Google, use Reconfigurar.</template>
               </p>
             </div>
             <button
@@ -501,6 +507,7 @@ onMounted(init)
       </div>
 
       <div
+        v-if="SHOW_MAIL_TEST_SECTION"
         class="rounded-lg border border-amber-600/40 bg-amber-950/20 px-3 py-3 space-y-3"
         role="region"
         aria-label="Correo de prueba"

@@ -80,6 +80,12 @@ class PanelNotification extends Model
     /** Lista de titulares de inventario interno actualizada. */
     public const TYPE_INVENTORY_HOLDERS_UPDATED = 'inventory_holders_updated';
 
+    /** Correo de bienvenida a empresa del directorio enviado (proceso en segundo plano). */
+    public const TYPE_MAIL_COMPANY_WELCOME_OK = 'mail_company_welcome_ok';
+
+    /** Fallo al enviar correo de bienvenida a empresa (proceso en segundo plano). */
+    public const TYPE_MAIL_COMPANY_WELCOME_FAILED = 'mail_company_welcome_failed';
+
     protected $table = 'panel_notifications';
 
     /**

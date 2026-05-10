@@ -673,8 +673,8 @@ async function confirmWelcomePdfIfCorreo(correo) {
       const ok = await uiDialog.confirm({
         title: 'Bienvenida sin PDF adjunto',
         message:
-          'No hay PDF de bienvenida configurado o el archivo no está disponible. Se intentará enviar el correo de bienvenida solo con el texto de la plantilla (sin adjunto). ¿Continuar?',
-        confirmLabel: creating ? 'Crear y enviar' : 'Guardar y enviar',
+          'No hay PDF de bienvenida configurado o el archivo no está disponible. Se programará el envío del correo solo con el texto de la plantilla (sin adjunto), en segundo plano tras guardar. ¿Continuar?',
+        confirmLabel: creating ? 'Crear empresa' : 'Guardar',
         cancelLabel: 'Volver',
       })
       return ok
@@ -687,14 +687,26 @@ async function confirmWelcomePdfIfCorreo(correo) {
   return true
 }
 
-async function alertIfWelcomeMailFailed(welcomeMail) {
-  if (!welcomeMail || welcomeMail.sent || welcomeMail.skipped_reason !== 'send_failed') return
-  const extra = welcomeMail.detail ? `\n\nDetalle: ${welcomeMail.detail}` : ''
-  const dest = welcomeMail.to ? ` a ${welcomeMail.to}` : ''
-  await uiDialog.alert({
-    title: 'No se envió el correo de bienvenida',
-    message: `La empresa se guardó, pero el envío${dest} falló.${extra}\n\nRevise Admin → Correo del sistema (SMTP y remitente) y storage/logs/laravel.log.`,
-  })
+/** Tras guardar: aviso si el bienvenida quedó en cola; error solo si el API aún devolviera fallo síncrono. */
+async function notifyWelcomeMailOutcome(welcomeMail) {
+  if (!welcomeMail) return
+  if (welcomeMail.skipped_reason === 'no_correo') return
+  if (welcomeMail.queued) {
+    const dest = welcomeMail.to ? ` (${welcomeMail.to})` : ''
+    await uiDialog.alert({
+      title: 'Correo de bienvenida',
+      message: `La empresa se guardó. El correo de bienvenida${dest} se enviará en segundo plano; recibirá una notificación en el panel cuando termine (éxito o error).`,
+    })
+    return
+  }
+  if (!welcomeMail.sent && welcomeMail.skipped_reason === 'send_failed') {
+    const extra = welcomeMail.detail ? `\n\nDetalle: ${welcomeMail.detail}` : ''
+    const dest = welcomeMail.to ? ` a ${welcomeMail.to}` : ''
+    await uiDialog.alert({
+      title: 'No se envió el correo de bienvenida',
+      message: `La empresa se guardó, pero el envío${dest} falló.${extra}\n\nRevise Admin → Correo del sistema (SMTP y remitente) y storage/logs/laravel.log.`,
+    })
+  }
 }
 
 async function onSubmitModal() {
@@ -721,7 +733,7 @@ async function onSubmitModal() {
       const res = await createCompany(payload)
       modalOpen.value = false
       await load()
-      await alertIfWelcomeMailFailed(res.welcome_mail)
+      await notifyWelcomeMailOutcome(res.welcome_mail)
     } else {
       const addedFirstCorreo = !editingHadCorreo.value && !!payload.correo
       if (addedFirstCorreo) {
@@ -734,7 +746,7 @@ async function onSubmitModal() {
       const res = await updateCompany(editingId.value, payload)
       modalOpen.value = false
       await load()
-      await alertIfWelcomeMailFailed(res.welcome_mail)
+      if (res.welcome_mail) await notifyWelcomeMailOutcome(res.welcome_mail)
     }
   } catch (e) {
     if (e.data?.errors) fieldErrors.value = e.data.errors
@@ -1386,9 +1398,7 @@ async function submitDeleteCompanyModal() {
                 maxlength="255"
                 placeholder="ej. contacto@empresa.com"
               />
-              <small class="muted"
-                >Necesario para enviar bienvenida al crear/guardar y para facturas por correo.</small
-              >
+              
               <small v-if="fieldErrors.correo" class="err">{{ fieldErrors.correo[0] }}</small>
             </label>
             <fieldset class="field">
