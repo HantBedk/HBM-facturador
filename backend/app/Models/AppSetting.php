@@ -79,6 +79,18 @@ class AppSetting extends Model
      */
     public const KEY_MAIL_RUNTIME_TRANSPORT = 'mail_runtime_transport';
 
+    /**
+     * Datos de la empresa operadora del sistema (facturador), no confundir con empresas cliente.
+     * JSON: legal_name, trade_name, nit, email, phone, phone_secondary, website, address_line1, address_line2, city, department, country, postal_code.
+     */
+    public const KEY_SYSTEM_ORGANIZATION_PROFILE = 'system_organization_profile';
+
+    /**
+     * Logo de la empresa del sistema (imagen).
+     * JSON: { "relative_path": "system-organization/uuid.ext", "original_filename": "logo.png" }.
+     */
+    public const KEY_SYSTEM_ORGANIZATION_LOGO = 'system_organization_logo';
+
     protected $fillable = [
         'key',
         'value',

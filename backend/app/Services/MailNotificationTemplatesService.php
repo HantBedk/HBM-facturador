@@ -110,6 +110,7 @@ class MailNotificationTemplatesService
     {
         return $this->renderSubject($this->effectiveWelcomeSubject(), [
             self::PH_COMPANY => $company->nombre,
+            self::PH_NOMBRE_SISTEMA => $this->nombreSistemaParaPlaceholders(),
         ]);
     }
 
@@ -117,8 +118,22 @@ class MailNotificationTemplatesService
     {
         return $this->renderBodyHtml($this->effectiveWelcomeBody(), [
             self::PH_COMPANY => $company->nombre,
-            self::PH_NOMBRE_SISTEMA => (string) config('app.name', 'HBM'),
+            self::PH_NOMBRE_SISTEMA => $this->nombreSistemaParaPlaceholders(),
         ]);
+    }
+
+    /**
+     * Valor para {{nombre_sistema}} en bienvenida, factura y mantenimiento:
+     * nombre comercial o razón social (Configuración → Empresa sistema), si no APP_NAME.
+     */
+    public function nombreSistemaParaPlaceholders(): string
+    {
+        $org = app(SystemOrganizationProfileService::class)->displayNameForMail();
+        if ($org !== '') {
+            return $org;
+        }
+
+        return (string) config('app.name', 'HBM');
     }
 
     public function invoiceToCompanySubjectRendered(Invoice $invoice, string $companyName): string
@@ -128,6 +143,7 @@ class MailNotificationTemplatesService
             self::PH_COMPANY => $companyName,
             self::PH_MES_FACTURADO => $this->mesFacturado($invoice),
             self::PH_PERIODO_FACTURADO => $this->periodoFacturado($invoice),
+            self::PH_NOMBRE_SISTEMA => $this->nombreSistemaParaPlaceholders(),
         ]);
     }
 
@@ -140,6 +156,7 @@ class MailNotificationTemplatesService
             self::PH_MES_FACTURADO => e($this->mesFacturado($invoice)),
             self::PH_PERIODO_FACTURADO => e($this->periodoFacturado($invoice)),
             self::PH_ENLACE_FACTURA => '<a href="'.e($consultUrl).'" rel="noopener noreferrer">'.e($consultUrl).'</a>',
+            self::PH_NOMBRE_SISTEMA => e($this->nombreSistemaParaPlaceholders()),
         ];
         $out = $tpl;
         foreach ($map as $needle => $value) {
@@ -166,6 +183,7 @@ class MailNotificationTemplatesService
     {
         return [
             self::PH_COMPANY => $company->nombre,
+            self::PH_NOMBRE_SISTEMA => $this->nombreSistemaParaPlaceholders(),
             self::PH_CODIGO_SERVICIO => (string) $service->code,
             self::PH_NOMBRE_EQUIPO => $equipmentName,
             self::PH_TIPO_SERVICIO => (string) $service->service_type,

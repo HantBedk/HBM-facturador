@@ -14,6 +14,7 @@ const AdminEmpleadoNotificacionesView = () => import('@/views/admin/AdminEmplead
 const AdminHistorialMovimientosView = () => import('@/views/admin/AdminHistorialMovimientosView.vue')
 const AdminBillingAutomationView = () => import('@/views/admin/AdminBillingAutomationView.vue')
 const AdminMailNotificationsView = () => import('@/views/admin/AdminMailNotificationsView.vue')
+const AdminSystemOrganizationView = () => import('@/views/admin/AdminSystemOrganizationView.vue')
 const AdminInventoryConfigView = () => import('@/views/admin/AdminInventoryConfigView.vue')
 const AdminEmpleadoPerfilView = () => import('@/views/admin/AdminEmpleadoPerfilView.vue')
 const EmpleadosListView = () => import('@/views/admin/EmpleadosListView.vue')
@@ -113,6 +114,11 @@ const routes = [
           {
             path: 'cuentas',
             redirect: { name: 'admin-emp-rendimiento' },
+          },
+          {
+            path: 'empresa-sistema',
+            name: 'admin-config-system-organization',
+            component: AdminSystemOrganizationView,
           },
           {
             path: 'notificaciones-tecnicos',

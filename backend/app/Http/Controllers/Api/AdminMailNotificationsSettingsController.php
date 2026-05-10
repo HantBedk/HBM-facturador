@@ -77,11 +77,11 @@ class AdminMailNotificationsSettingsController extends Controller
                 'maintenance_supplement_pdf_filename' => $this->templatePdfs->meta(MailTemplatePdfService::KIND_MAINTENANCE_SUPPLEMENT)['original_filename'] ?? null,
                 'smtp' => $this->runtimeSmtp->publicConfig(),
             ], $tpl),
-            'help_gmail_smtp' => 'Gmail: smtp.gmail.com, 587, tls. Usuario = correo completo. Clave = contraseña de aplicación (cuenta con 2 pasos; no sirve la clave normal). Los envíos de bienvenida (nueva empresa), factura por correo y aviso de mantenimiento usan este mismo SMTP (PHPMailer), no el mailer por defecto MAIL_MAILER de Laravel. Al guardar, el sistema comprueba la conexión y la autenticación SMTP (no envía correo); si falla, no guarda las credenciales. La entrega real solo se confirma con «Enviar prueba» o un envío del sistema. Si "Could not authenticate": genere una clave nueva, sin espacios al pegar, y compruebe que la cuenta no tenga "Protección avanzada" (bloquea claves de aplicación). Diagnóstico: MAIL_SMTP_DEBUG=true en .env y revise storage/logs/laravel.log. Si el fallo es de certificado TLS en Docker: MAIL_SMTP_SSL_RELAXED=true solo para probar. Para omitir la comprobación al guardar (red aislada): MAIL_VERIFY_SMTP=false. En servidor también puede probar: php artisan hbm:mail-test su@correo.com. Para producción suele ser más estable un SMTP transaccional (Brevo, etc.).',
+            'help_gmail_smtp' => '',
             'help_company_welcome_pdf' => 'PDF opcional para nuevas empresas (p. ej. condiciones). Al crear una empresa con correo siempre se envía el correo de bienvenida; si hay PDF configurado y legible, se adjunta. Sin PDF el envío es solo texto (el panel puede advertir antes de guardar).',
             'help_invoice_supplement_pdf' => 'PDF opcional adicional. El envío por correo siempre incluye el PDF oficial de la factura generado por el sistema; este archivo solo se añade si lo configura.',
             'help_maintenance_supplement_pdf' => 'PDF opcional al notificar mantenimiento a la empresa. El correo se envía aunque no haya PDF; si lo hay y es legible, se adjunta.',
-            'help_mail_templates' => 'Texto plano (sin HTML); saltos de línea se respetan. Placeholders: bienvenida {{nombre_empresa}}, {{nombre_sistema}}; factura {{codigo_factura}}, {{nombre_empresa}}, {{mes_facturado}}, {{periodo_facturado}}, {{enlace_consulta_factura}}; mantenimiento {{nombre_empresa}}, {{nombre_equipo}}, {{codigo_servicio}}, {{tipo_servicio}}, {{fecha_mantenimiento}}, {{descripcion}}. FRONTEND_PUBLIC_URL en el servidor define el enlace de consulta.',
+            'help_mail_templates' => '',
         ]);
     }
 
