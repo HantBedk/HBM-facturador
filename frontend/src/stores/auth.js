@@ -79,6 +79,11 @@ export const useAuthStore = defineStore('auth', () => {
     }
     setToken(data.token, remember)
     persistUser(data.user, remember)
+    try {
+      sessionStorage.removeItem('hbm_dismiss_mail_outbound_prompt')
+    } catch {
+      /* ignore */
+    }
     return data.user
   }
 

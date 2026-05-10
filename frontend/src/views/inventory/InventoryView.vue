@@ -76,14 +76,6 @@ const lots = ref([])
 const lotsMeta = ref(null)
 const lotsPage = ref(1)
 const lotsQ = ref('')
-/** Filtro API por fecha de alta del lote (inventario activos). */
-const lotsDateFrom = ref('')
-const lotsDateTo = ref('')
-let lotsDateFilterTimer = null
-/** Filtros API persistidos en URL (inv_*). */
-const invFilterAssetType = ref('')
-const invFilterBrand = ref('')
-let invFilterTimer = null
 const importCsvFileRef = ref(null)
 const importCsvBusy = ref(false)
 const importCsvFeedback = ref('')
@@ -91,10 +83,7 @@ const importCsvModalOpen = ref(false)
 const activeTab = ref('activos')
 
 watch(isCompanyInventoryRoute, (custodia) => {
-  if (
-    custodia &&
-    ['alquiler', 'ventas', 'en_alquiler_lotes', 'vendidos'].includes(activeTab.value)
-  ) {
+  if (custodia && ['alquiler', 'ventas'].includes(activeTab.value)) {
     activeTab.value = 'activos'
   }
 })
@@ -114,8 +103,6 @@ const salesPage = ref(1)
 const salesQ = ref('')
 
 const bajasQ = ref('')
-const vendidosQ = ref('')
-const rentLotsQ = ref('')
 const repairQ = ref('')
 
 const sortState = ref({
@@ -123,19 +110,11 @@ const sortState = ref({
   rentals: { key: 'started_at', dir: 'desc' },
   sales: { key: 'created_at', dir: 'desc' },
   bajas: { key: 'name', dir: 'asc' },
-  vendidos: { key: 'name', dir: 'asc' },
-  rentLots: { key: 'name', dir: 'asc' },
   repair: { key: 'name', dir: 'asc' },
 })
 
 const activeLots = computed(() =>
   (lots.value || []).filter((row) => String(row.lifecycle_status || 'activo') === 'activo')
-)
-/** Equipos vendidos por completo (lifecycle «vendido», distinto de baja por inservible). */
-const soldLots = computed(() => (lots.value || []).filter((row) => String(row.lifecycle_status || '') === 'vendido'))
-/** Lotes con unidades físicamente en alquiler activo. */
-const lotsWithActiveRentUnits = computed(() =>
-  (lots.value || []).filter((row) => Number(row.units_on_rent || 0) > 0)
 )
 const decommissionedLots = computed(() => (lots.value || []).filter((row) => String(row.lifecycle_status || '') === 'baja'))
 const repairLots = computed(() => (lots.value || []).filter((row) => String(row.lifecycle_status || '') === 'reparacion'))
@@ -194,43 +173,6 @@ const filteredBajas = computed(() => {
   })
 })
 
-const filteredVendidos = computed(() => {
-  const q = String(vendidosQ.value || '').trim().toLowerCase()
-  if (!q) return soldLots.value
-  return soldLots.value.filter((row) => {
-    const haystack = [
-      row.name,
-      row.internal_code,
-      row.serial_number,
-      row.created_at,
-      row.description,
-      readDescriptionField(row.description, 'Codigo interno'),
-    ]
-      .join(' ')
-      .toLowerCase()
-    return haystack.includes(q)
-  })
-})
-
-const filteredRentLots = computed(() => {
-  const q = String(rentLotsQ.value || '').trim().toLowerCase()
-  if (!q) return lotsWithActiveRentUnits.value
-  return lotsWithActiveRentUnits.value.filter((row) => {
-    const haystack = [
-      row.name,
-      row.internal_code,
-      row.serial_number,
-      row.description,
-      readDescriptionField(row.description, 'Codigo interno'),
-      String(row.units_on_rent || ''),
-      String(row.quantity_available || ''),
-    ]
-      .join(' ')
-      .toLowerCase()
-    return haystack.includes(q)
-  })
-})
-
 const filteredRepair = computed(() => {
   const q = String(repairQ.value || '').trim().toLowerCase()
   if (!q) return repairLots.value
@@ -256,8 +198,6 @@ const activeTabSearch = computed({
     if (activeTab.value === 'alquiler') return rentalsQ.value
     if (activeTab.value === 'ventas') return salesQ.value
     if (activeTab.value === 'bajas') return bajasQ.value
-    if (activeTab.value === 'vendidos') return vendidosQ.value
-    if (activeTab.value === 'en_alquiler_lotes') return rentLotsQ.value
     if (activeTab.value === 'reparacion') return repairQ.value
     return ''
   },
@@ -267,8 +207,6 @@ const activeTabSearch = computed({
     else if (activeTab.value === 'alquiler') rentalsQ.value = value
     else if (activeTab.value === 'ventas') salesQ.value = value
     else if (activeTab.value === 'bajas') bajasQ.value = value
-    else if (activeTab.value === 'vendidos') vendidosQ.value = value
-    else if (activeTab.value === 'en_alquiler_lotes') rentLotsQ.value = value
     else if (activeTab.value === 'reparacion') repairQ.value = value
   },
 })
@@ -278,9 +216,6 @@ const activeTabSearchPlaceholder = computed(() => {
   if (activeTab.value === 'alquiler') return 'Buscar alquiler por cliente, teléfono, equipo, estado o fecha…'
   if (activeTab.value === 'ventas') return 'Buscar venta por ID, fecha, vendedor, total o detalle…'
   if (activeTab.value === 'bajas') return 'Buscar baja por nombre, código, fecha o detalle…'
-  if (activeTab.value === 'vendidos') return 'Buscar equipo vendido por nombre, código o detalle…'
-  if (activeTab.value === 'en_alquiler_lotes')
-    return 'Buscar lote con unidades en alquiler por nombre, código o stock…'
   if (activeTab.value === 'reparacion') return 'Buscar equipo en reparación por nombre, código, ubicación o detalle…'
   return 'Buscar…'
 })
@@ -289,8 +224,6 @@ const sortedLots = computed(() => sortRows(activeLots.value, sortState.value.lot
 const sortedRentals = computed(() => sortRows(filteredRentals.value, sortState.value.rentals, rentalSortValue))
 const sortedSales = computed(() => sortRows(filteredSales.value, sortState.value.sales, saleSortValue))
 const sortedBajas = computed(() => sortRows(filteredBajas.value, sortState.value.bajas, sortableValue))
-const sortedVendidos = computed(() => sortRows(filteredVendidos.value, sortState.value.vendidos, sortableValue))
-const sortedRentLots = computed(() => sortRows(filteredRentLots.value, sortState.value.rentLots, sortableValue))
 const sortedRepair = computed(() => sortRows(filteredRepair.value, sortState.value.repair, repairSortValue))
 
 function toggleTableSort(table, key) {
@@ -493,10 +426,10 @@ function syncInventoryListUrlQuery() {
     else delete next[k]
   }
   assign('inv_q', lotsQ.value)
-  assign('inv_from', lotsDateFrom.value)
-  assign('inv_to', lotsDateTo.value)
-  assign('inv_asset_type', invFilterAssetType.value)
-  assign('inv_brand', invFilterBrand.value)
+  assign('inv_from', '')
+  assign('inv_to', '')
+  assign('inv_asset_type', '')
+  assign('inv_brand', '')
   router.replace({ path: route.path, query: next })
 }
 
@@ -510,10 +443,6 @@ async function loadLots() {
       active_only: isAdmin.value ? undefined : '1',
       ...contextQueryParams.value,
     }
-    if (lotsDateFrom.value.trim()) params.created_from = lotsDateFrom.value.trim()
-    if (lotsDateTo.value.trim()) params.created_to = lotsDateTo.value.trim()
-    if (invFilterAssetType.value.trim()) params.asset_type = invFilterAssetType.value.trim()
-    if (invFilterBrand.value.trim()) params.brand = invFilterBrand.value.trim()
     const res = await fetchInventoryLots(params)
     lots.value = res.data || []
     lotsMeta.value = res.meta || null
@@ -1164,25 +1093,6 @@ watch(lotsQ, () => {
 })
 
 watch(lotsPage, () => loadLots())
-watch([lotsDateFrom, lotsDateTo], () => {
-  if (activeTab.value !== 'activos') return
-  clearTimeout(lotsDateFilterTimer)
-  lotsDateFilterTimer = setTimeout(() => {
-    lotsPage.value = 1
-    loadLots()
-    syncInventoryListUrlQuery()
-  }, 400)
-})
-
-watch([invFilterAssetType, invFilterBrand], () => {
-  if (activeTab.value !== 'activos') return
-  clearTimeout(invFilterTimer)
-  invFilterTimer = setTimeout(() => {
-    lotsPage.value = 1
-    loadLots()
-    syncInventoryListUrlQuery()
-  }, 400)
-})
 watch(rentalsPage, () => loadRentals())
 watch(salesPage, () => loadSales())
 onMounted(async () => {
@@ -1205,17 +1115,12 @@ onMounted(async () => {
   }
   const q = route.query || {}
   if (q.inv_q != null) lotsQ.value = String(q.inv_q)
-  if (q.inv_from) lotsDateFrom.value = String(q.inv_from)
-  if (q.inv_to) lotsDateTo.value = String(q.inv_to)
-  if (q.inv_asset_type) invFilterAssetType.value = String(q.inv_asset_type)
-  if (q.inv_brand) invFilterBrand.value = String(q.inv_brand)
   const extraLoads = isCompanyInventoryRoute.value ? [] : [loadRentals(), loadSales()]
   await Promise.all([loadLots(), loadPendingBajaRequests(), ...extraLoads])
 })
 
 onUnmounted(() => {
   document.removeEventListener('mousedown', onInventoryFormMousedown)
-  clearTimeout(invFilterTimer)
 })
 </script>
 
@@ -1242,7 +1147,7 @@ onUnmounted(() => {
             código de inventario único (sigla de factura de la empresa + correlativo).
           </template>
           <template v-else-if="isInternalAdminInventory">
-            Stock y activos de la operación (sin empresa cliente en el lote).
+            Stock y activos de la operación.
           </template>
           <template v-else>
             Activos donde usted figura como titular. Para altas y ajustes globales consulte con administración.
@@ -1320,33 +1225,7 @@ onUnmounted(() => {
             "
             @click="activeTab = 'ventas'"
           >
-            Historial de ventas
-          </button>
-          <button
-            v-if="!isCompanyInventoryRoute"
-            type="button"
-            class="rounded-xl px-3 py-2 text-sm font-medium transition"
-            :class="
-              activeTab === 'vendidos'
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
-                : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
-            "
-            @click="activeTab = 'vendidos'"
-          >
-            Vendidos
-          </button>
-          <button
-            v-if="!isCompanyInventoryRoute"
-            type="button"
-            class="rounded-xl px-3 py-2 text-sm font-medium transition"
-            :class="
-              activeTab === 'en_alquiler_lotes'
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
-                : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
-            "
-            @click="activeTab = 'en_alquiler_lotes'"
-          >
-            En alquiler (lotes)
+            Ventas
           </button>
           <button
             type="button"
@@ -1408,54 +1287,6 @@ onUnmounted(() => {
 
       <template v-if="activeTab === 'activos'">
         <p v-if="lotsError" class="mb-3 text-sm text-rose-400">{{ lotsError }}</p>
-        <div
-          class="mb-3 flex flex-wrap items-end gap-3 rounded-xl border border-slate-700/50 bg-[#13161f]/80 px-3 py-2 text-xs text-slate-400"
-        >
-          <label class="block min-w-[9.5rem]">
-            <span class="mb-0.5 block text-[0.65rem] uppercase tracking-wide text-slate-500">Alta desde</span>
-            <input
-              v-model="lotsDateFrom"
-              type="date"
-              class="w-full rounded-lg border border-slate-600 bg-[#111723] px-2 py-1.5 text-sm text-slate-100"
-            />
-          </label>
-          <label class="block min-w-[9.5rem]">
-            <span class="mb-0.5 block text-[0.65rem] uppercase tracking-wide text-slate-500">Alta hasta</span>
-            <input
-              v-model="lotsDateTo"
-              type="date"
-              class="w-full rounded-lg border border-slate-600 bg-[#111723] px-2 py-1.5 text-sm text-slate-100"
-            />
-          </label>
-          <button
-            type="button"
-            class="rounded-lg border border-slate-600 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
-            @click="() => { lotsDateFrom = ''; lotsDateTo = ''; }"
-          >
-            Limpiar fechas
-          </button>
-          <label v-if="isAdmin" class="block min-w-[8rem]">
-            <span class="mb-0.5 block text-[0.65rem] uppercase tracking-wide text-slate-500">Tipo activo</span>
-            <input
-              v-model="invFilterAssetType"
-              type="text"
-              placeholder="Ej. Equipo"
-              class="w-full rounded-lg border border-slate-600 bg-[#111723] px-2 py-1.5 text-sm text-slate-100"
-            />
-          </label>
-          <label v-if="isAdmin" class="block min-w-[8rem]">
-            <span class="mb-0.5 block text-[0.65rem] uppercase tracking-wide text-slate-500">Marca</span>
-            <input
-              v-model="invFilterBrand"
-              type="text"
-              class="w-full rounded-lg border border-slate-600 bg-[#111723] px-2 py-1.5 text-sm text-slate-100"
-            />
-          </label>
-          <p class="max-w-xl flex-1 text-[0.7rem] leading-snug text-slate-500">
-            Filtro por fecha de registro del activo. La búsqueda incluye nombre, serial, MAC, marca, modelo, sede y
-            responsable (servidor). Los filtros de tipo/marca se reflejan en la URL (compartir enlace).
-          </p>
-        </div>
         <div v-if="lotsLoading" class="py-8 text-center text-slate-500">Cargando…</div>
         <div v-else class="overflow-x-auto">
           <table class="min-w-[1080px] w-full text-left text-sm">
@@ -1727,154 +1558,6 @@ onUnmounted(() => {
           >
             Siguiente
           </button>
-        </div>
-      </template>
-
-      <template v-else-if="activeTab === 'vendidos' && !isCompanyInventoryRoute">
-        <div class="overflow-x-auto">
-          <table class="min-w-[880px] w-full text-left text-sm">
-            <thead>
-              <tr class="border-b border-slate-700/80 text-slate-400">
-                <th class="pb-2 pr-3 font-medium">
-                  <button type="button" class="hover:text-white" @click="toggleTableSort('vendidos', 'code')">
-                    Código{{ tableSortIndicator('vendidos', 'code') }}
-                  </button>
-                </th>
-                <th class="pb-2 pr-3 font-medium">
-                  <button type="button" class="hover:text-white" @click="toggleTableSort('vendidos', 'name')">
-                    Activo / dispositivo{{ tableSortIndicator('vendidos', 'name') }}
-                  </button>
-                </th>
-                <th v-if="isAdminInventoryRoute" class="pb-2 pr-3 font-medium">
-                  <button type="button" class="hover:text-white" @click="toggleTableSort('vendidos', 'owner')">
-                    Titular{{ tableSortIndicator('vendidos', 'owner') }}
-                  </button>
-                </th>
-                <th class="pb-2 pr-3 font-medium">
-                  <button type="button" class="hover:text-white" @click="toggleTableSort('vendidos', 'entry_date')">
-                    Fecha de entrada{{ tableSortIndicator('vendidos', 'entry_date') }}
-                  </button>
-                </th>
-                <th class="pb-2 pr-3 font-medium">
-                  <button type="button" class="hover:text-white" @click="toggleTableSort('vendidos', 'stock')">
-                    Stock final{{ tableSortIndicator('vendidos', 'stock') }}
-                  </button>
-                </th>
-                <th class="pb-2 pr-3 font-medium">Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in sortedVendidos" :key="`vend-${row.id}`" class="border-b border-slate-800/80">
-                <td class="py-2 pr-3 align-top font-mono text-slate-300">
-                  <button type="button" class="text-sky-300 hover:text-sky-200 hover:underline" @click="openAssetSheet(row)">
-                    {{ lotCode(row) }}
-                  </button>
-                </td>
-                <td class="py-2 pr-3 align-top text-white">{{ row.name }}</td>
-                <td v-if="isAdminInventoryRoute" class="py-2 pr-3 align-top text-slate-300">
-                  {{ row.owner?.nombre || '—' }}
-                </td>
-                <td class="py-2 pr-3 align-top text-slate-300">{{ row.created_at?.slice(0, 10) || '—' }}</td>
-                <td class="py-2 pr-3 align-top text-xs">
-                  <span class="text-emerald-300">{{ row.quantity_available }}</span>
-                  <span class="text-slate-600"> / </span>
-                  <span class="text-amber-300">{{ Number(row.units_on_rent || 0) }}</span>
-                  <span class="text-slate-600"> / </span>
-                  <span class="text-slate-200">{{
-                    row.quantity_total != null && row.quantity_total !== undefined
-                      ? row.quantity_total
-                      : Number(row.quantity_available || 0) + Number(row.units_on_rent || 0)
-                  }}</span>
-                </td>
-                <td class="py-2 pr-3 align-top text-sky-300">Vendido</td>
-              </tr>
-              <tr v-if="!sortedVendidos.length">
-                <td :colspan="isAdminInventoryRoute ? 6 : 5" class="py-3 text-slate-500">
-                  No hay equipos marcados como vendidos en esta vista.
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </template>
-
-      <template v-else-if="activeTab === 'en_alquiler_lotes' && !isCompanyInventoryRoute">
-        <div class="overflow-x-auto">
-          <table class="min-w-[920px] w-full text-left text-sm">
-            <thead>
-              <tr class="border-b border-slate-700/80 text-slate-400">
-                <th class="pb-2 pr-3 font-medium">
-                  <button type="button" class="hover:text-white" @click="toggleTableSort('rentLots', 'code')">
-                    Código{{ tableSortIndicator('rentLots', 'code') }}
-                  </button>
-                </th>
-                <th class="pb-2 pr-3 font-medium">
-                  <button type="button" class="hover:text-white" @click="toggleTableSort('rentLots', 'name')">
-                    Activo / dispositivo{{ tableSortIndicator('rentLots', 'name') }}
-                  </button>
-                </th>
-                <th v-if="isAdminInventoryRoute" class="pb-2 pr-3 font-medium">
-                  <button type="button" class="hover:text-white" @click="toggleTableSort('rentLots', 'owner')">
-                    Titular{{ tableSortIndicator('rentLots', 'owner') }}
-                  </button>
-                </th>
-                <th class="pb-2 pr-3 font-medium">
-                  <button type="button" class="hover:text-white" @click="toggleTableSort('rentLots', 'location')">
-                    Ubicación{{ tableSortIndicator('rentLots', 'location') }}
-                  </button>
-                </th>
-                <th class="pb-2 pr-3 font-medium">
-                  <button type="button" class="hover:text-white" @click="toggleTableSort('rentLots', 'stock')">
-                    Stock (disp. / alq. / tot.){{ tableSortIndicator('rentLots', 'stock') }}
-                  </button>
-                </th>
-                <th class="pb-2 pr-3 font-medium">Estado ciclo</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in sortedRentLots" :key="`rentlot-${row.id}`" class="border-b border-slate-800/80">
-                <td class="py-2 pr-3 align-top font-mono text-slate-300">
-                  <button type="button" class="text-sky-300 hover:text-sky-200 hover:underline" @click="openAssetSheet(row)">
-                    {{ lotCode(row) }}
-                  </button>
-                </td>
-                <td class="py-2 pr-3 align-top text-white">{{ row.name }}</td>
-                <td v-if="isAdminInventoryRoute" class="py-2 pr-3 align-top text-slate-300">
-                  {{ row.owner?.nombre || '—' }}
-                </td>
-                <td class="py-2 pr-3 align-top text-slate-300">{{ readDescriptionField(row.description, 'Ubicacion') || '—' }}</td>
-                <td class="py-2 pr-3 align-top text-xs leading-snug">
-                  <span class="font-medium text-emerald-300">{{ row.quantity_available }}</span>
-                  <span class="text-slate-600"> / </span>
-                  <span class="font-medium text-amber-300">{{ Number(row.units_on_rent || 0) }}</span>
-                  <span class="text-slate-600"> / </span>
-                  <span class="text-slate-200">{{
-                    row.quantity_total != null && row.quantity_total !== undefined
-                      ? row.quantity_total
-                      : Number(row.quantity_available || 0) + Number(row.units_on_rent || 0)
-                  }}</span>
-                </td>
-                <td class="py-2 pr-3 align-top">
-                  <span
-                    :class="
-                      row.lifecycle_status === 'activo'
-                        ? 'text-emerald-400'
-                        : row.lifecycle_status === 'reparacion'
-                          ? 'text-amber-300'
-                          : 'text-rose-300'
-                    "
-                  >
-                    {{ lotLifecycleStatusLabel(row) }}
-                  </span>
-                </td>
-              </tr>
-              <tr v-if="!sortedRentLots.length">
-                <td :colspan="isAdminInventoryRoute ? 6 : 5" class="py-3 text-slate-500">
-                  No hay lotes con unidades actualmente en alquiler.
-                </td>
-              </tr>
-            </tbody>
-          </table>
         </div>
       </template>
 

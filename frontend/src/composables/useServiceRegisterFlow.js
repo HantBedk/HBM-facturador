@@ -86,6 +86,7 @@ export function useServiceRegisterFlow({
     inventory_quantity: 1,
     inventory_days: 1,
     inventory_sale_items: [],
+    inventory_rental_items: [],
   })
 
   let toastTimer = null
@@ -124,6 +125,7 @@ export function useServiceRegisterFlow({
       inventory_quantity: 1,
       inventory_days: 1,
       inventory_sale_items: [],
+      inventory_rental_items: [],
     }
     photoFiles.value = []
     formResetKey.value += 1
@@ -216,20 +218,27 @@ export function useServiceRegisterFlow({
             e.inventory_quantity = ['Cada producto debe tener una cantidad válida (mínimo 1).']
           }
         }
-      } else {
-        const lotId = Number(form.value.inventory_lot_id)
-        const qty = Number(form.value.inventory_quantity)
-        if (!Number.isInteger(lotId) || lotId <= 0) {
-          e.inventory_lot_id = ['Selecciona un equipo de inventario para la operación comercial.']
-        }
-        if (!Number.isFinite(qty) || qty < 1) {
-          e.inventory_quantity = ['Indica una cantidad válida (mínimo 1).']
-        }
-      }
-      if (opType === 'alquiler') {
-        const days = Number(form.value.inventory_days)
-        if (!Number.isFinite(days) || days < 1) {
-          e.inventory_days = ['Indica los días de alquiler (mínimo 1).']
+      } else if (opType === 'alquiler') {
+        const rentalItems = Array.isArray(form.value.inventory_rental_items) ? form.value.inventory_rental_items : []
+        if (!rentalItems.length) {
+          e.inventory_lot_id = ['Agrega al menos un equipo para registrar el alquiler.']
+        } else {
+          const invalidQty = rentalItems.some(
+            (item) => !Number.isFinite(Number(item?.quantity)) || Number(item?.quantity) < 1
+          )
+          const invalidLot = rentalItems.some(
+            (item) => !Number.isInteger(Number(item?.lot_id)) || Number(item?.lot_id) <= 0
+          )
+          const invalidDays = rentalItems.some((item) => !Number.isFinite(Number(item?.days)) || Number(item?.days) < 1)
+          if (invalidLot) {
+            e.inventory_lot_id = ['Hay equipos inválidos en la lista seleccionada.']
+          }
+          if (invalidQty) {
+            e.inventory_quantity = ['Cada equipo debe tener una cantidad válida (mínimo 1).']
+          }
+          if (invalidDays) {
+            e.inventory_days = ['Cada equipo debe tener días de alquiler válidos (mínimo 1).']
+          }
         }
       }
     }
@@ -586,13 +595,15 @@ export function useServiceRegisterFlow({
             })
           }
         } else {
-          const lotId = Number(form.value.inventory_lot_id)
-          const qty = Number(form.value.inventory_quantity || 1)
-          const days = Number(form.value.inventory_days || 1)
-          const lot = inventoryLots.value.find((x) => Number(x.id) === lotId)
-          if (lot) {
+          const rentalItems = Array.isArray(form.value.inventory_rental_items) ? form.value.inventory_rental_items : []
+          for (const ri of rentalItems) {
+            const lotId = Number(ri?.lot_id)
+            const qty = Number(ri?.quantity || 1)
+            const days = Number(ri?.days || 1)
+            const lot = inventoryLots.value.find((x) => Number(x.id) === lotId)
+            if (!lot) continue
             if (!lotAllowsRental(lot)) {
-              throw new Error('El equipo seleccionado no está habilitado para alquiler.')
+              throw new Error(`El equipo «${lot.name}» no está habilitado para alquiler.`)
             }
             const unit = Number(lot.unit_price || 0)
             const total = unit * qty * days
@@ -649,13 +660,21 @@ export function useServiceRegisterFlow({
         if (!sid) throw new Error('Respuesta inválida al registrar la venta de inventario.')
         inventoryRollback = { type: 'sale', id: sid, query: q }
       } else if (opType === 'alquiler') {
-        const lotId = Number(form.value.inventory_lot_id)
-        const lot = inventoryLots.value.find((x) => Number(x.id) === lotId)
-        if (!lot) throw new Error('Equipo de inventario no encontrado.')
-        const q = buildInventoryQueryFromLots([lot])
+        const rentalItems = Array.isArray(form.value.inventory_rental_items) ? form.value.inventory_rental_items : []
+        const lotsUsed = rentalItems
+          .map((ri) => inventoryLots.value.find((x) => Number(x.id) === Number(ri.lot_id)))
+          .filter(Boolean)
+        if (!lotsUsed.length) {
+          throw new Error('No hay equipos válidos para registrar el alquiler en inventario.')
+        }
+        const q = buildInventoryQueryFromLots(lotsUsed)
         const invRes = await createInventoryRental(
           {
-            lines: [{ inventory_lot_id: lotId, quantity: Number(form.value.inventory_quantity || 1) }],
+            lines: rentalItems.map((ri) => ({
+              inventory_lot_id: Number(ri.lot_id),
+              quantity: Number(ri.quantity || 1),
+              rental_days: Number(ri.days || 1),
+            })),
             customer_name: baseClient,
             customer_phone: form.value.use_quick_client ? digitsOnly(form.value.quick_telefono) : '',
             notes: String(form.value.description || '').trim() || null,
@@ -669,7 +688,9 @@ export function useServiceRegisterFlow({
 
       let created
       try {
-        created = await createService(payload, photoFiles.value)
+        const photosToSend =
+          opType === 'venta' || opType === 'alquiler' ? [] : photoFiles.value
+        created = await createService(payload, photosToSend)
       } catch (svcErr) {
         if (inventoryRollback?.type === 'sale') {
           await deleteInventorySale(inventoryRollback.id, inventoryRollback.query).catch(() => {})

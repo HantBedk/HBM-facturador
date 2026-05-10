@@ -59,6 +59,7 @@ class InventoryRentalController extends Controller
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.inventory_lot_id' => ['required', 'integer', 'exists:inventory_lots,id'],
             'lines.*.quantity' => ['required', 'integer', 'min:1', 'max:999999'],
+            'lines.*.rental_days' => ['sometimes', 'integer', 'min:1', 'max:9999'],
         ]);
 
         $tenantCompanyId = $this->tenantCompanyIdFromRequest($request, $validated);
@@ -83,6 +84,10 @@ class InventoryRentalController extends Controller
             foreach ($validated['lines'] as $row) {
                 $lotId = (int) $row['inventory_lot_id'];
                 $qty = (int) $row['quantity'];
+                $rentalDays = (int) ($row['rental_days'] ?? 1);
+                if ($rentalDays < 1) {
+                    $rentalDays = 1;
+                }
                 $lot = $lots->get($lotId);
                 if (! $lot) {
                     throw ValidationException::withMessages(['lines' => ["Lote {$lotId} no encontrado."]]);
@@ -122,7 +127,8 @@ class InventoryRentalController extends Controller
                 }
 
                 $unit = (string) $lot->unit_price;
-                $lineTotal = DecimalMath::mul($unit, (string) $qty, 2);
+                $subTotal = DecimalMath::mul($unit, (string) $qty, 2);
+                $lineTotal = DecimalMath::mul($subTotal, (string) $rentalDays, 2);
 
                 InventoryRentalLine::query()->create([
                     'inventory_rental_id' => $rental->id,
@@ -130,6 +136,7 @@ class InventoryRentalController extends Controller
                     'owner_user_id' => $lot->owner_user_id,
                     'tenant_company_id' => $tenantCompanyId,
                     'quantity' => $qty,
+                    'rental_days' => $rentalDays,
                     'unit_price' => $unit,
                     'line_total' => $lineTotal,
                 ]);

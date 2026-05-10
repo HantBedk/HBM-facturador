@@ -13,6 +13,7 @@ class InventoryRentalLine extends Model
         'owner_user_id',
         'tenant_company_id',
         'quantity',
+        'rental_days',
         'unit_price',
         'line_total',
         'returned_at',
@@ -22,6 +23,7 @@ class InventoryRentalLine extends Model
     {
         return [
             'quantity' => 'integer',
+            'rental_days' => 'integer',
             'unit_price' => 'decimal:2',
             'line_total' => 'decimal:2',
             'returned_at' => 'datetime',

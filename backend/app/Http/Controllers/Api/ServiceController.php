@@ -1155,15 +1155,35 @@ class ServiceController extends Controller
                 }
                 $cnameTrim = trim($cname);
                 /**
-                 * Inventario comercial: el importe enviado es el valor facturable acordado (lista/precio interno);
-                 * el ejecutor del registro no devenga por estas líneas — el titular del lote se reconoce vía `owner_user_id` en inventario.
+                 * Inventario comercial: el importe enviado es la referencia interna (precio de lista del lote × cantidad/días),
+                 * igual que el resto de líneas; el facturable aplica el margen global de venta o alquiler.
+                 * El ejecutor no devenga (`technician_line_amount` 0) — el titular del lote está en inventario.
                  */
-                if (str_starts_with($cnameTrim, 'Venta equipo:') || str_starts_with($cnameTrim, 'Alquiler equipo:')) {
+                if (str_starts_with($cnameTrim, 'Venta equipo:')) {
+                    $pInv = CatalogPricing::globalInventorySaleDiscountPercent();
+                    $billedStr = CatalogPricing::billedAmountFromTechnicianEntry((float) $amtStr, $pInv);
                     $out[] = [
                         'catalog_id' => null,
                         'custom_name' => $cname,
                         'custom_description' => $cdesc,
-                        'amount' => $amtStr,
+                        'amount' => $billedStr,
+                        'technician_line_amount' => '0.00',
+                        'label' => $cname,
+                        'line_description' => $lineDesc,
+                        'is_custom' => true,
+                        'propose_catalog' => false,
+                    ];
+
+                    continue;
+                }
+                if (str_starts_with($cnameTrim, 'Alquiler equipo:')) {
+                    $pInv = CatalogPricing::globalInventoryRentalDiscountPercent();
+                    $billedStr = CatalogPricing::billedAmountFromTechnicianEntry((float) $amtStr, $pInv);
+                    $out[] = [
+                        'catalog_id' => null,
+                        'custom_name' => $cname,
+                        'custom_description' => $cdesc,
+                        'amount' => $billedStr,
                         'technician_line_amount' => '0.00',
                         'label' => $cname,
                         'line_description' => $lineDesc,

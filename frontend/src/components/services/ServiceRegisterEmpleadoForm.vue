@@ -284,26 +284,6 @@ const operationLots = computed(() => {
   if (operationType.value === 'alquiler') return withStock.filter((x) => isEnabledForRental(x))
   return []
 })
-const selectedOperationLot = computed(() =>
-  operationLots.value.find((x) => Number(x.id) === Number(props.modelValue.inventory_lot_id))
-)
-const operationPreview = computed(() => {
-  const lot = selectedOperationLot.value
-  if (!lot) return null
-  const qty = Math.max(1, Number(props.modelValue.inventory_quantity || 1))
-  const days = Math.max(1, Number(props.modelValue.inventory_days || 1))
-  const unit = Number(lot.unit_price || 0)
-  const total = operationType.value === 'alquiler' ? unit * qty * days : unit * qty
-  return { unit, total, qty, days }
-})
-
-watch([selectedOperationLot, operationType], () => {
-  const lot = selectedOperationLot.value
-  if (!lot || operationType.value !== 'alquiler') return
-  const maxQ = Math.max(1, Number(lot.quantity_available || 0))
-  const q = Math.max(1, Number(props.modelValue.inventory_quantity || 1))
-  if (q > maxQ) patch({ inventory_quantity: maxQ })
-})
 
 const lotPickSearchQ = ref('')
 const selectedSaleLotId = ref('')
@@ -325,6 +305,39 @@ const filteredOperationLots = computed(() => {
     return blob.includes(q)
   })
 })
+
+const rentalItems = computed(() =>
+  Array.isArray(props.modelValue.inventory_rental_items) ? props.modelValue.inventory_rental_items : []
+)
+
+const selectedRentalItemsDetailed = computed(() =>
+  rentalItems.value
+    .map((item) => {
+      const lotId = Number(item?.lot_id)
+      const lot = operationLots.value.find((x) => Number(x.id) === lotId)
+      if (!lot) return null
+      const quantity = Math.max(1, Number(item?.quantity || 1))
+      const days = Math.max(1, Number(item?.days ?? 1))
+      const unit = Number(lot.unit_price || 0)
+      return {
+        lot,
+        lot_id: lotId,
+        quantity,
+        days,
+        lineTotal: unit * quantity * days,
+      }
+    })
+    .filter(Boolean)
+)
+
+const availableRentalLotsForPick = computed(() => {
+  const used = new Set(rentalItems.value.map((item) => Number(item?.lot_id)))
+  return filteredOperationLots.value.filter((lot) => !used.has(Number(lot.id)))
+})
+
+const rentalGrandTotal = computed(() =>
+  selectedRentalItemsDetailed.value.reduce((acc, item) => acc + Number(item.lineTotal || 0), 0)
+)
 
 const saleItems = computed(() =>
   Array.isArray(props.modelValue.inventory_sale_items) ? props.modelValue.inventory_sale_items : []
@@ -371,21 +384,50 @@ function setInventoryOperationType(t) {
     inventory_quantity: 1,
     inventory_days: 1,
     inventory_sale_items: [],
+    inventory_rental_items: [],
   })
 }
 
-function confirmRentalLotPick() {
+function addRentalItem() {
   if (props.disabled) return
-  const id = Number(selectedRentalLotId.value)
-  if (!id) return
-  patch({ inventory_lot_id: String(id), inventory_quantity: 1, inventory_days: 1 })
+  if (operationType.value !== 'alquiler') return
+  const lotId = Number(selectedRentalLotId.value)
+  if (!lotId) return
+  if (rentalItems.value.some((item) => Number(item?.lot_id) === lotId)) return
+  patch({
+    inventory_rental_items: [...rentalItems.value, { lot_id: lotId, quantity: 1, days: 1 }],
+  })
   selectedRentalLotId.value = ''
 }
 
-function clearRentalLotSelection() {
+function removeRentalItem(lotId) {
   if (props.disabled) return
-  patch({ inventory_lot_id: '', inventory_quantity: 1, inventory_days: 1 })
-  selectedRentalLotId.value = ''
+  patch({
+    inventory_rental_items: rentalItems.value.filter((item) => Number(item?.lot_id) !== Number(lotId)),
+  })
+}
+
+function updateRentalItemQty(lotId, qtyRaw) {
+  if (props.disabled) return
+  const lot = props.inventoryLots.find((x) => Number(x.id) === Number(lotId))
+  const maxQ = lot != null ? Math.max(1, Number(lot.quantity_available || 0)) : 999999
+  let qty = Math.max(1, Number(qtyRaw || 1))
+  if (qty > maxQ) qty = maxQ
+  patch({
+    inventory_rental_items: rentalItems.value.map((item) =>
+      Number(item?.lot_id) === Number(lotId) ? { ...item, quantity: qty } : item
+    ),
+  })
+}
+
+function updateRentalItemDays(lotId, daysRaw) {
+  if (props.disabled) return
+  const days = Math.max(1, Number(daysRaw || 1))
+  patch({
+    inventory_rental_items: rentalItems.value.map((item) =>
+      Number(item?.lot_id) === Number(lotId) ? { ...item, days } : item
+    ),
+  })
 }
 
 function addSaleItem() {
@@ -420,15 +462,6 @@ function updateSaleItemQty(lotId, qtyRaw) {
   })
 }
 
-function onRentalQtyInput(ev) {
-  if (props.disabled) return
-  const lot = selectedOperationLot.value
-  const maxQ = lot != null ? Math.max(1, Number(lot.quantity_available || 0)) : 1
-  let q = Math.max(1, Number(ev.target?.value || 1))
-  if (q > maxQ) q = maxQ
-  patch({ inventory_quantity: q })
-}
-
 watch(
   () => props.allowInventoryCommercialOps,
   (allow) => {
@@ -439,6 +472,7 @@ watch(
         inventory_quantity: 1,
         inventory_days: 1,
         inventory_sale_items: [],
+        inventory_rental_items: [],
       })
     }
   },
@@ -458,6 +492,7 @@ watch(
         inventory_quantity: 1,
         inventory_days: 1,
         inventory_sale_items: [],
+        inventory_rental_items: [],
       })
     } else if (k === 'mantenimiento') {
       patch({
@@ -465,6 +500,7 @@ watch(
         inventory_quantity: 1,
         inventory_days: 1,
         inventory_sale_items: [],
+        inventory_rental_items: [],
       })
     }
   },
@@ -872,7 +908,7 @@ watch(
               class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white outline-none focus:border-sky-500 disabled:opacity-50"
             >
               <option value="" disabled>Seleccionar equipo…</option>
-              <option v-for="lot in filteredOperationLots" :key="lot.id" :value="String(lot.id)">
+              <option v-for="lot in availableRentalLotsForPick" :key="lot.id" :value="String(lot.id)">
                 {{ lot.name }} · Stock {{ lot.quantity_available }} · {{ formatHintMoneyCop(lot.unit_price) }}
               </option>
             </select>
@@ -880,62 +916,79 @@ watch(
               type="button"
               :disabled="disabled || !selectedRentalLotId"
               class="shrink-0 rounded-xl border border-slate-600 px-3 py-2.5 text-xs font-semibold text-slate-200 transition hover:border-sky-500 hover:text-sky-300 disabled:opacity-50"
-              @click="confirmRentalLotPick"
+              @click="addRentalItem"
             >
               Agregar
             </button>
           </div>
-          <p class="text-xs text-slate-400">Equipo en operación: {{ selectedOperationLot ? 1 : 0 }}</p>
-          <ul
-            v-if="selectedOperationLot"
-            class="max-h-56 divide-y divide-slate-700/50 overflow-y-auto rounded-xl border border-slate-700/80 bg-[#141a22]"
+          <p class="text-xs text-slate-400">
+            Equipos en alquiler: {{ selectedRentalItemsDetailed.length }}
+          </p>
+          <div
+            v-if="selectedRentalItemsDetailed.length"
+            class="mt-1 flex flex-col gap-3"
           >
-            <li
-              class="flex flex-col gap-2 px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between"
+            <div
+              v-for="(item, rIdx) in selectedRentalItemsDetailed"
+              :key="item.lot_id"
+              class="rounded-xl border border-slate-600/70 bg-[#141a22] p-3.5 shadow-sm ring-1 ring-slate-800/40 sm:p-4"
             >
-              <div class="text-slate-200">
-                {{ selectedOperationLot.name }} · {{ formatHintMoneyCop(selectedOperationLot.unit_price) }}
-              </div>
-              <div class="flex flex-wrap items-center gap-2">
-                <span v-if="operationPreview" class="text-xs text-emerald-400">{{ formatHintMoneyCop(operationPreview.total) }}</span>
+              <div class="mb-3 flex flex-wrap items-start justify-between gap-2 border-b border-slate-700/50 pb-2">
+                <div>
+                  <p class="text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">
+                    Equipo {{ rIdx + 1 }}
+                  </p>
+                  <p class="text-sm font-medium text-slate-100">
+                    {{ item.lot.name }}
+                  </p>
+                  <p class="mt-0.5 text-xs text-slate-400">
+                    Tarifa diaria {{ formatHintMoneyCop(item.lot.unit_price) }}
+                    <span class="text-slate-600"> · </span>
+                    Stock {{ item.lot.quantity_available }}
+                  </p>
+                </div>
                 <button
                   type="button"
                   :disabled="disabled"
-                  class="rounded-lg px-2 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/10 disabled:opacity-50"
-                  @click="clearRentalLotSelection"
+                  class="shrink-0 rounded-lg border border-red-500/30 px-2.5 py-1 text-xs font-semibold text-red-400 transition hover:bg-red-500/10 disabled:opacity-50"
+                  @click="removeRentalItem(item.lot_id)"
                 >
                   Quitar
                 </button>
               </div>
-            </li>
-          </ul>
-          <p v-else class="text-xs text-slate-500">No hay equipo seleccionado para el alquiler.</p>
+              <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+                <label class="block text-xs text-slate-400">
+                  <span class="mb-1 block text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">Cantidad</span>
+                  <input
+                    :value="item.quantity"
+                    type="number"
+                    min="1"
+                    :max="Math.max(1, Number(item.lot.quantity_available || 0))"
+                    :disabled="disabled"
+                    class="w-full min-w-[5.5rem] rounded-lg border border-slate-700/90 bg-[#0f1419] px-3 py-2 text-sm text-white outline-none focus:border-sky-500 sm:w-24"
+                    @input="updateRentalItemQty(item.lot_id, $event.target.value)"
+                  />
+                </label>
+                <label class="block text-xs text-slate-400">
+                  <span class="mb-1 block text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">Días</span>
+                  <input
+                    :value="item.days"
+                    type="number"
+                    min="1"
+                    :disabled="disabled"
+                    class="w-full min-w-[5.5rem] rounded-lg border border-slate-700/90 bg-[#0f1419] px-3 py-2 text-sm text-white outline-none focus:border-sky-500 sm:w-24"
+                    @input="updateRentalItemDays(item.lot_id, $event.target.value)"
+                  />
+                </label>
+                <div class="flex flex-1 flex-col justify-end sm:min-w-[8rem] sm:items-end">
+                  <span class="text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">Subtotal</span>
+                  <span class="text-sm font-semibold tabular-nums text-emerald-400">{{ formatHintMoneyCop(item.lineTotal) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p v-else class="text-xs text-slate-500">No hay equipos agregados al alquiler.</p>
         </template>
-      </div>
-      <div v-if="operationType === 'alquiler'" class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <label class="block text-xs text-slate-400">
-          Cantidad
-          <input
-            :value="inner.inventory_quantity || 1"
-            type="number"
-            min="1"
-            :max="selectedOperationLot ? Math.max(1, Number(selectedOperationLot.quantity_available || 0)) : undefined"
-            :disabled="disabled"
-            class="mt-1 w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
-            @input="onRentalQtyInput($event)"
-          />
-        </label>
-        <label class="block text-xs text-slate-400">
-          Días de alquiler
-          <input
-            :value="inner.inventory_days || 1"
-            type="number"
-            min="1"
-            :disabled="disabled"
-            class="mt-1 w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
-            @input="patch({ inventory_days: Number($event.target.value || 1) })"
-          />
-        </label>
       </div>
       <p v-if="fieldErrors.inventory_lot_id" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.inventory_lot_id[0] }}</p>
       <p v-if="fieldErrors.inventory_quantity" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.inventory_quantity[0] }}</p>
@@ -1132,8 +1185,12 @@ watch(
     </section>
     </div>
 
-    <!-- Paso 3 -->
-    <section v-if="operationType !== 'venta'" class="step-section" aria-labelledby="reg-svc-step3">
+    <!-- Paso 3: solo aplica a registro tipo servicio / mantenimiento (no venta ni alquiler de inventario). -->
+    <section
+      v-if="operationType !== 'venta' && operationType !== 'alquiler'"
+      class="step-section"
+      aria-labelledby="reg-svc-step3"
+    >
       <h2 id="reg-svc-step3" class="step-title">
         <span class="step-badge" aria-hidden="true">3</span>
         Evidencias
@@ -1198,10 +1255,10 @@ watch(
       Total de la venta: {{ formatHintMoneyCop(saleGrandTotal) }}
     </p>
     <p
-      v-if="operationType === 'alquiler' && operationPreview"
+      v-if="operationType === 'alquiler' && selectedRentalItemsDetailed.length"
       class="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-center text-sm font-semibold text-emerald-100"
     >
-      Total del alquiler: {{ formatHintMoneyCop(operationPreview.total) }}
+      Total del alquiler: {{ formatHintMoneyCop(rentalGrandTotal) }}
     </p>
 
     <button

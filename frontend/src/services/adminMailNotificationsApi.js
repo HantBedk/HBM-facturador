@@ -2,6 +2,11 @@ import { api } from '@/services/api.js'
 
 /** @typedef {'welcome' | 'invoice_supplement' | 'maintenance_supplement'} MailTemplatePdfKind */
 
+/** Sin desbloqueo: indica si hay SMTP panel o .env listo para enviar. */
+export function fetchMailOutboundStatus() {
+  return api('/admin/settings/mail-notifications/outbound-status')
+}
+
 export function fetchMailNotificationsUnlockStatus() {
   return api('/admin/settings/mail-notifications/unlock-status')
 }

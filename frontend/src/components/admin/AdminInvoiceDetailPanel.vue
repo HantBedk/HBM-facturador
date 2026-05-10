@@ -7,6 +7,7 @@ import {
   downloadInvoicePdfBlob,
   fetchAdminInvoice,
   patchInvoiceStatus,
+  sendInvoiceEmailToCompany,
 } from '@/services/invoicesApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
@@ -130,6 +131,28 @@ const canEdit = computed(() => invoice.value?.status === 'borrador' && hasRegist
 const canApprove = computed(() => invoice.value?.status === 'borrador' && hasRegisteredCompany.value)
 const canSend = computed(() => invoice.value?.status === 'aprobada')
 
+const sendEmailBusy = ref(false)
+
+const companyEmailValid = computed(() => {
+  const raw = invoice.value?.company?.correo
+  const s = raw != null ? String(raw).trim() : ''
+  if (!s) return false
+  return /^[^\s@]+@[^\s@]+$/u.test(s)
+})
+
+/** No borrador y correo de empresa válido (el API ahora incluye `correo` en la relación company). */
+const canEmailPdfToCompany = computed(() => {
+  const inv = invoice.value
+  if (!inv || inv.status === 'borrador') return false
+  return companyEmailValid.value
+})
+
+/** Muestra el botón junto a PDF aunque falte correo (queda deshabilitado o avisa al pulsar). */
+const showToolbarEnviarFactura = computed(() => {
+  if (!invoice.value || invoice.value.status === 'borrador') return false
+  return hasRegisteredCompany.value
+})
+
 const balanceNum = computed(() => {
   const b = invoice.value?.financial?.balance
   if (b === undefined || b === null) return null
@@ -168,17 +191,56 @@ const clientContactPreview = computed(() => {
   return names.length ? names.join(', ') : '—'
 })
 
-async function onAprobar() {
+async function onAprobarYEnviar() {
   actionError.value = ''
+  if (!invoice.value || invoice.value.status !== 'borrador' || !hasRegisteredCompany.value) return
+  if (!companyEmailValid.value) {
+    await uiDialog.alert({
+      title: 'Correo requerido',
+      message: 'Para aprobar y enviar, la empresa debe tener un correo electrónico válido en el directorio.',
+    })
+    return
+  }
+  const ok = await uiDialog.confirm({
+    title: 'Aprobar y enviar factura',
+    message:
+      'Una vez aprobada y enviada al cliente, esta factura ya no podrá modificarse como borrador ni alterarse su contenido facturado desde el panel. Se enviará el PDF al correo registrado en la empresa. ¿Desea continuar?',
+    confirmLabel: 'Aceptar',
+    cancelLabel: 'Rechazar',
+    danger: true,
+  })
+  if (!ok) return
+
+  const id = idRef.value
   approveSubmitting.value = true
   try {
-    invoice.value = await patchInvoiceStatus(idRef.value, 'aprobada')
+    invoice.value = await patchInvoiceStatus(id, 'aprobada')
+    try {
+      const r = await sendInvoiceEmailToCompany(id)
+      await uiDialog.alert({
+        title: 'Factura enviada',
+        message: r?.message || 'Correo con PDF enviado al cliente.',
+      })
+    } catch (emailErr) {
+      const msg =
+        emailErr.data?.errors?.company?.[0] ||
+        emailErr.data?.message ||
+        emailErr.message ||
+        'Error desconocido.'
+      actionError.value =
+        'La factura quedó aprobada, pero el envío por correo falló: ' +
+        msg +
+        ' Revise Configuración → Correo del sistema y use «Enviar factura» en la barra superior.'
+      emit('changed')
+      return
+    }
+    invoice.value = await patchInvoiceStatus(id, 'enviada')
     emit('changed')
     if (props.reviewMode) {
       emit('close')
     }
   } catch (e) {
-    actionError.value = e.data?.message || e.message || 'No se pudo aprobar.'
+    actionError.value = e.data?.message || e.message || 'No se pudo completar la acción.'
   } finally {
     approveSubmitting.value = false
   }
@@ -277,6 +339,52 @@ async function onPdfOfficialDownload() {
   }
 }
 
+async function onToolbarEnviarFacturaClick() {
+  if (!companyEmailValid.value) {
+    await uiDialog.alert({
+      title: 'No se puede enviar',
+      message:
+        'La empresa no tiene un correo válido en el directorio. Edítela, guarde un correo y vuelva a abrir esta factura.',
+    })
+    return
+  }
+  await onSendInvoiceEmail()
+}
+
+async function onSendInvoiceEmail() {
+  const inv = invoice.value
+  const panelId = idRef.value
+  if (!inv || panelId == null || panelId === '') return
+  if (String(inv.id) !== String(panelId)) {
+    actionError.value = 'El panel no coincide con la factura cargada. Cierre y vuelva a abrir.'
+    return
+  }
+  if (!canEmailPdfToCompany.value) return
+  const code = inv.code || String(panelId)
+  const correo = String(inv.company?.correo || '').trim()
+  const ok = await uiDialog.confirm({
+    title: 'Enviar factura por correo',
+    message: `Se enviará el PDF oficial de la factura ${code} (esta misma, abierta en el panel) a ${correo}. ¿Continuar?`,
+    confirmLabel: 'Enviar',
+  })
+  if (!ok) return
+  actionError.value = ''
+  sendEmailBusy.value = true
+  try {
+    const r = await sendInvoiceEmailToCompany(panelId)
+    await uiDialog.alert({
+      title: 'Correo enviado',
+      message: r.message || 'Factura enviada.',
+    })
+    emit('changed')
+  } catch (e) {
+    const msg = e.data?.errors?.company?.[0] || e.data?.message || e.message || 'No se pudo enviar el correo.'
+    actionError.value = msg
+  } finally {
+    sendEmailBusy.value = false
+  }
+}
+
 defineExpose({ reload })
 </script>
 
@@ -321,6 +429,16 @@ defineExpose({ reload })
           <template v-else>
             <button type="button" class="btn secondary btn-compact" @click="onPdfOfficialView">Ver PDF</button>
             <button type="button" class="btn secondary btn-compact" @click="onPdfOfficialDownload">Descargar PDF</button>
+            <button
+              v-if="showToolbarEnviarFactura"
+              type="button"
+              class="btn secondary btn-compact"
+              :disabled="sendEmailBusy || !companyEmailValid"
+              :title="!companyEmailValid ? 'Agregue un correo válido en la ficha de la empresa' : ''"
+              @click="onToolbarEnviarFacturaClick"
+            >
+              {{ sendEmailBusy ? 'Enviando…' : 'Enviar factura' }}
+            </button>
           </template>
           <RouterLink v-if="canEdit" class="btn primary btn-compact" :to="`/admin/facturas/${invoice.id}/editar`" @click="emit('close')">
             Editar borrador
@@ -448,12 +566,19 @@ defineExpose({ reload })
                 v-if="canApprove && !reviewMode"
                 type="button"
                 class="btn primary btn-compact"
-                :disabled="approveSubmitting"
-                @click="onAprobar"
+                :disabled="approveSubmitting || !companyEmailValid"
+                :title="!companyEmailValid ? 'La empresa necesita un correo válido para aprobar y enviar' : ''"
+                @click="onAprobarYEnviar"
               >
-                {{ approveSubmitting ? 'Aprobando…' : 'Aprobar factura' }}
+                {{ approveSubmitting ? 'Procesando…' : 'Aprobar y enviar' }}
               </button>
-              <button v-if="canSend" type="button" class="btn primary btn-compact" @click="onEnviar">Marcar como enviada</button>
+              <template v-if="canSend">
+                <p class="muted small send-hint">
+                  «Marcar como enviada» solo marca el estado para registrar cobros; <strong>no envía correo</strong>. Use
+                  <strong>Enviar factura</strong> en la barra superior si el cliente aún no recibió el PDF.
+                </p>
+                <button type="button" class="btn primary btn-compact" @click="onEnviar">Marcar como enviada</button>
+              </template>
             </div>
 
             <div class="grid-2">
@@ -603,10 +728,11 @@ defineExpose({ reload })
           <button
             type="button"
             class="btn primary btn-compact"
-            :disabled="approveSubmitting"
-            @click="onAprobar"
+            :disabled="approveSubmitting || !companyEmailValid"
+            :title="!companyEmailValid ? 'Agregue correo a la empresa en el directorio' : ''"
+            @click="onAprobarYEnviar"
           >
-            {{ approveSubmitting ? 'Aprobando…' : 'Aprobar factura' }}
+            {{ approveSubmitting ? 'Procesando…' : 'Aprobar y enviar' }}
           </button>
         </footer>
       </aside>
@@ -810,6 +936,12 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.actions-bar .send-hint {
+  flex: 1 1 100%;
+  margin: 0 0 0.15rem;
+  line-height: 1.45;
 }
 
 .grid-2 {

@@ -133,6 +133,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::post('/admin/settings/system-organization/logo', [AdminSystemOrganizationController::class, 'uploadLogo']);
         Route::delete('/admin/settings/system-organization/logo', [AdminSystemOrganizationController::class, 'deleteLogo']);
         Route::get('/admin/settings/system-organization/logo', [AdminSystemOrganizationController::class, 'logoFile']);
+        Route::get('/admin/settings/mail-notifications/outbound-status', [AdminMailNotificationsSettingsController::class, 'outboundStatus']);
         Route::get('/admin/settings/mail-notifications/unlock-status', [AdminMailNotificationsSettingsController::class, 'unlockStatus']);
         Route::post('/admin/settings/mail-notifications/unlock', [AdminMailNotificationsSettingsController::class, 'unlock']);
         Route::get('/admin/settings/mail-notifications', [AdminMailNotificationsSettingsController::class, 'show']);

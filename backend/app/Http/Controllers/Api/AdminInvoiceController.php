@@ -40,7 +40,7 @@ class AdminInvoiceController extends Controller
     public function index(Request $request): AnonymousResourceCollection
     {
         $q = Invoice::query()->with([
-            'company:id,nombre,nit,telefono,es_cliente_puntual',
+            'company:id,nombre,nit,telefono,correo,es_cliente_puntual',
             'payments:id,invoice_id,amount',
         ]);
 
@@ -109,7 +109,7 @@ class AdminInvoiceController extends Controller
 
     public function show(Invoice $invoice): AdminInvoiceResource
     {
-        $invoice->load(['company:id,nombre,nit,telefono,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent', 'payments' => fn ($q) => $q->orderBy('payment_date')]);
+        $invoice->load(['company:id,nombre,nit,telefono,correo,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent', 'payments' => fn ($q) => $q->orderBy('payment_date')]);
 
         return new AdminInvoiceResource($invoice);
     }
@@ -233,7 +233,7 @@ class AdminInvoiceController extends Controller
             return $inv;
         });
 
-        $invoice->load(['company:id,nombre,nit,telefono,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent,iva_percent', 'payments']);
+        $invoice->load(['company:id,nombre,nit,telefono,correo,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent,iva_percent', 'payments']);
 
         app(PanelNotificationDispatcher::class)->notifyAdmins(
             PanelNotification::TYPE_INVOICE_DRAFT,
@@ -312,7 +312,7 @@ class AdminInvoiceController extends Controller
             $invoice->services()->sync($data['service_ids']);
         });
 
-        $invoice->refresh()->load(['company:id,nombre,nit,telefono,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent', 'payments']);
+        $invoice->refresh()->load(['company:id,nombre,nit,telefono,correo,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent', 'payments']);
 
         $removedIds = array_values(array_diff($prevServiceIds, $data['service_ids']));
         if ($removedIds !== []) {
@@ -568,7 +568,7 @@ class AdminInvoiceController extends Controller
             $invoice->refresh();
         }
 
-        $invoice->load(['company:id,nombre,nit,telefono,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent', 'payments']);
+        $invoice->load(['company:id,nombre,nit,telefono,correo,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent', 'payments']);
 
         if ($data['status'] === Invoice::STATUS_APROBADA) {
             $dispatcher = app(PanelNotificationDispatcher::class);
@@ -638,7 +638,7 @@ class AdminInvoiceController extends Controller
         }
 
         $plain = $publicAccess->regenerate($invoice);
-        $invoice->refresh()->load(['company:id,nombre,nit,telefono,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent', 'payments']);
+        $invoice->refresh()->load(['company:id,nombre,nit,telefono,correo,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent', 'payments']);
 
         ActivityLogger::log(
             $request->user(),
@@ -699,7 +699,7 @@ class AdminInvoiceController extends Controller
 
         $invoice->refresh();
         $this->syncInvoiceStatusFromPayments($invoice);
-        $invoice->load(['company:id,nombre,nit,telefono,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent', 'payments']);
+        $invoice->load(['company:id,nombre,nit,telefono,correo,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent', 'payments']);
 
         if ($invoice->status === Invoice::STATUS_PARCIALMENTE_PAGADA) {
             app(PanelNotificationDispatcher::class)->notifyAdmins(
@@ -760,7 +760,7 @@ class AdminInvoiceController extends Controller
         $payment->delete();
         $invoice->refresh();
         $this->syncInvoiceStatusFromPayments($invoice);
-        $invoice->load(['company:id,nombre,nit,telefono,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent', 'payments']);
+        $invoice->load(['company:id,nombre,nit,telefono,correo,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent', 'payments']);
 
         ActivityLogger::log(
             $request->user(),
@@ -792,7 +792,7 @@ class AdminInvoiceController extends Controller
             }
         }
 
-        $invoice->loadMissing('company:id,nombre');
+        $invoice->loadMissing('company:id,nombre,nit,telefono,correo,es_cliente_puntual');
         $code = $invoice->code;
         $invId = $invoice->id;
         $prevStatus = $invoice->status;

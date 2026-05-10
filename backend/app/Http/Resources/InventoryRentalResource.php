@@ -42,6 +42,7 @@ class InventoryRentalResource extends JsonResource
                             'nombre' => $line->owner->nombre,
                         ] : null,
                         'quantity' => $line->quantity,
+                        'rental_days' => (int) ($line->rental_days ?? 1),
                         'unit_price' => (string) $line->unit_price,
                         'line_total' => (string) $line->line_total,
                         'returned_at' => $line->returned_at?->toIso8601String(),

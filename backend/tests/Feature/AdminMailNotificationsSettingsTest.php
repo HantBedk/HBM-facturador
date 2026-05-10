@@ -26,6 +26,16 @@ class AdminMailNotificationsSettingsTest extends TestCase
             ->assertJsonPath('unlocked', true);
     }
 
+    public function test_outbound_status_accessible_without_unlock(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/admin/settings/mail-notifications/outbound-status')
+            ->assertOk()
+            ->assertJsonStructure(['outbound_configured']);
+    }
+
     public function test_unlock_status_false_until_unlock(): void
     {
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);

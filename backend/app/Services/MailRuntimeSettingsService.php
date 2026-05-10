@@ -30,6 +30,33 @@ class MailRuntimeSettingsService
     }
 
     /**
+     * SMTP definido en .env (sin abrir el panel).
+     */
+    public function envSmtpConfigured(): bool
+    {
+        $host = trim((string) config('mail.mailers.smtp.host', ''));
+        $username = config('mail.mailers.smtp.username');
+        $password = config('mail.mailers.smtp.password');
+        $userStr = $username !== null ? trim((string) $username) : '';
+        $passStr = $password !== null ? trim((string) $password) : '';
+
+        return $host !== '' && $userStr !== '' && $passStr !== '';
+    }
+
+    /**
+     * Hay credenciales para enviar correo transaccional (panel Gmail o MAIL_* en .env).
+     */
+    public function isOutboundMailConfigured(): bool
+    {
+        $pub = $this->publicConfig();
+        if (! empty($pub['panel_smtp_ready'])) {
+            return true;
+        }
+
+        return $this->envSmtpConfigured();
+    }
+
+    /**
      * Credenciales SMTP para enviar correo: panel (host en BD) con contraseña cifrada y, si no hay,
      * contraseña de MAIL_PASSWORD en .env con el mismo host/usuario del panel.
      * Si no hay host en panel, usa solo MAIL_* del .env.

@@ -8,7 +8,7 @@ use App\Models\AppSetting;
  * Margen entre importe de referencia (técnico / operación) y lo facturable a la empresa (% configurable).
  *
  * factura (empresa) = referencia ÷ ((100−p)/100). Ítems de catálogo pueden tener override por fila;
- * inventario comercial (venta/alquiler) usa márgenes globales propios.
+ * inventario comercial (líneas «Venta equipo:» / «Alquiler equipo:») aplica márgenes globales de venta y alquiler sobre la referencia interna.
  * Los pisos mínimos de cada margen se guardan en app_settings y los define el admin.
  */
 final class CatalogPricing

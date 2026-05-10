@@ -3,8 +3,12 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import AdminNotificationBell from '@/components/AdminNotificationBell.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useUiDialogStore } from '@/stores/uiDialog'
+import { fetchMailOutboundStatus } from '@/services/adminMailNotificationsApi.js'
+import { isAdminPanelRole } from '@/utils/roles.js'
 
 const auth = useAuthStore()
+const uiDialog = useUiDialogStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -80,11 +84,40 @@ const fechaLinea = computed(() =>
   })
 )
 
+async function maybePromptOutboundMail() {
+  if (!isAdminPanelRole(auth.user?.rol)) return
+  try {
+    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('hbm_dismiss_mail_outbound_prompt')) {
+      return
+    }
+    const st = await fetchMailOutboundStatus()
+    if (st?.outbound_configured) return
+    const go = await uiDialog.confirm({
+      title: 'Configurar envío de correos',
+      message:
+        'No hay cuenta Gmail/SMTP lista para enviar desde el panel (facturas, bienvenidas, avisos). Configure Gmail en Configuración → Correo del sistema. No es obligatorio ahora, pero sin ello los correos no saldrán.',
+      confirmLabel: 'Ir a correo del sistema',
+      cancelLabel: 'Ahora no',
+    })
+    try {
+      sessionStorage.setItem('hbm_dismiss_mail_outbound_prompt', '1')
+    } catch {
+      /* ignore */
+    }
+    if (go) {
+      await router.push({ name: 'admin-config-mail-notifications' })
+    }
+  } catch {
+    /* no bloquear el panel si falla la comprobación */
+  }
+}
+
 onMounted(() => {
   timeInterval = setInterval(() => {
     now.value = new Date()
   }, 30000)
   document.addEventListener('click', onDocClick)
+  void maybePromptOutboundMail()
 })
 
 watch(menuOpen, (open) => {

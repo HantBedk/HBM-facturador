@@ -584,7 +584,8 @@ class ServiceCatalogTest extends TestCase
         $item = ServiceItem::query()->where('service_id', $serviceId)->first();
         $this->assertNotNull($item);
         $this->assertSame('0.00', (string) $item->technician_line_amount);
-        $this->assertSame('50000.00', number_format((float) $item->amount, 2, '.', ''));
+        // Referencia interna 50_000 con margen global venta inventario por defecto (10 %) → 50_000 ÷ 0,9.
+        $this->assertSame('55555.56', number_format((float) $item->amount, 2, '.', ''));
     }
 
     public function test_alquiler_de_equipo_usa_prefijo_alq_en_codigo(): void

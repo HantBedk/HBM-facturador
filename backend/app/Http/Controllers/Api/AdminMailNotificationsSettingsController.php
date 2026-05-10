@@ -40,6 +40,16 @@ class AdminMailNotificationsSettingsController extends Controller
         ]);
     }
 
+    /**
+     * Estado mínimo de envío (panel Gmail o MAIL_* en .env). Sin desbloqueo de contraseña.
+     */
+    public function outboundStatus(): JsonResponse
+    {
+        return response()->json([
+            'outbound_configured' => $this->runtimeSmtp->isOutboundMailConfigured(),
+        ]);
+    }
+
     public function unlock(Request $request): JsonResponse
     {
         $data = $request->validate([
