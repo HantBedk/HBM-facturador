@@ -2,14 +2,16 @@
 
 namespace Tests\Feature;
 
-use App\Mail\AdminMailNotificationsTestMail;
+use App\MailTransport\Contracts\OutgoingMailSender;
+use App\MailTransport\MailMessage;
+use App\MailTransport\SmtpConnectionVerifier;
 use App\Models\AppSetting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
+use PHPMailer\PHPMailer\Exception as PhpMailerException;
 use Tests\TestCase;
 
 class AdminMailNotificationsSettingsTest extends TestCase
@@ -87,16 +89,15 @@ class AdminMailNotificationsSettingsTest extends TestCase
                     'invoice_supplement_pdf_configured',
                     'maintenance_supplement_pdf_configured',
                     'smtp' => [
-                        'mailer',
                         'host',
                         'port',
                         'encryption',
                         'username',
                         'has_smtp_password',
-                        'has_resend_api_key',
+                        'panel_smtp_ready',
                     ],
                 ],
-                'help',
+                'help_gmail_smtp',
                 'help_company_welcome_pdf',
                 'help_invoice_supplement_pdf',
                 'help_maintenance_supplement_pdf',
@@ -116,42 +117,73 @@ class AdminMailNotificationsSettingsTest extends TestCase
         $this->unlockMailNotificationsFor($admin);
 
         $this->putJson('/api/admin/settings/mail-notifications', [
-            'from_address' => 'facturacion@cliente-hbm.test',
-            'from_name' => 'HBM Facturación',
             'welcome_subject' => 'Hola {{nombre_empresa}}',
             'welcome_body' => "Gracias por unirse, {{nombre_empresa}}.\nSaludos.",
             'invoice_to_company_subject' => 'Su factura {{codigo_factura}}',
             'invoice_to_company_body' => "Estimado cliente {{nombre_empresa}}:\nFactura {{codigo_factura}} adjunta.",
-            'smtp_mailer' => 'smtp',
-            'smtp_host' => 'smtp.resend.com',
-            'smtp_port' => 587,
-            'smtp_encryption' => 'tls',
-            'smtp_username' => 'resend',
-            'smtp_password' => 'secret-123',
-            'resend_api_key' => 're_abc123',
-        ])->assertOk()
-            ->assertJsonPath('data.from_address', 'facturacion@cliente-hbm.test')
-            ->assertJsonPath('data.from_name', 'HBM Facturación')
-            ->assertJsonPath('data.effective_from_address', 'facturacion@cliente-hbm.test')
-            ->assertJsonPath('data.smtp.host', 'smtp.resend.com')
-            ->assertJsonPath('data.smtp.username', 'resend')
-            ->assertJsonPath('data.smtp.has_smtp_password', true)
-            ->assertJsonPath('data.smtp.has_resend_api_key', true);
+        ])->assertOk();
 
-        $row = AppSetting::query()->where('key', AppSetting::KEY_MAIL_NOTIFICATIONS_FROM)->first();
-        $this->assertIsArray($row->value);
-        $this->assertSame('facturacion@cliente-hbm.test', $row->value['address']);
+        $this->assertDatabaseMissing('app_settings', ['key' => AppSetting::KEY_MAIL_NOTIFICATIONS_FROM]);
 
         $tplRow = AppSetting::query()->where('key', AppSetting::KEY_MAIL_NOTIFICATION_TEMPLATES)->first();
         $this->assertIsArray($tplRow->value);
         $this->assertStringContainsString('{{nombre_empresa}}', (string) $tplRow->value['welcome_subject']);
         $this->assertStringContainsString('{{codigo_factura}}', (string) $tplRow->value['invoice_to_company_body']);
+    }
+
+    public function test_save_smtp_does_not_persist_when_verifier_fails(): void
+    {
+        config(['mail.verify_smtp_on_save' => true]);
+        $verifier = \Mockery::mock(SmtpConnectionVerifier::class);
+        $verifier->shouldReceive('verify')
+            ->once()
+            ->andThrow(new PhpMailerException('SMTP connect() failed'));
+        $this->app->instance(SmtpConnectionVerifier::class, $verifier);
+
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        Sanctum::actingAs($admin);
+        $this->unlockMailNotificationsFor($admin);
+
+        $this->putJson('/api/admin/settings/mail-notifications', [
+            'smtp_host' => 'smtp.gmail.com',
+            'smtp_port' => 587,
+            'smtp_encryption' => 'tls',
+            'smtp_username' => 'cuenta@gmail.com',
+            'smtp_password' => 'bad-password',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors(['smtp_password']);
+
+        $this->assertDatabaseMissing('app_settings', ['key' => AppSetting::KEY_MAIL_RUNTIME_TRANSPORT]);
+    }
+
+    public function test_admin_can_save_gmail_smtp_from_panel(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        Sanctum::actingAs($admin);
+        $this->unlockMailNotificationsFor($admin);
+
+        $this->putJson('/api/admin/settings/mail-notifications', [
+            'smtp_host' => 'smtp.gmail.com',
+            'smtp_port' => 587,
+            'smtp_encryption' => 'tls',
+            'smtp_username' => 'cuenta@gmail.com',
+            'smtp_password' => 'app-password-16chars',
+            'from_address' => 'cuenta@gmail.com',
+            'from_name' => 'Mi Empresa',
+        ])->assertOk()
+            ->assertJsonPath('data.smtp.host', 'smtp.gmail.com')
+            ->assertJsonPath('data.smtp.username', 'cuenta@gmail.com')
+            ->assertJsonPath('data.smtp.panel_smtp_ready', true)
+            ->assertJsonPath('data.from_address', 'cuenta@gmail.com');
 
         $smtpRow = AppSetting::query()->where('key', AppSetting::KEY_MAIL_RUNTIME_TRANSPORT)->first();
         $this->assertIsArray($smtpRow->value);
-        $this->assertSame('smtp.resend.com', $smtpRow->value['host']);
-        $this->assertNotSame('secret-123', $smtpRow->value['password_encrypted']);
-        $this->assertNotSame('re_abc123', $smtpRow->value['resend_api_key_encrypted']);
+        $this->assertSame('smtp.gmail.com', $smtpRow->value['host']);
+        $this->assertNotSame('app-password-16chars', $smtpRow->value['password_encrypted']);
+
+        $fromRow = AppSetting::query()->where('key', AppSetting::KEY_MAIL_NOTIFICATIONS_FROM)->first();
+        $this->assertIsArray($fromRow->value);
+        $this->assertSame('cuenta@gmail.com', $fromRow->value['address']);
     }
 
     public function test_admin_can_upload_welcome_template_pdf(): void
@@ -203,7 +235,6 @@ class AdminMailNotificationsSettingsTest extends TestCase
 
     public function test_test_send_mail_forbidden_without_unlock(): void
     {
-        Mail::fake();
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
         Sanctum::actingAs($admin);
 
@@ -211,13 +242,22 @@ class AdminMailNotificationsSettingsTest extends TestCase
             'to' => 'a@b.test',
         ])->assertForbidden()
             ->assertJsonPath('code', 'mail_config_locked');
-
-        Mail::assertNothingSent();
     }
 
     public function test_test_send_mail_sends_mailable_when_unlocked(): void
     {
-        Mail::fake();
+        $sender = \Mockery::mock(OutgoingMailSender::class);
+        $sender->shouldReceive('send')
+            ->once()
+            ->withArgs(function (MailMessage $m): bool {
+                return $m->toEmail === 'dest@example.test'
+                    && $m->fromEmail === 'from@example.test'
+                    && $m->fromName === 'Remitente Prueba'
+                    && $m->subject === 'Prueba HBM'
+                    && $m->htmlBody === '<p>Hola</p>';
+            });
+        $this->app->instance(OutgoingMailSender::class, $sender);
+
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
         Sanctum::actingAs($admin);
         $this->unlockMailNotificationsFor($admin);
@@ -230,18 +270,10 @@ class AdminMailNotificationsSettingsTest extends TestCase
             'to' => 'dest@example.test',
         ])->assertOk()
             ->assertJsonPath('sent_to', 'dest@example.test');
-
-        Mail::assertSent(AdminMailNotificationsTestMail::class, function (AdminMailNotificationsTestMail $m) {
-            return $m->fromAddress === 'from@example.test'
-                && $m->fromDisplayName === 'Remitente Prueba'
-                && $m->subjectLine === 'Prueba'
-                && $m->htmlBody === 'ok';
-        });
     }
 
     public function test_test_send_mail_rejects_when_no_effective_from(): void
     {
-        Mail::fake();
         config(['mail.from.address' => '', 'mail.from.name' => '']);
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
         Sanctum::actingAs($admin);
@@ -251,7 +283,5 @@ class AdminMailNotificationsSettingsTest extends TestCase
             'to' => 'dest@example.test',
         ])->assertUnprocessable()
             ->assertJsonValidationErrors(['to']);
-
-        Mail::assertNothingSent();
     }
 }

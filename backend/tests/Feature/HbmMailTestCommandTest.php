@@ -2,15 +2,18 @@
 
 namespace Tests\Feature;
 
-use Illuminate\Support\Facades\Mail;
+use App\MailTransport\Contracts\OutgoingMailSender;
+use App\MailTransport\MailMessage;
 use Tests\TestCase;
 
 class HbmMailTestCommandTest extends TestCase
 {
-    public function test_hbm_mail_test_command_succeeds_with_array_mailer(): void
+    public function test_hbm_mail_test_command_invokes_outgoing_sender(): void
     {
-        Mail::fake();
-        config(['mail.default' => 'array']);
+        $sender = \Mockery::mock(OutgoingMailSender::class);
+        $sender->shouldReceive('send')->once()->with(\Mockery::type(MailMessage::class));
+        $this->app->instance(OutgoingMailSender::class, $sender);
+        config(['mail.from.address' => 'from-cli@test.local', 'mail.from.name' => 'CLI']);
 
         $this->artisan('hbm:mail-test', ['email' => 'qa-inventario@example.test'])
             ->assertSuccessful()

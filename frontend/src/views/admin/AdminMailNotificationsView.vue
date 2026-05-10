@@ -24,16 +24,25 @@ const uploadingKind = ref(null)
 const deletingKind = ref(null)
 const error = ref('')
 const toast = ref('')
-const help = ref('')
 const helpWelcomePdf = ref('')
 const helpInvoicePdf = ref('')
 const helpMaintenancePdf = ref('')
 const helpMailTemplates = ref('')
+const helpGmailSmtp = ref('')
 
 const fromAddress = ref('')
 const fromName = ref('')
-const effectiveAddress = ref('')
-const effectiveName = ref('')
+const smtpHost = ref('smtp.gmail.com')
+const smtpPort = ref(587)
+const smtpEncryption = ref('tls')
+const smtpUsername = ref('')
+const smtpPassword = ref('')
+const hasSmtpPassword = ref(false)
+const clearSmtpPassword = ref(false)
+const panelSmtpReady = ref(false)
+/** Si false y hay SMTP guardado, solo se muestra estado "Conectado" sin formulario. */
+const gmailShowCredentialsForm = ref(true)
+
 const welcomeSubject = ref('')
 const welcomeBody = ref('')
 const invoiceToCompanySubject = ref('')
@@ -46,16 +55,6 @@ const invoiceSupplementPdfConfigured = ref(false)
 const invoiceSupplementPdfFilename = ref('')
 const maintenanceSupplementPdfConfigured = ref(false)
 const maintenanceSupplementPdfFilename = ref('')
-const smtpHost = ref('')
-const smtpPort = ref(587)
-const smtpEncryption = ref('tls')
-const smtpUsername = ref('')
-const smtpPassword = ref('')
-const resendApiKey = ref('')
-const hasSmtpPassword = ref(false)
-const hasResendApiKey = ref(false)
-const clearSmtpPassword = ref(false)
-const clearResendApiKey = ref(false)
 
 const welcomePdfInput = ref(null)
 const invoicePdfInput = ref(null)
@@ -68,8 +67,20 @@ function applyDataFromResponse(r) {
   const d = r.data || {}
   fromAddress.value = d.from_address || ''
   fromName.value = d.from_name || ''
-  effectiveAddress.value = d.effective_from_address || ''
-  effectiveName.value = d.effective_from_name || ''
+  const smtp = d.smtp || {}
+  smtpHost.value = (smtp.host && String(smtp.host).trim()) || 'smtp.gmail.com'
+  smtpPort.value = Number(smtp.port || 587)
+  smtpEncryption.value = smtp.encryption || 'tls'
+  smtpUsername.value = smtp.username || ''
+  hasSmtpPassword.value = Boolean(smtp.has_smtp_password)
+  panelSmtpReady.value = Boolean(smtp.panel_smtp_ready)
+  smtpPassword.value = ''
+  clearSmtpPassword.value = false
+  if (panelSmtpReady.value) {
+    gmailShowCredentialsForm.value = false
+  } else {
+    gmailShowCredentialsForm.value = true
+  }
   welcomeSubject.value = d.welcome_subject || ''
   welcomeBody.value = d.welcome_body || ''
   invoiceToCompanySubject.value = d.invoice_to_company_subject || ''
@@ -82,17 +93,6 @@ function applyDataFromResponse(r) {
   invoiceSupplementPdfFilename.value = d.invoice_supplement_pdf_filename || ''
   maintenanceSupplementPdfConfigured.value = Boolean(d.maintenance_supplement_pdf_configured)
   maintenanceSupplementPdfFilename.value = d.maintenance_supplement_pdf_filename || ''
-  const smtp = d.smtp || {}
-  smtpHost.value = smtp.host || ''
-  smtpPort.value = Number(smtp.port || 587)
-  smtpEncryption.value = smtp.encryption || 'tls'
-  smtpUsername.value = smtp.username || ''
-  hasSmtpPassword.value = Boolean(smtp.has_smtp_password)
-  hasResendApiKey.value = Boolean(smtp.has_resend_api_key)
-  smtpPassword.value = ''
-  resendApiKey.value = ''
-  clearSmtpPassword.value = false
-  clearResendApiKey.value = false
 }
 
 function handleMailConfigLocked() {
@@ -109,11 +109,11 @@ async function loadSettings() {
   loading.value = true
   try {
     const r = await fetchMailNotificationsSettings()
-    help.value = r.help || ''
     helpWelcomePdf.value = r.help_company_welcome_pdf || ''
     helpInvoicePdf.value = r.help_invoice_supplement_pdf || ''
     helpMaintenancePdf.value = r.help_maintenance_supplement_pdf || ''
     helpMailTemplates.value = r.help_mail_templates || ''
+    helpGmailSmtp.value = r.help_gmail_smtp || ''
     applyDataFromResponse(r)
   } catch (e) {
     if (e.status === 403 && e.code === 'mail_config_locked') {
@@ -213,21 +213,18 @@ async function save() {
     const r = await updateMailNotificationsSettings({
       from_address: fromAddress.value.trim() || null,
       from_name: fromName.value.trim() || null,
+      smtp_host: smtpHost.value.trim() || null,
+      smtp_port: Number(smtpPort.value) || 587,
+      smtp_encryption: smtpEncryption.value || null,
+      smtp_username: smtpUsername.value.trim() || null,
+      smtp_password: smtpPassword.value.trim() || null,
+      clear_smtp_password: clearSmtpPassword.value,
       welcome_subject: welcomeSubject.value.trim() || null,
       welcome_body: welcomeBody.value || null,
       invoice_to_company_subject: invoiceToCompanySubject.value.trim() || null,
       invoice_to_company_body: invoiceToCompanyBody.value || null,
       maintenance_subject: maintenanceSubject.value.trim() || null,
       maintenance_body: maintenanceBody.value || null,
-      smtp_mailer: 'smtp',
-      smtp_host: smtpHost.value.trim() || null,
-      smtp_port: Number(smtpPort.value) || 587,
-      smtp_encryption: smtpEncryption.value || null,
-      smtp_username: smtpUsername.value.trim() || null,
-      smtp_password: smtpPassword.value.trim() || null,
-      resend_api_key: resendApiKey.value.trim() || null,
-      clear_smtp_password: clearSmtpPassword.value,
-      clear_resend_api_key: clearResendApiKey.value,
     })
     toast.value = r.message || 'Guardado.'
     applyDataFromResponse(r)
@@ -316,6 +313,15 @@ async function removeTemplatePdf(kind) {
   }
 }
 
+function startGmailReconfigure() {
+  gmailShowCredentialsForm.value = true
+}
+
+async function cancelGmailReconfigure() {
+  gmailShowCredentialsForm.value = false
+  await loadSettings()
+}
+
 onMounted(init)
 </script>
 
@@ -324,7 +330,7 @@ onMounted(init)
     <div>
       <h1 class="text-xl font-semibold text-white">Correo del sistema</h1>
       <p class="mt-1 text-sm text-slate-400">
-        Tres motivos (bienvenida, factura, mantenimiento), cada uno con texto y PDF opcional. El acceso a esta pantalla requiere confirmar su contraseña (válido por un tiempo limitado).
+        Gmail por SMTP desde el panel (contraseña de aplicación cifrada) o respaldo con MAIL_* en .env. Plantillas de bienvenida, factura y mantenimiento. El acceso requiere confirmar su contraseña.
       </p>
     </div>
 
@@ -364,14 +370,134 @@ onMounted(init)
     <p v-if="toast" class="rounded-lg border border-emerald-600/40 bg-emerald-900/20 px-3 py-2 text-sm text-emerald-100">{{ toast }}</p>
 
     <div v-if="!loading" class="rounded-xl border border-slate-700/80 bg-[#111723] p-3 sm:p-4 space-y-3">
-      <div class="rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-2 text-xs text-slate-400">
-        <p class="font-medium text-slate-300">Remitente efectivo hoy</p>
-        <p class="mt-1 truncate" :title="effectiveAddress || ''">
-          <span class="text-slate-500">Correo:</span> {{ effectiveAddress || '—' }}
-        </p>
-        <p class="truncate" :title="effectiveName || ''">
-          <span class="text-slate-500">Nombre:</span> {{ effectiveName || '—' }}
-        </p>
+      <div class="rounded-lg border border-sky-700/50 bg-slate-900/25 overflow-hidden">
+        <div
+          class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700/50 px-3 py-2.5"
+        >
+          <h3 class="text-sm font-medium text-white">Correo Gmail (SMTP)</h3>
+          <span
+            v-if="panelSmtpReady && !gmailShowCredentialsForm"
+            class="inline-flex items-center rounded-full border border-emerald-600/50 bg-emerald-950/40 px-2.5 py-0.5 text-xs font-medium text-emerald-200"
+          >
+            Conectado
+          </span>
+        </div>
+        <div class="px-3 pb-3 pt-3 space-y-3">
+          <template v-if="panelSmtpReady && !gmailShowCredentialsForm">
+            <div
+              class="rounded-lg border border-emerald-700/45 bg-emerald-950/20 px-3 py-3 space-y-2"
+              role="status"
+            >
+              <p class="text-sm font-medium text-emerald-100">Sesión SMTP configurada</p>
+              <p class="text-xs leading-relaxed text-slate-400">
+                El envío usa credenciales guardadas de forma cifrada en el servidor. No se muestran correo ni contraseña en pantalla.
+              </p>
+              <p class="text-xs text-slate-500">
+                Use «Enviar prueba» abajo para comprobar el envío. Si cambia la clave en Google, use Reconfigurar.
+              </p>
+            </div>
+            <button
+              type="button"
+              class="min-h-[40px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white hover:bg-slate-700"
+              @click="startGmailReconfigure"
+            >
+              Reconfigurar cuenta de correo
+            </button>
+          </template>
+          <template v-else>
+            <p v-if="helpGmailSmtp" class="text-xs leading-relaxed text-slate-500">{{ helpGmailSmtp }}</p>
+            <p
+              v-if="panelSmtpReady && gmailShowCredentialsForm"
+              class="rounded-lg border border-amber-600/40 bg-amber-950/20 px-2 py-1.5 text-xs text-amber-100/90"
+            >
+              Está editando datos sensibles. Al guardar, vuelve al modo «Conectado» sin mostrarlos.
+            </p>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label class="block text-sm sm:col-span-2">
+                <span class="text-slate-400">Servidor SMTP</span>
+                <input
+                  v-model="smtpHost"
+                  type="text"
+                  class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+                  placeholder="smtp.gmail.com"
+                />
+              </label>
+              <label class="block text-sm">
+                <span class="text-slate-400">Puerto</span>
+                <input
+                  v-model.number="smtpPort"
+                  type="number"
+                  min="1"
+                  max="65535"
+                  class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+                />
+              </label>
+              <label class="block text-sm">
+                <span class="text-slate-400">Cifrado</span>
+                <select v-model="smtpEncryption" class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white">
+                  <option value="tls">tls / STARTTLS (587)</option>
+                  <option value="starttls">starttls</option>
+                  <option value="ssl">ssl (465)</option>
+                </select>
+              </label>
+              <label class="block text-sm sm:col-span-2">
+                <span class="text-slate-400">Usuario SMTP (correo Gmail)</span>
+                <input
+                  v-model="smtpUsername"
+                  type="email"
+                  autocomplete="username"
+                  class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+                  placeholder="su cuenta@gmail.com"
+                />
+              </label>
+              <label class="block text-sm sm:col-span-2">
+                <span class="text-slate-400">Contraseña de aplicación (Google)</span>
+                <input
+                  v-model="smtpPassword"
+                  type="password"
+                  autocomplete="new-password"
+                  class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+                />
+              </label>
+            </div>
+            <label class="inline-flex items-center gap-2 text-xs text-slate-400">
+              <input v-model="clearSmtpPassword" type="checkbox" class="h-4 w-4 rounded border-slate-500 bg-slate-900 text-sky-500" />
+              Borrar contraseña guardada ({{ hasSmtpPassword ? 'hay valor' : 'vacía' }})
+            </label>
+            <div class="border-t border-slate-700/40 pt-3 space-y-3">
+              <p class="text-xs font-medium text-slate-400">Remitente visible (From)</p>
+              <p class="text-xs text-slate-500">Debe coincidir con el correo Gmail o un alias verificado en Google.</p>
+              <label class="block text-sm">
+                <span class="text-slate-400">Correo remitente</span>
+                <input
+                  v-model="fromAddress"
+                  type="email"
+                  autocomplete="off"
+                  class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+                />
+              </label>
+              <label class="block text-sm">
+                <span class="text-slate-400">Nombre visible</span>
+                <input
+                  v-model="fromName"
+                  type="text"
+                  maxlength="120"
+                  class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+                  placeholder="Ej. Facturación HBM"
+                />
+              </label>
+            </div>
+            <div v-if="panelSmtpReady && gmailShowCredentialsForm" class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                class="min-h-[40px] rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
+                @click="cancelGmailReconfigure"
+              >
+                Cancelar y volver a Conectado
+              </button>
+            </div>
+          </template>
+        </div>
       </div>
 
       <div
@@ -379,9 +505,9 @@ onMounted(init)
         role="region"
         aria-label="Correo de prueba"
       >
-        <h3 class="text-sm font-medium text-amber-100/95">Correo de prueba (SMTP)</h3>
+        <h3 class="text-sm font-medium text-amber-100/95">Correo de prueba</h3>
         <p class="text-xs leading-relaxed text-slate-400">
-          Al pulsar el botón, se solicita el correo destino para enviar una prueba usando el remitente efectivo mostrado arriba.
+          Usa el SMTP guardado (modo Conectado) o el .env si no hay panel. Asunto «Prueba HBM», cuerpo «Hola». Tras reconfigurar Gmail, guarde antes de probar.
         </p>
         <button
           type="button"
@@ -395,116 +521,13 @@ onMounted(init)
 
       <p v-if="helpMailTemplates" class="text-xs leading-relaxed text-slate-500 px-0.5">{{ helpMailTemplates }}</p>
 
-      <!-- Remitente -->
-      <details class="mail-disclosure group rounded-lg border border-slate-700/55 bg-slate-900/25 open:border-slate-600/60 open:bg-slate-900/35">
-        <summary
-          class="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-medium text-white outline-none marker:content-none focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#111723] [&::-webkit-details-marker]:hidden"
-        >
-          <span
-            class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-slate-600/80 bg-slate-800/80 text-[0.65rem] text-slate-300 transition-transform group-open:rotate-90"
-            aria-hidden="true"
-          >
-            ›
-          </span>
-          <span class="min-w-0 flex-1 text-left">Remitente (correo y nombre visible)</span>
-        </summary>
-        <div class="space-y-3 border-t border-slate-700/50 px-3 pb-3 pt-3">
-          <p v-if="help" class="text-xs leading-relaxed text-slate-500">{{ help }}</p>
-          <label class="block text-sm">
-            <span class="text-slate-400">Correo remitente (From)</span>
-            <input
-              v-model="fromAddress"
-              type="email"
-              autocomplete="off"
-              class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white placeholder:text-slate-600"
-              placeholder="Vacío = usar MAIL_FROM_ADDRESS del servidor"
-            />
-          </label>
-          <label class="block text-sm">
-            <span class="text-slate-400">Nombre visible</span>
-            <input
-              v-model="fromName"
-              type="text"
-              maxlength="120"
-              class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white placeholder:text-slate-600"
-              placeholder="Ej. Facturación HBM"
-            />
-          </label>
-        </div>
-      </details>
-
-      <details class="mail-disclosure group rounded-lg border border-slate-700/55 bg-slate-900/25 open:border-slate-600/60 open:bg-slate-900/35">
-        <summary
-          class="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-medium text-white outline-none marker:content-none focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#111723] [&::-webkit-details-marker]:hidden"
-        >
-          <span
-            class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-slate-600/80 bg-slate-800/80 text-[0.65rem] text-slate-300 transition-transform group-open:rotate-90"
-            aria-hidden="true"
-          >
-            ›
-          </span>
-          <span class="min-w-0 flex-1 text-left">SMTP / Resend (credenciales de envío)</span>
-        </summary>
-        <div class="space-y-3 border-t border-slate-700/50 px-3 pb-3 pt-3">
-          <p class="text-xs text-slate-500">
-            Se guarda cifrado en backend. Para Resend SMTP use host smtp.resend.com, usuario resend y API key en el campo
-            «API key Resend».
-          </p>
-          <div class="grid gap-3 sm:grid-cols-2">
-            <label class="block text-sm sm:col-span-2">
-              <span class="text-slate-400">Servidor SMTP</span>
-              <input v-model="smtpHost" type="text" class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white" />
-            </label>
-            <label class="block text-sm">
-              <span class="text-slate-400">Puerto</span>
-              <input v-model.number="smtpPort" type="number" min="1" max="65535" class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white" />
-            </label>
-            <label class="block text-sm">
-              <span class="text-slate-400">Encriptación</span>
-              <select v-model="smtpEncryption" class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white">
-                <option value="tls">tls</option>
-                <option value="ssl">ssl</option>
-                <option value="starttls">starttls</option>
-              </select>
-            </label>
-            <label class="block text-sm sm:col-span-2">
-              <span class="text-slate-400">Usuario SMTP (correo)</span>
-              <input v-model="smtpUsername" type="text" class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white" />
-            </label>
-            <label class="block text-sm sm:col-span-2">
-              <span class="text-slate-400">Contraseña SMTP (opcional si usa API key)</span>
-              <input v-model="smtpPassword" type="password" autocomplete="new-password" class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white" />
-            </label>
-            <label class="block text-sm sm:col-span-2">
-              <span class="text-slate-400">API key Resend</span>
-              <input v-model="resendApiKey" type="password" autocomplete="new-password" class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white" />
-            </label>
-          </div>
-          <div class="flex flex-wrap gap-4 text-xs text-slate-400">
-            <label class="inline-flex items-center gap-2">
-              <input v-model="clearSmtpPassword" type="checkbox" class="h-4 w-4 rounded border-slate-500 bg-slate-900 text-sky-500" />
-              Borrar contraseña SMTP guardada ({{ hasSmtpPassword ? 'hay valor' : 'vacía' }})
-            </label>
-            <label class="inline-flex items-center gap-2">
-              <input v-model="clearResendApiKey" type="checkbox" class="h-4 w-4 rounded border-slate-500 bg-slate-900 text-sky-500" />
-              Borrar API key Resend guardada ({{ hasResendApiKey ? 'hay valor' : 'vacía' }})
-            </label>
-          </div>
-        </div>
-      </details>
-
       <!-- Bienvenida -->
-      <details class="mail-disclosure group rounded-lg border border-slate-700/55 bg-slate-900/25 open:border-slate-600/60 open:bg-slate-900/35">
+      <details class="group rounded-lg border border-slate-700/55 bg-slate-900/25 open:border-slate-600/55">
         <summary
-          class="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-medium text-white outline-none marker:content-none focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#111723] [&::-webkit-details-marker]:hidden"
+          class="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-medium text-white outline-none marker:content-none [&::-webkit-details-marker]:hidden focus-visible:ring-2 focus-visible:ring-sky-500/60 rounded-lg"
         >
-          <span
-            class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-slate-600/80 bg-slate-800/80 text-[0.65rem] text-slate-300 transition-transform group-open:rotate-90"
-            aria-hidden="true"
-          >
-            ›
-          </span>
-          <span class="min-w-0 flex-1 text-left">
+          <span class="inline-block text-slate-400 transition-transform duration-150 group-open:rotate-90" aria-hidden="true">›</span>
+          <span class="min-w-0 text-left">
             1. Bienvenida (nueva empresa)
             <span v-if="companyWelcomePdfConfigured" class="ml-1 font-normal text-emerald-400/90">· PDF</span>
           </span>
@@ -565,17 +588,12 @@ onMounted(init)
       </details>
 
       <!-- Factura -->
-      <details class="mail-disclosure group rounded-lg border border-slate-700/55 bg-slate-900/25 open:border-slate-600/60 open:bg-slate-900/35">
+      <details class="group rounded-lg border border-slate-700/55 bg-slate-900/25 open:border-slate-600/55">
         <summary
-          class="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-medium text-white outline-none marker:content-none focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#111723] [&::-webkit-details-marker]:hidden"
+          class="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-medium text-white outline-none marker:content-none [&::-webkit-details-marker]:hidden focus-visible:ring-2 focus-visible:ring-sky-500/60 rounded-lg"
         >
-          <span
-            class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-slate-600/80 bg-slate-800/80 text-[0.65rem] text-slate-300 transition-transform group-open:rotate-90"
-            aria-hidden="true"
-          >
-            ›
-          </span>
-          <span class="min-w-0 flex-1 text-left">
+          <span class="inline-block text-slate-400 transition-transform duration-150 group-open:rotate-90" aria-hidden="true">›</span>
+          <span class="min-w-0 text-left">
             2. Factura enviada a la empresa
             <span v-if="invoiceSupplementPdfConfigured" class="ml-1 font-normal text-emerald-400/90">· PDF extra</span>
           </span>
@@ -639,17 +657,12 @@ onMounted(init)
       </details>
 
       <!-- Mantenimiento -->
-      <details class="mail-disclosure group rounded-lg border border-slate-700/55 bg-slate-900/25 open:border-slate-600/60 open:bg-slate-900/35">
+      <details class="group rounded-lg border border-slate-700/55 bg-slate-900/25 open:border-slate-600/55">
         <summary
-          class="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-medium text-white outline-none marker:content-none focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#111723] [&::-webkit-details-marker]:hidden"
+          class="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-medium text-white outline-none marker:content-none [&::-webkit-details-marker]:hidden focus-visible:ring-2 focus-visible:ring-sky-500/60 rounded-lg"
         >
-          <span
-            class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-slate-600/80 bg-slate-800/80 text-[0.65rem] text-slate-300 transition-transform group-open:rotate-90"
-            aria-hidden="true"
-          >
-            ›
-          </span>
-          <span class="min-w-0 flex-1 text-left">
+          <span class="inline-block text-slate-400 transition-transform duration-150 group-open:rotate-90" aria-hidden="true">›</span>
+          <span class="min-w-0 text-left">
             3. Mantenimiento (al registrar servicio al equipo)
             <span v-if="maintenanceSupplementPdfConfigured" class="ml-1 font-normal text-emerald-400/90">· PDF</span>
           </span>
@@ -719,7 +732,7 @@ onMounted(init)
           :disabled="saving"
           @click="save"
         >
-          {{ saving ? 'Guardando…' : 'Guardar remitente y textos' }}
+          {{ saving ? 'Guardando…' : 'Guardar correo Gmail y plantillas' }}
         </button>
       </div>
     </div>

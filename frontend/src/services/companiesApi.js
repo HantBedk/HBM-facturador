@@ -33,7 +33,10 @@ export function createCompany(payload) {
   return api('/admin/companies', {
     method: 'POST',
     body: JSON.stringify(payload),
-  }).then((r) => r.data)
+  }).then((r) => ({
+    data: r.data,
+    welcome_mail: r.welcome_mail ?? null,
+  }))
 }
 
 /**
@@ -51,7 +54,10 @@ export function updateCompany(id, payload) {
   return api(`/admin/companies/${id}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
-  }).then((r) => r.data)
+  }).then((r) => ({
+    data: r.data,
+    welcome_mail: r.welcome_mail ?? null,
+  }))
 }
 
 /**

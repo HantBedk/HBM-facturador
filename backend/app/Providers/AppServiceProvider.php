@@ -4,7 +4,6 @@ namespace App\Providers;
 
 use App\Models\AppSetting;
 use App\Models\CompanyRecurringService;
-use App\Services\MailRuntimeSettingsService;
 use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
@@ -36,8 +35,6 @@ class AppServiceProvider extends ServiceProvider
         }
 
         Route::model('recurring_service', CompanyRecurringService::class);
-
-        app(MailRuntimeSettingsService::class)->applyRuntimeMailConfig();
 
         Event::listen(MessageSending::class, function (MessageSending $event): void {
             $row = AppSetting::query()->where('key', AppSetting::KEY_MAIL_NOTIFICATIONS_FROM)->first();

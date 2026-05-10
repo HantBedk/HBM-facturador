@@ -39,6 +39,8 @@ const search = ref('')
 const modalOpen = ref(false)
 const modalMode = ref('create')
 const editingId = ref(null)
+/** Si al abrir edición la empresa ya tenía correo (no reenviar bienvenida al guardar). */
+const editingHadCorreo = ref(false)
 const saving = ref(false)
 const modalError = ref('')
 const fieldErrors = ref({})
@@ -637,6 +639,7 @@ function openCreate() {
 function openEdit(row) {
   modalMode.value = 'edit'
   editingId.value = row.id
+  editingHadCorreo.value = !!(row.correo && String(row.correo).trim())
   modalError.value = ''
   fieldErrors.value = {}
   form.value = {
@@ -660,6 +663,40 @@ const deleteExpectedSigla = computed(() =>
   deleteCompanyTarget.value ? normalizeFacturaSigla(deleteCompanyTarget.value.factura_sigla) : ''
 )
 
+/** Si hay correo y no hay PDF de bienvenida, confirma antes de disparar el envío. */
+async function confirmWelcomePdfIfCorreo(correo) {
+  if (!correo || !String(correo).trim()) return true
+  try {
+    const st = await fetchWelcomeMailAttachmentReady()
+    if (!st.welcome_pdf_ready) {
+      const creating = modalMode.value === 'create'
+      const ok = await uiDialog.confirm({
+        title: 'Bienvenida sin PDF adjunto',
+        message:
+          'No hay PDF de bienvenida configurado o el archivo no está disponible. Se intentará enviar el correo de bienvenida solo con el texto de la plantilla (sin adjunto). ¿Continuar?',
+        confirmLabel: creating ? 'Crear y enviar' : 'Guardar y enviar',
+        cancelLabel: 'Volver',
+      })
+      return ok
+    }
+  } catch (e) {
+    modalError.value =
+      e.data?.message || e.message || 'No se pudo comprobar si hay PDF de bienvenida.'
+    return false
+  }
+  return true
+}
+
+async function alertIfWelcomeMailFailed(welcomeMail) {
+  if (!welcomeMail || welcomeMail.sent || welcomeMail.skipped_reason !== 'send_failed') return
+  const extra = welcomeMail.detail ? `\n\nDetalle: ${welcomeMail.detail}` : ''
+  const dest = welcomeMail.to ? ` a ${welcomeMail.to}` : ''
+  await uiDialog.alert({
+    title: 'No se envió el correo de bienvenida',
+    message: `La empresa se guardó, pero el envío${dest} falló.${extra}\n\nRevise Admin → Correo del sistema (SMTP y remitente) y storage/logs/laravel.log.`,
+  })
+}
+
 async function onSubmitModal() {
   modalError.value = ''
   fieldErrors.value = {}
@@ -675,34 +712,30 @@ async function onSubmitModal() {
     }
     if (modalMode.value === 'create') {
       if (payload.correo) {
-        try {
-          const st = await fetchWelcomeMailAttachmentReady()
-          if (!st.welcome_pdf_ready) {
-            const ok = await uiDialog.confirm({
-              title: 'Bienvenida sin PDF adjunto',
-              message:
-                'No hay PDF de bienvenida configurado o el archivo no está disponible. Se creará la empresa y se enviará el correo de bienvenida solo con el texto de la plantilla (sin adjunto). ¿Continuar?',
-              confirmLabel: 'Crear y enviar',
-              cancelLabel: 'Volver',
-            })
-            if (!ok) {
-              saving.value = false
-              return
-            }
-          }
-        } catch (e) {
-          modalError.value =
-            e.data?.message || e.message || 'No se pudo comprobar si hay PDF de bienvenida.'
+        const okPdf = await confirmWelcomePdfIfCorreo(payload.correo)
+        if (!okPdf) {
           saving.value = false
           return
         }
       }
-      await createCompany(payload)
+      const res = await createCompany(payload)
+      modalOpen.value = false
+      await load()
+      await alertIfWelcomeMailFailed(res.welcome_mail)
     } else {
-      await updateCompany(editingId.value, payload)
+      const addedFirstCorreo = !editingHadCorreo.value && !!payload.correo
+      if (addedFirstCorreo) {
+        const okPdf = await confirmWelcomePdfIfCorreo(payload.correo)
+        if (!okPdf) {
+          saving.value = false
+          return
+        }
+      }
+      const res = await updateCompany(editingId.value, payload)
+      modalOpen.value = false
+      await load()
+      await alertIfWelcomeMailFailed(res.welcome_mail)
     }
-    modalOpen.value = false
-    await load()
   } catch (e) {
     if (e.data?.errors) fieldErrors.value = e.data.errors
     else modalError.value = e.data?.message || e.message || 'No se pudo guardar.'
@@ -1346,7 +1379,16 @@ async function submitDeleteCompanyModal() {
             </label>
             <label class="field">
               <span>Correo</span>
-              <input v-model="form.correo" type="email" class="input" maxlength="255" placeholder="Opcional" />
+              <input
+                v-model="form.correo"
+                type="email"
+                class="input"
+                maxlength="255"
+                placeholder="ej. contacto@empresa.com"
+              />
+              <small class="muted"
+                >Necesario para enviar bienvenida al crear/guardar y para facturas por correo.</small
+              >
               <small v-if="fieldErrors.correo" class="err">{{ fieldErrors.correo[0] }}</small>
             </label>
             <fieldset class="field">

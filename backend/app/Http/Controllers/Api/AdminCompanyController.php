@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\CompanyResource;
-use App\Mail\CompanyWelcomeMail;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\Payment;
@@ -12,17 +11,21 @@ use App\Models\Service;
 use App\Models\ServiceCatalogSuggestion;
 use App\Services\MailNotificationTemplatesService;
 use App\Services\MailTemplatePdfService;
+use App\Services\PanelNotificationMailSender;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class AdminCompanyController extends Controller
 {
+    public function __construct(
+        private readonly PanelNotificationMailSender $panelMail,
+    ) {}
+
     public function index(Request $request): AnonymousResourceCollection
     {
         $q = Company::query()->orderByRaw('es_cliente_puntual asc')->orderBy('nombre');
@@ -95,9 +98,12 @@ class AdminCompanyController extends Controller
             'estado' => $data['estado'] ?? Company::ESTADO_ACTIVO,
         ]);
 
-        $this->trySendCompanyWelcomeMail($company);
+        $welcomeMail = $this->trySendCompanyWelcomeMail($company);
 
-        return (new CompanyResource($company))->response()->setStatusCode(201);
+        return (new CompanyResource($company))
+            ->additional(['welcome_mail' => $welcomeMail])
+            ->response()
+            ->setStatusCode(201);
     }
 
     public function update(Request $request, Company $company): CompanyResource
@@ -122,6 +128,8 @@ class AdminCompanyController extends Controller
             'estado' => ['required', Rule::in([Company::ESTADO_ACTIVO, Company::ESTADO_INACTIVO])],
         ]);
 
+        $hadCorreo = $company->correo !== null && trim((string) $company->correo) !== '';
+
         $nombre = trim($data['nombre']);
         $this->assertNombreUnique($nombre, $company->id);
 
@@ -133,7 +141,18 @@ class AdminCompanyController extends Controller
         $company->estado = $data['estado'];
         $company->save();
 
-        return new CompanyResource($company);
+        $hasCorreo = $company->correo !== null && trim((string) $company->correo) !== '';
+        $welcomeMail = null;
+        if (! $hadCorreo && $hasCorreo) {
+            $welcomeMail = $this->trySendCompanyWelcomeMail($company->fresh());
+        }
+
+        $resource = new CompanyResource($company->fresh());
+        if ($welcomeMail !== null) {
+            $resource->additional(['welcome_mail' => $welcomeMail]);
+        }
+
+        return $resource;
     }
 
     public function updateEstado(Request $request, Company $company): CompanyResource
@@ -280,12 +299,22 @@ class AdminCompanyController extends Controller
         return number_format($n, 2, '.', '');
     }
 
-    private function trySendCompanyWelcomeMail(Company $company): void
+    /**
+     * @return array{sent: bool, skipped_reason: string|null, to: string|null, detail: string|null}
+     */
+    private function trySendCompanyWelcomeMail(Company $company): array
     {
         $correo = $company->correo;
         if ($correo === null || trim($correo) === '') {
-            return;
+            return [
+                'sent' => false,
+                'skipped_reason' => 'no_correo',
+                'to' => null,
+                'detail' => null,
+            ];
         }
+
+        $to = strtolower(trim($correo));
 
         $absolutePath = null;
         $attachName = null;
@@ -308,18 +337,40 @@ class AdminCompanyController extends Controller
 
         try {
             $tpl = app(MailNotificationTemplatesService::class);
-            Mail::to($correo)->send(new CompanyWelcomeMail(
-                $company,
-                $absolutePath,
-                $attachName,
+            $fileAttachments = [];
+            if ($absolutePath !== null && $attachName !== null && $attachName !== '') {
+                $fileAttachments[] = [
+                    'path' => $absolutePath,
+                    'name' => $attachName,
+                    'mime' => 'application/pdf',
+                ];
+            }
+            $this->panelMail->sendHtml(
+                $to,
                 $tpl->welcomeSubjectRendered($company),
-                $tpl->welcomeBodyHtml($company),
-            ));
+                (string) $tpl->welcomeBodyHtml($company),
+                null,
+                $fileAttachments,
+            );
+
+            return [
+                'sent' => true,
+                'skipped_reason' => null,
+                'to' => $to,
+                'detail' => null,
+            ];
         } catch (\Throwable $e) {
             Log::warning('company_welcome_mail_failed', [
                 'company_id' => $company->id,
                 'error' => $e->getMessage(),
             ]);
+
+            return [
+                'sent' => false,
+                'skipped_reason' => 'send_failed',
+                'to' => $to,
+                'detail' => config('app.debug') ? $e->getMessage() : null,
+            ];
         }
     }
 

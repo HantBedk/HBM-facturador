@@ -5,16 +5,18 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AppSetting;
 use App\Services\ActivityLogger;
+use App\MailTransport\Contracts\OutgoingMailSender;
+use App\MailTransport\MailMessage;
+use App\MailTransport\SmtpConnectionVerifier;
 use App\Services\AdminMailSettingsUnlockService;
-use App\Mail\AdminMailNotificationsTestMail;
-use App\Services\MailNotificationTemplatesService;
 use App\Services\MailRuntimeSettingsService;
+use App\Services\MailNotificationTemplatesService;
 use App\Services\MailTemplatePdfService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use PHPMailer\PHPMailer\Exception as PhpMailerException;
 
 class AdminMailNotificationsSettingsController extends Controller
 {
@@ -22,7 +24,9 @@ class AdminMailNotificationsSettingsController extends Controller
         private readonly MailTemplatePdfService $templatePdfs,
         private readonly MailNotificationTemplatesService $templates,
         private readonly AdminMailSettingsUnlockService $mailUnlock,
-        private readonly MailRuntimeSettingsService $runtimeMail,
+        private readonly OutgoingMailSender $outgoingMail,
+        private readonly MailRuntimeSettingsService $runtimeSmtp,
+        private readonly SmtpConnectionVerifier $smtpVerifier,
     ) {}
 
     public function unlockStatus(Request $request): JsonResponse
@@ -71,9 +75,9 @@ class AdminMailNotificationsSettingsController extends Controller
                 'invoice_supplement_pdf_filename' => $this->templatePdfs->meta(MailTemplatePdfService::KIND_INVOICE_SUPPLEMENT)['original_filename'] ?? null,
                 'maintenance_supplement_pdf_configured' => $this->templatePdfs->configured(MailTemplatePdfService::KIND_MAINTENANCE_SUPPLEMENT),
                 'maintenance_supplement_pdf_filename' => $this->templatePdfs->meta(MailTemplatePdfService::KIND_MAINTENANCE_SUPPLEMENT)['original_filename'] ?? null,
-                'smtp' => $this->runtimeMail->publicConfig(),
+                'smtp' => $this->runtimeSmtp->publicConfig(),
             ], $tpl),
-            'help' => 'Dirección y nombre usados como remitente en correos del sistema (OTP inventario empresa, facturas enviadas, recuperación de clave, etc.). Debe coincidir con un remitente verificado en su proveedor SMTP (p. ej. Brevo). Si deja la dirección vacía, se usa MAIL_FROM_ADDRESS del .env.',
+            'help_gmail_smtp' => 'Gmail: smtp.gmail.com, 587, tls. Usuario = correo completo. Clave = contraseña de aplicación (cuenta con 2 pasos; no sirve la clave normal). Los envíos de bienvenida (nueva empresa), factura por correo y aviso de mantenimiento usan este mismo SMTP (PHPMailer), no el mailer por defecto MAIL_MAILER de Laravel. Al guardar, el sistema comprueba la conexión y la autenticación SMTP (no envía correo); si falla, no guarda las credenciales. La entrega real solo se confirma con «Enviar prueba» o un envío del sistema. Si "Could not authenticate": genere una clave nueva, sin espacios al pegar, y compruebe que la cuenta no tenga "Protección avanzada" (bloquea claves de aplicación). Diagnóstico: MAIL_SMTP_DEBUG=true en .env y revise storage/logs/laravel.log. Si el fallo es de certificado TLS en Docker: MAIL_SMTP_SSL_RELAXED=true solo para probar. Para omitir la comprobación al guardar (red aislada): MAIL_VERIFY_SMTP=false. En servidor también puede probar: php artisan hbm:mail-test su@correo.com. Para producción suele ser más estable un SMTP transaccional (Brevo, etc.).',
             'help_company_welcome_pdf' => 'PDF opcional para nuevas empresas (p. ej. condiciones). Al crear una empresa con correo siempre se envía el correo de bienvenida; si hay PDF configurado y legible, se adjunta. Sin PDF el envío es solo texto (el panel puede advertir antes de guardar).',
             'help_invoice_supplement_pdf' => 'PDF opcional adicional. El envío por correo siempre incluye el PDF oficial de la factura generado por el sistema; este archivo solo se añade si lo configura.',
             'help_maintenance_supplement_pdf' => 'PDF opcional al notificar mantenimiento a la empresa. El correo se envía aunque no haya PDF; si lo hay y es legible, se adjunta.',
@@ -86,52 +90,96 @@ class AdminMailNotificationsSettingsController extends Controller
         $this->mailUnlock->assertUnlocked($request->user());
 
         $data = $request->validate([
-            'from_address' => ['nullable', 'string', 'max:255'],
-            'from_name' => ['nullable', 'string', 'max:120'],
+            'from_address' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'from_name' => ['sometimes', 'nullable', 'string', 'max:120'],
             'welcome_subject' => ['sometimes', 'nullable', 'string', 'max:200'],
             'welcome_body' => ['sometimes', 'nullable', 'string', 'max:8000'],
             'invoice_to_company_subject' => ['sometimes', 'nullable', 'string', 'max:200'],
             'invoice_to_company_body' => ['sometimes', 'nullable', 'string', 'max:8000'],
             'maintenance_subject' => ['sometimes', 'nullable', 'string', 'max:200'],
             'maintenance_body' => ['sometimes', 'nullable', 'string', 'max:8000'],
-            'smtp_mailer' => ['sometimes', 'nullable', 'string', Rule::in(['smtp'])],
             'smtp_host' => ['sometimes', 'nullable', 'string', 'max:255'],
             'smtp_port' => ['sometimes', 'nullable', 'integer', 'between:1,65535'],
-            'smtp_encryption' => ['sometimes', 'nullable', 'string', Rule::in(['tls', 'ssl', 'starttls', ''])],
+            'smtp_encryption' => ['sometimes', 'nullable', 'string', Rule::in(['tls', 'ssl', 'starttls'])],
             'smtp_username' => ['sometimes', 'nullable', 'string', 'max:255'],
             'smtp_password' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'resend_api_key' => ['sometimes', 'nullable', 'string', 'max:255'],
             'clear_smtp_password' => ['sometimes', 'boolean'],
-            'clear_resend_api_key' => ['sometimes', 'boolean'],
         ]);
 
         $actor = $request->user();
 
-        $addr = trim((string) ($data['from_address'] ?? ''));
-        if ($addr !== '' && ! filter_var($addr, FILTER_VALIDATE_EMAIL)) {
-            throw ValidationException::withMessages([
-                'from_address' => ['Indique un correo electrónico válido o déjelo vacío para usar el .env.'],
+        $smtpVerifyOk = false;
+        if (array_key_exists('smtp_host', $data)
+            || array_key_exists('smtp_port', $data)
+            || array_key_exists('smtp_encryption', $data)
+            || array_key_exists('smtp_username', $data)
+            || array_key_exists('smtp_password', $data)
+            || array_key_exists('clear_smtp_password', $data)) {
+            $creds = $this->runtimeSmtp->smtpCredentialsForConnectionTest($data);
+            if ($creds !== null) {
+                if ($creds['username'] === '') {
+                    throw ValidationException::withMessages([
+                        'smtp_username' => ['Indique el usuario SMTP (con Gmail, el correo completo).'],
+                    ]);
+                }
+                if ($creds['password'] === '') {
+                    throw ValidationException::withMessages([
+                        'smtp_password' => ['Indique la contraseña de aplicación o no borre la ya guardada.'],
+                    ]);
+                }
+                try {
+                    $smtpVerifyOk = $this->smtpVerifier->verify($creds);
+                } catch (PhpMailerException $e) {
+                    report($e);
+                    $hint = config('app.debug')
+                        ? $e->getMessage()
+                        : 'No se pudo autenticar con el servidor SMTP. Revise usuario, contraseña de aplicación y puerto/encriptación (587, tls).';
+
+                    throw ValidationException::withMessages([
+                        'smtp_password' => [$hint],
+                    ]);
+                }
+            }
+            $this->runtimeSmtp->persistFromForm($data);
+        }
+
+        if (array_key_exists('from_address', $data) || array_key_exists('from_name', $data)) {
+            $row = AppSetting::query()->where('key', AppSetting::KEY_MAIL_NOTIFICATIONS_FROM)->first();
+            $stored = is_array($row?->value) ? $row->value : [];
+            $addr = array_key_exists('from_address', $data)
+                ? trim((string) $data['from_address'])
+                : trim((string) ($stored['address'] ?? ''));
+            $name = array_key_exists('from_name', $data)
+                ? trim((string) $data['from_name'])
+                : trim((string) ($stored['name'] ?? ''));
+
+            if ($addr !== '' && ! filter_var($addr, FILTER_VALIDATE_EMAIL)) {
+                throw ValidationException::withMessages([
+                    'from_address' => ['Indique un correo electrónico válido o déjelo vacío para usar el .env.'],
+                ]);
+            }
+
+            AppSetting::setJsonValue(AppSetting::KEY_MAIL_NOTIFICATIONS_FROM, [
+                'address' => $addr,
+                'name' => $name,
             ]);
         }
 
-        $name = trim((string) ($data['from_name'] ?? ''));
-
-        AppSetting::setJsonValue(AppSetting::KEY_MAIL_NOTIFICATIONS_FROM, [
-            'address' => $addr,
-            'name' => $name,
-        ]);
-
         $this->templates->persistPartial($data);
-        $this->runtimeMail->persistFromForm($data);
 
         ActivityLogger::log(
             $actor,
             'correo_notificaciones_actualizado',
-            'Actualizó remitente y plantillas de correo del sistema (bienvenida, factura, mantenimiento).'
+            'Actualizó correo Gmail/SMTP, remitente y/o plantillas del sistema.'
         );
 
+        $message = 'Configuración de correo guardada.';
+        if ($smtpVerifyOk) {
+            $message .= ' La conexión SMTP se verificó correctamente (sin enviar correo).';
+        }
+
         return response()->json([
-            'message' => 'Configuración de correo guardada.',
+            'message' => $message,
             'data' => $this->responseDataPayload(),
         ]);
     }
@@ -156,28 +204,39 @@ class AdminMailNotificationsSettingsController extends Controller
 
         if ($fromEmail === '' || ! filter_var($fromEmail, FILTER_VALIDATE_EMAIL)) {
             throw ValidationException::withMessages([
-                'to' => ['Indique un remitente válido arriba o configure MAIL_FROM_ADDRESS / MAIL_FROM_NAME en el servidor antes de probar.'],
+                'to' => ['Indique un correo remitente válido en la sección Gmail o configure MAIL_FROM_ADDRESS en .env antes de probar.'],
             ]);
         }
 
         $to = strtolower(trim($data['to']));
-        $subject = 'Prueba';
-        $html = 'ok';
 
         try {
-            Mail::to($to)->send(new AdminMailNotificationsTestMail(
-                $fromEmail,
-                $fromName,
-                $subject,
-                $html,
+            $this->outgoingMail->send(new MailMessage(
+                toEmail: $to,
+                fromEmail: $fromEmail,
+                fromName: $fromName,
+                subject: 'Prueba HBM',
+                htmlBody: '<p>Hola</p>',
             ));
+        } catch (\InvalidArgumentException $e) {
+            throw ValidationException::withMessages([
+                'to' => [$e->getMessage()],
+            ]);
+        } catch (PhpMailerException $e) {
+            report($e);
+
+            return response()->json([
+                'message' => config('app.debug')
+                    ? 'No se pudo enviar: '.$e->getMessage()
+                    : 'No se pudo enviar la prueba. Revise Gmail/SMTP en el panel (o MAIL_* en .env), contraseña de aplicación y que el remitente sea el correo de la cuenta.',
+            ], 422);
         } catch (\Throwable $e) {
             report($e);
 
             return response()->json([
                 'message' => config('app.debug')
                     ? 'No se pudo enviar: '.$e->getMessage()
-                    : 'No se pudo enviar el correo de prueba. Revise SMTP, credenciales y que el remitente esté autorizado en su proveedor.',
+                    : 'No se pudo enviar el correo de prueba. Revise MAIL_* en el servidor, credenciales del proveedor y que el remitente esté autorizado.',
             ], 422);
         }
 
@@ -269,7 +328,7 @@ class AdminMailNotificationsSettingsController extends Controller
             'invoice_supplement_pdf_filename' => $this->templatePdfs->meta(MailTemplatePdfService::KIND_INVOICE_SUPPLEMENT)['original_filename'] ?? null,
             'maintenance_supplement_pdf_configured' => $this->templatePdfs->configured(MailTemplatePdfService::KIND_MAINTENANCE_SUPPLEMENT),
             'maintenance_supplement_pdf_filename' => $this->templatePdfs->meta(MailTemplatePdfService::KIND_MAINTENANCE_SUPPLEMENT)['original_filename'] ?? null,
-            'smtp' => $this->runtimeMail->publicConfig(),
+            'smtp' => $this->runtimeSmtp->publicConfig(),
         ], $this->templates->templatesForForm());
     }
 

@@ -2,17 +2,15 @@
 
 namespace App\Services;
 
-use App\Mail\MaintenanceCompanyNotifyMail;
 use App\Models\Service;
-use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 
 class MaintenanceCompanyMailDispatcher
 {
     public function __construct(
         private readonly MailNotificationTemplatesService $templates,
         private readonly MailTemplatePdfService $pdfs,
+        private readonly PanelNotificationMailSender $panelMail,
     ) {}
 
     public function sendIfApplicable(Service $service): void
@@ -40,7 +38,7 @@ class MaintenanceCompanyMailDispatcher
                 : 'Equipo';
         }
 
-        $attachList = [];
+        $fileAttachments = [];
         $meta = $this->pdfs->meta(MailTemplatePdfService::KIND_MAINTENANCE_SUPPLEMENT);
         $path = $this->pdfs->absolutePath(MailTemplatePdfService::KIND_MAINTENANCE_SUPPLEMENT);
         if ($meta !== null && $path !== null && is_readable($path)) {
@@ -48,15 +46,21 @@ class MaintenanceCompanyMailDispatcher
             if (! str_ends_with(strtolower($fn), '.pdf')) {
                 $fn .= '.pdf';
             }
-            $attachList[] = Attachment::fromPath($path)->as($fn)->withMime('application/pdf');
+            $fileAttachments[] = [
+                'path' => $path,
+                'name' => $fn,
+                'mime' => 'application/pdf',
+            ];
         }
 
         try {
-            Mail::to($correo)->send(new MaintenanceCompanyNotifyMail(
+            $this->panelMail->sendHtml(
+                $correo,
                 $this->templates->maintenanceSubjectRendered($service, $company, $equipmentName),
-                $this->templates->maintenanceBodyHtml($service, $company, $equipmentName),
-                $attachList,
-            ));
+                (string) $this->templates->maintenanceBodyHtml($service, $company, $equipmentName),
+                null,
+                $fileAttachments,
+            );
         } catch (\Throwable $e) {
             Log::warning('maintenance_company_mail_failed', [
                 'service_id' => $service->id,

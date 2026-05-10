@@ -32,11 +32,14 @@ class MailNotificationTemplatesService
 
     public const PH_NOMBRE_SISTEMA = '{{nombre_sistema}}';
 
-    public const DEFAULT_WELCOME_SUBJECT = 'Bienvenida — {{nombre_empresa}}';
+    public const DEFAULT_WELCOME_SUBJECT = 'Bienvenida, {{nombre_empresa}} — {{nombre_sistema}}';
 
-    public const DEFAULT_WELCOME_BODY = "Le damos la bienvenida a {{nombre_empresa}}.\n\n"
-        .'En {{nombre_sistema}} acompañamos a empresas con mantenimiento y soporte técnico; gracias por sumarse.\n\n'
-        .'El PDF adjunto incluye condiciones, alcance y lineamientos. Ante cualquier duda puede responder a este correo.';
+    public const DEFAULT_WELCOME_BODY = "Estimados,\n\n"
+        ."Nos complace dar la bienvenida a {{nombre_empresa}} en {{nombre_sistema}}.\n\n"
+        ."Somos su aliado en mantenimiento y soporte técnico: procesos claros, seguimiento responsable y comunicación directa cuando nos necesite. Queremos que se sienta respaldado desde el primer día.\n\n"
+        ."Si este correo incluye un documento PDF, allí encontrará condiciones generales, alcance y lineamientos que dan transparencia y previsibilidad a nuestra relación.\n\n"
+        ."Este mensaje y la dirección desde la que lo enviamos son su canal oficial con nosotros. Ante cualquier duda o solicitud, responda a este mismo correo; trataremos su consulta con prioridad.\n\n"
+        ."Gracias por confiar en {{nombre_sistema}}.";
 
     public const DEFAULT_INVOICE_SUBJECT = 'Factura {{codigo_factura}} — {{mes_facturado}}';
 
@@ -269,7 +272,23 @@ class MailNotificationTemplatesService
             $out = str_replace($needle, e($value), $out);
         }
 
+        $out = $this->normalizeBodyNewlines($out);
+
         return new HtmlString(nl2br($out, false));
+    }
+
+    /**
+     * Convierte saltos de línea reales y, por compatibilidad, la secuencia literal "\n" (error histórico
+     * en textos por defecto guardados con comillas simples en PHP).
+     */
+    private function normalizeBodyNewlines(string $text): string
+    {
+        $text = str_replace(["\r\n", "\r"], "\n", $text);
+        if (str_contains($text, '\\n')) {
+            $text = str_replace('\\n', "\n", $text);
+        }
+
+        return $text;
     }
 
     private function plainForSubject(string $value): string

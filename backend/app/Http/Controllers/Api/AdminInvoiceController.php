@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\AdminInvoiceResource;
-use App\Mail\InvoicePdfToCompanyMail;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\PanelNotification;
@@ -17,6 +16,7 @@ use App\Services\InvoicePublicAccessService;
 use App\Services\MailNotificationTemplatesService;
 use App\Services\MailTemplatePdfService;
 use App\Services\PanelNotificationDispatcher;
+use App\Services\PanelNotificationMailSender;
 use App\Support\ActivityAmountNarrative;
 use App\Support\InvoicePdfPayload;
 use App\Support\InvoiceTotalsFromServices;
@@ -26,14 +26,17 @@ use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
+use PHPMailer\PHPMailer\Exception as PhpMailerException;
 use Symfony\Component\HttpFoundation\Response;
 
 class AdminInvoiceController extends Controller
 {
+    public function __construct(
+        private readonly PanelNotificationMailSender $panelMail,
+    ) {}
+
     public function index(Request $request): AnonymousResourceCollection
     {
         $q = Invoice::query()->with([
@@ -464,9 +467,10 @@ class AdminInvoiceController extends Controller
         $companyNombre = (string) $invoice->company->nombre;
         $consultUrl = $tpl->invoicePublicConsultUrl($invoice->code);
 
-        $attachments = [
-            Attachment::fromData(fn () => $binary, $filename)->withMime('application/pdf'),
+        $blobAttachments = [
+            ['content' => $binary, 'name' => $filename, 'mime' => 'application/pdf'],
         ];
+        $fileAttachments = [];
         $supMeta = $pdfExtra->meta(MailTemplatePdfService::KIND_INVOICE_SUPPLEMENT);
         $supPath = $pdfExtra->absolutePath(MailTemplatePdfService::KIND_INVOICE_SUPPLEMENT);
         if ($supMeta !== null && $supPath !== null && is_readable($supPath)) {
@@ -474,14 +478,43 @@ class AdminInvoiceController extends Controller
             if (! str_ends_with(strtolower($supFn), '.pdf')) {
                 $supFn .= '.pdf';
             }
-            $attachments[] = Attachment::fromPath($supPath)->as($supFn)->withMime('application/pdf');
+            $fileAttachments[] = [
+                'path' => $supPath,
+                'name' => $supFn,
+                'mime' => 'application/pdf',
+            ];
         }
 
-        Mail::to($correo)->send(new InvoicePdfToCompanyMail(
-            $tpl->invoiceToCompanySubjectRendered($invoice, $companyNombre),
-            $tpl->invoiceToCompanyBodyHtml($invoice, $companyNombre, $consultUrl),
-            $attachments,
-        ));
+        try {
+            $this->panelMail->sendHtml(
+                $correo,
+                $tpl->invoiceToCompanySubjectRendered($invoice, $companyNombre),
+                (string) $tpl->invoiceToCompanyBodyHtml($invoice, $companyNombre, $consultUrl),
+                null,
+                $fileAttachments,
+                $blobAttachments,
+            );
+        } catch (\InvalidArgumentException $e) {
+            throw ValidationException::withMessages([
+                'company' => [$e->getMessage()],
+            ]);
+        } catch (PhpMailerException $e) {
+            report($e);
+
+            return response()->json([
+                'message' => config('app.debug')
+                    ? 'No se pudo enviar: '.$e->getMessage()
+                    : 'No se pudo enviar el correo. Revise Gmail/SMTP en el panel o MAIL_* en .env.',
+            ], 422);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => config('app.debug')
+                    ? 'No se pudo enviar: '.$e->getMessage()
+                    : 'No se pudo enviar el correo. Revise la configuración de correo del servidor.',
+            ], 422);
+        }
 
         ActivityLogger::log(
             $request->user(),

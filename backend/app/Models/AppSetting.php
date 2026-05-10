@@ -74,8 +74,8 @@ class AppSetting extends Model
     public const KEY_MAIL_NOTIFICATION_TEMPLATES = 'mail_notification_templates';
 
     /**
-     * Configuración SMTP editable desde panel (se guardan secretos cifrados).
-     * JSON: mailer, host, port, encryption, username, password_encrypted, resend_api_key_encrypted.
+     * SMTP configurable desde panel (Gmail u otro). JSON: host, port, encryption, username, password_encrypted.
+     * Si host vacío, el envío usa MAIL_* del .env.
      */
     public const KEY_MAIL_RUNTIME_TRANSPORT = 'mail_runtime_transport';
 

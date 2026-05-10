@@ -5,12 +5,12 @@ namespace Tests\Feature;
 use App\Models\Company;
 use App\Models\InventoryAuditEvent;
 use App\Models\InventoryLot;
-use App\Mail\MaintenanceCompanyNotifyMail;
+use App\MailTransport\Contracts\OutgoingMailSender;
+use App\MailTransport\MailMessage;
 use App\Models\Service;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -85,7 +85,14 @@ class ServiceMaintenanceTest extends TestCase
 
     public function test_maintenance_sends_email_when_company_has_correo(): void
     {
-        Mail::fake();
+        $sender = \Mockery::mock(OutgoingMailSender::class);
+        $sender->shouldReceive('send')->once()->with(\Mockery::on(function (MailMessage $m): bool {
+            return $m->toEmail === 'cliente-mantto@test.local'
+                && str_contains($m->subject, 'Servidor rack')
+                && str_contains($m->htmlBody, 'Reemplazo de ventilador');
+        }));
+        $this->app->instance(OutgoingMailSender::class, $sender);
+
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
         $company = Company::query()->create([
             'nombre' => 'Empresa Con Correo',
@@ -123,11 +130,6 @@ class ServiceMaintenanceTest extends TestCase
                 'line_description' => 'Mano de obra y repuesto.',
             ]],
         ])->assertCreated();
-
-        Mail::assertSent(MaintenanceCompanyNotifyMail::class, function (MaintenanceCompanyNotifyMail $m) {
-            return str_contains($m->subjectLine, 'Servidor rack')
-                && str_contains((string) $m->htmlBody, 'Reemplazo de ventilador');
-        });
     }
 
     public function test_maintenance_rejects_lot_from_other_company(): void

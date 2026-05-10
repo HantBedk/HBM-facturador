@@ -2,7 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Mail\InvoicePdfToCompanyMail;
+use App\MailTransport\Contracts\OutgoingMailSender;
+use App\MailTransport\MailMessage;
 use App\Models\AppSetting;
 use App\Models\Company;
 use App\Models\Invoice;
@@ -11,7 +12,6 @@ use App\Models\ServiceCatalog;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -361,46 +361,51 @@ class AdminInvoiceApiTest extends TestCase
 
     public function test_send_invoice_email_rejects_borrador(): void
     {
+        $sender = \Mockery::mock(OutgoingMailSender::class);
+        $sender->shouldReceive('send')->never();
+        $this->app->instance(OutgoingMailSender::class, $sender);
+
         $s = $this->seedInvoiceScenario();
         Sanctum::actingAs($s['admin']);
-        Mail::fake();
 
         $this->postJson('/api/admin/invoices/'.$s['invoice']->id.'/send-email')->assertStatus(422);
-
-        Mail::assertNothingOutgoing();
     }
 
     public function test_send_invoice_email_requires_valid_company_correo(): void
     {
+        $sender = \Mockery::mock(OutgoingMailSender::class);
+        $sender->shouldReceive('send')->never();
+        $this->app->instance(OutgoingMailSender::class, $sender);
+
         $s = $this->seedInvoiceScenario();
         $s['company']->update(['correo' => '   ']);
         $s['invoice']->update(['status' => Invoice::STATUS_APROBADA]);
         Sanctum::actingAs($s['admin']);
-        Mail::fake();
 
         $this->postJson('/api/admin/invoices/'.$s['invoice']->id.'/send-email')
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['company']);
-
-        Mail::assertNothingOutgoing();
     }
 
     public function test_send_invoice_email_dispatches_pdf_mail(): void
     {
+        $sender = \Mockery::mock(OutgoingMailSender::class);
+        $sender->shouldReceive('send')->once()->with(\Mockery::on(function (MailMessage $m): bool {
+            return $m->toEmail === 'facturas-empresa@test.local'
+                && str_contains($m->subject, 'T-FAC-001')
+                && str_contains($m->htmlBody, 'consulta-factura')
+                && $m->blobAttachments !== null
+                && count($m->blobAttachments) >= 1;
+        }));
+        $this->app->instance(OutgoingMailSender::class, $sender);
+
         $s = $this->seedInvoiceScenario();
         $s['invoice']->update(['status' => Invoice::STATUS_APROBADA]);
         Sanctum::actingAs($s['admin']);
-        Mail::fake();
 
         $this->postJson('/api/admin/invoices/'.$s['invoice']->id.'/send-email')
             ->assertOk()
             ->assertJsonPath('sent_to', 'facturas-empresa@test.local');
-
-        Mail::assertSent(InvoicePdfToCompanyMail::class, function (InvoicePdfToCompanyMail $m) {
-            return str_contains($m->subjectLine, 'T-FAC-001')
-                && str_contains((string) $m->htmlBody, 'consulta-factura')
-                && count($m->attachmentsList) >= 1;
-        });
     }
 
     public function test_send_invoice_email_uses_custom_message_template(): void
@@ -412,18 +417,19 @@ class AdminInvoiceApiTest extends TestCase
             'invoice_to_company_body' => 'Empresa={{nombre_empresa}} Codigo={{codigo_factura}}',
         ]);
 
+        $sender = \Mockery::mock(OutgoingMailSender::class);
+        $sender->shouldReceive('send')->once()->with(\Mockery::on(function (MailMessage $m): bool {
+            return $m->subject === 'DOC T-FAC-001'
+                && str_contains($m->htmlBody, 'Empresa=Empresa Test')
+                && str_contains($m->htmlBody, 'Codigo=T-FAC-001');
+        }));
+        $this->app->instance(OutgoingMailSender::class, $sender);
+
         $s = $this->seedInvoiceScenario();
         $s['invoice']->update(['status' => Invoice::STATUS_APROBADA]);
         Sanctum::actingAs($s['admin']);
-        Mail::fake();
 
         $this->postJson('/api/admin/invoices/'.$s['invoice']->id.'/send-email')->assertOk();
-
-        Mail::assertSent(InvoicePdfToCompanyMail::class, function (InvoicePdfToCompanyMail $m) {
-            return $m->subjectLine === 'DOC T-FAC-001'
-                && str_contains((string) $m->htmlBody, 'Empresa=Empresa Test')
-                && str_contains((string) $m->htmlBody, 'Codigo=T-FAC-001');
-        });
     }
 
     public function test_send_invoice_email_attaches_supplement_pdf_when_configured(): void
@@ -436,15 +442,19 @@ class AdminInvoiceApiTest extends TestCase
             'original_filename' => 'Anexo.pdf',
         ]);
 
+        $sender = \Mockery::mock(OutgoingMailSender::class);
+        $sender->shouldReceive('send')->once()->with(\Mockery::on(function (MailMessage $m): bool {
+            $files = count($m->fileAttachments ?? []);
+            $blobs = count($m->blobAttachments ?? []);
+
+            return $files === 1 && $blobs === 1;
+        }));
+        $this->app->instance(OutgoingMailSender::class, $sender);
+
         $s = $this->seedInvoiceScenario();
         $s['invoice']->update(['status' => Invoice::STATUS_APROBADA]);
         Sanctum::actingAs($s['admin']);
-        Mail::fake();
 
         $this->postJson('/api/admin/invoices/'.$s['invoice']->id.'/send-email')->assertOk();
-
-        Mail::assertSent(InvoicePdfToCompanyMail::class, function (InvoicePdfToCompanyMail $m) {
-            return count($m->attachmentsList) === 2;
-        });
     }
 }
