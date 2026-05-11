@@ -86,6 +86,11 @@ class InvoicePdfPayload
         $issuedTimeLabel = $issuedTz ? $issuedTz->format('g:i A') : '';
         $periodLabel = self::invoicePeriodLabel((int) $invoice->period_month, (int) $invoice->period_year);
 
+        $companyDireccion = '';
+        if ($invoice->company !== null) {
+            $companyDireccion = trim((string) ($invoice->company->direccion ?? ''));
+        }
+
         return [
             'issuer' => self::issuerBlock(),
             'invoice' => [
@@ -113,7 +118,7 @@ class InvoicePdfPayload
                 'correo' => $invoice->company?->correo,
                 /** Reservado; el PDF ya no muestra nombres agregados aquí (técnico por línea en `services`). */
                 'contact' => null,
-                'direccion' => data_get($invoice->company, 'direccion'),
+                'direccion' => $companyDireccion !== '' ? $companyDireccion : null,
             ],
             'services' => $services,
             'products' => [],

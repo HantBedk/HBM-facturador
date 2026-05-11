@@ -48,6 +48,7 @@ class AdminCompanyStoreWelcomeMailTest extends TestCase
             'nombre' => 'Empresa Nueva SA',
             'factura_sigla' => 'ENS',
             'nit' => '900123456-7',
+            'direccion' => 'Carrera 1 # 2-3, Bogotá',
             'correo' => 'contacto@empresa-nueva.test',
         ])->assertCreated();
 
@@ -73,6 +74,7 @@ class AdminCompanyStoreWelcomeMailTest extends TestCase
         $response = $this->postJson('/api/admin/companies', [
             'nombre' => 'Sin PDF SA',
             'factura_sigla' => 'SPF',
+            'direccion' => 'Calle 10 # 20-30',
             'correo' => 'a@b.test',
         ])->assertCreated();
 
@@ -163,6 +165,7 @@ class AdminCompanyStoreWelcomeMailTest extends TestCase
         $this->postJson('/api/admin/companies', [
             'nombre' => 'Sin Correo SA',
             'factura_sigla' => 'SCS',
+            'direccion' => 'Av. Principal 100',
         ])->assertCreated()
             ->assertJsonPath('welcome_mail.queued', false)
             ->assertJsonPath('welcome_mail.sent', false)
@@ -182,6 +185,7 @@ class AdminCompanyStoreWelcomeMailTest extends TestCase
             'nombre' => 'Sin Mail SA',
             'factura_sigla' => 'SMS',
             'nit' => '901-SMS',
+            'direccion' => 'Calle 5 # 6-7',
             'estado' => 'activo',
         ])->assertCreated()
             ->assertJsonPath('welcome_mail.skipped_reason', 'no_correo');
@@ -195,6 +199,7 @@ class AdminCompanyStoreWelcomeMailTest extends TestCase
             'nombre' => 'Sin Mail SA',
             'factura_sigla' => 'SMS',
             'nit' => '901-SMS',
+            'direccion' => 'Calle 5 # 6-7',
             'correo' => 'nuevo@empresa.test',
             'estado' => 'activo',
         ])->assertOk()

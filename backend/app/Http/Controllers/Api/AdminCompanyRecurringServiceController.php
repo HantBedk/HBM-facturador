@@ -22,16 +22,21 @@ class AdminCompanyRecurringServiceController extends Controller
     public function store(Request $request, Company $company): JsonResponse
     {
         $data = $request->validate([
-            'catalog_id' => ['required', 'exists:service_catalog,id'],
+            'catalog_id' => ['nullable', 'integer', 'exists:service_catalog,id'],
+            'billing_kind' => ['required', 'string', 'in:venta,servicio,alquiler'],
             'service_type' => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'amount' => ['required', 'numeric', 'min:0.01'],
             'is_active' => ['sometimes', 'boolean'],
-            'sort_order' => ['sometimes', 'integer', 'min:0', 'max:999999'],
         ]);
 
+        $sortOrder = $this->nextRecurringSortOrder($company);
+
         $row = $company->recurringServices()->create([
-            'catalog_id' => (int) $data['catalog_id'],
+            'catalog_id' => array_key_exists('catalog_id', $data) && $data['catalog_id'] !== null
+                ? (int) $data['catalog_id']
+                : null,
+            'billing_kind' => (string) $data['billing_kind'],
             'service_type' => isset($data['service_type']) && $data['service_type'] !== ''
                 ? trim($data['service_type'])
                 : null,
@@ -40,7 +45,7 @@ class AdminCompanyRecurringServiceController extends Controller
                 : null,
             'amount' => $data['amount'],
             'is_active' => $data['is_active'] ?? true,
-            'sort_order' => $data['sort_order'] ?? 0,
+            'sort_order' => $sortOrder,
         ]);
 
         $row->load('catalog:id,name');
@@ -53,7 +58,8 @@ class AdminCompanyRecurringServiceController extends Controller
         $this->assertSameCompany($company, $recurring_service);
 
         $data = $request->validate([
-            'catalog_id' => ['sometimes', 'required', 'exists:service_catalog,id'],
+            'catalog_id' => ['sometimes', 'nullable', 'integer', 'exists:service_catalog,id'],
+            'billing_kind' => ['sometimes', 'required', 'string', 'in:venta,servicio,alquiler'],
             'service_type' => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'amount' => ['sometimes', 'required', 'numeric', 'min:0.01'],
@@ -62,7 +68,10 @@ class AdminCompanyRecurringServiceController extends Controller
         ]);
 
         if (array_key_exists('catalog_id', $data)) {
-            $recurring_service->catalog_id = (int) $data['catalog_id'];
+            $recurring_service->catalog_id = $data['catalog_id'] !== null ? (int) $data['catalog_id'] : null;
+        }
+        if (array_key_exists('billing_kind', $data)) {
+            $recurring_service->billing_kind = (string) $data['billing_kind'];
         }
         if (array_key_exists('service_type', $data)) {
             $recurring_service->service_type = $data['service_type'] !== null && trim($data['service_type']) !== ''
@@ -103,5 +112,15 @@ class AdminCompanyRecurringServiceController extends Controller
         if ((int) $row->company_id !== (int) $company->id) {
             abort(404);
         }
+    }
+
+    /** Orden de alta: 0, 1, 2… según el máximo actual de plantillas de la empresa. */
+    private function nextRecurringSortOrder(Company $company): int
+    {
+        $max = CompanyRecurringService::query()
+            ->where('company_id', $company->id)
+            ->max('sort_order');
+
+        return $max === null ? 0 : (int) $max + 1;
     }
 }

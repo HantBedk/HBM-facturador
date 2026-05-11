@@ -79,10 +79,17 @@ class AdminCompanyController extends Controller
             'nit' => ['nullable', 'string', 'max:100', Rule::unique('companies', 'nit')],
             'telefono' => ['nullable', 'string', 'max:64'],
             'correo' => ['nullable', 'string', 'email', 'max:255'],
+            'direccion' => ['required', 'string', 'max:512'],
             'estado' => ['sometimes', Rule::in([Company::ESTADO_ACTIVO, Company::ESTADO_INACTIVO])],
         ]);
 
         $nombre = trim($data['nombre']);
+        $direccion = trim($data['direccion']);
+        if ($direccion === '') {
+            throw ValidationException::withMessages([
+                'direccion' => ['La dirección no puede quedar vacía.'],
+            ]);
+        }
         $this->assertNombreUnique($nombre);
 
         $company = Company::query()->create([
@@ -91,6 +98,7 @@ class AdminCompanyController extends Controller
             'nit' => isset($data['nit']) && $data['nit'] !== '' ? trim($data['nit']) : null,
             'telefono' => isset($data['telefono']) && $data['telefono'] !== '' ? trim($data['telefono']) : null,
             'correo' => isset($data['correo']) && $data['correo'] !== '' ? trim($data['correo']) : null,
+            'direccion' => $direccion,
             'estado' => $data['estado'] ?? Company::ESTADO_ACTIVO,
         ]);
 
@@ -121,12 +129,19 @@ class AdminCompanyController extends Controller
             ],
             'telefono' => ['nullable', 'string', 'max:64'],
             'correo' => ['nullable', 'string', 'email', 'max:255'],
+            'direccion' => ['required', 'string', 'max:512'],
             'estado' => ['required', Rule::in([Company::ESTADO_ACTIVO, Company::ESTADO_INACTIVO])],
         ]);
 
         $hadCorreo = $company->correo !== null && trim((string) $company->correo) !== '';
 
         $nombre = trim($data['nombre']);
+        $direccion = trim($data['direccion']);
+        if ($direccion === '') {
+            throw ValidationException::withMessages([
+                'direccion' => ['La dirección no puede quedar vacía.'],
+            ]);
+        }
         $this->assertNombreUnique($nombre, $company->id);
 
         $company->nombre = $nombre;
@@ -134,6 +149,7 @@ class AdminCompanyController extends Controller
         $company->nit = isset($data['nit']) && $data['nit'] !== '' ? trim($data['nit']) : null;
         $company->telefono = isset($data['telefono']) && $data['telefono'] !== '' ? trim($data['telefono']) : null;
         $company->correo = isset($data['correo']) && $data['correo'] !== '' ? trim($data['correo']) : null;
+        $company->direccion = $direccion;
         $company->estado = $data['estado'];
         $company->save();
 

@@ -19,6 +19,7 @@ class Company extends Model
         'estado',
         'telefono',
         'correo',
+        'direccion',
         /** Cliente puntual (sin alta formal); `telefono_normalizado` agrupa por teléfono. */
         'es_cliente_puntual',
         'telefono_normalizado',

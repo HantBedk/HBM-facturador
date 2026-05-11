@@ -14,7 +14,7 @@ import {
   updateCompanyRecurringService,
 } from '@/services/companiesApi.js'
 import { fetchAdminInvoices } from '@/services/invoicesApi.js'
-import { fetchServiceCatalogActive, fetchServices } from '@/services/servicesApi.js'
+import { fetchServices } from '@/services/servicesApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import { tableAriaSort, tableSortIndicator } from '@/utils/tableSort.js'
@@ -49,6 +49,7 @@ const form = ref({
   nombre: '',
   factura_sigla: '',
   nit: '',
+  direccion: '',
   telefono: '',
   correo: '',
   estado: 'activo',
@@ -107,14 +108,24 @@ const recurringModalMode = ref('create')
 const recurringEditingId = ref(null)
 const recurringSaving = ref(false)
 const recurringModalError = ref('')
-const recurringCatalogOptions = ref([])
+
+const RECURRING_BILLING_KIND_OPTIONS = [
+  { value: 'venta', label: 'Venta' },
+  { value: 'servicio', label: 'Servicio' },
+  { value: 'alquiler', label: 'Alquiler' },
+]
+
+function recurringBillingKindLabel(k) {
+  const key = k && String(k).trim() !== '' ? k : 'servicio'
+  return RECURRING_BILLING_KIND_OPTIONS.find((o) => o.value === key)?.label || '—'
+}
+
 const recurringForm = ref({
-  catalog_id: '',
+  billing_kind: '',
   amount: '',
   description: '',
   service_type: '',
   is_active: true,
-  sort_order: 0,
 })
 
 /** Empresa objetivo del modal de servicios fijos (tabla o panel). */
@@ -228,16 +239,6 @@ async function loadRecurringModalList() {
   }
 }
 
-async function ensureRecurringCatalogLoaded() {
-  if (recurringCatalogOptions.value.length) return
-  try {
-    recurringCatalogOptions.value = await fetchServiceCatalogActive()
-  } catch {
-    recurringCatalogOptions.value = []
-    recurringModalError.value = 'No se pudo cargar el catálogo.'
-  }
-}
-
 async function loadCompanyRecurringServices() {
   const id = companyPanelCompany.value?.id
   if (!id) return
@@ -273,15 +274,13 @@ async function openRecurringCreate(companyRow) {
   recurringModalMode.value = 'create'
   recurringEditingId.value = null
   recurringForm.value = {
-    catalog_id: '',
+    billing_kind: '',
     amount: '',
     description: '',
     service_type: '',
     is_active: true,
-    sort_order: 0,
   }
   await loadRecurringModalList()
-  await ensureRecurringCatalogLoaded()
 }
 
 async function openRecurringShowFormCreate() {
@@ -289,14 +288,12 @@ async function openRecurringShowFormCreate() {
   recurringEditingId.value = null
   recurringModalError.value = ''
   recurringForm.value = {
-    catalog_id: '',
+    billing_kind: '',
     amount: '',
     description: '',
     service_type: '',
     is_active: true,
-    sort_order: 0,
   }
-  await ensureRecurringCatalogLoaded()
   recurringFormSectionOpen.value = true
 }
 
@@ -304,18 +301,16 @@ function applyRecurringFormFromRow(row) {
   recurringModalMode.value = 'edit'
   recurringEditingId.value = row.id
   recurringForm.value = {
-    catalog_id: row.catalog_id,
+    billing_kind: row.billing_kind || 'servicio',
     amount: String(row.amount ?? ''),
     description: row.description || '',
     service_type: row.service_type || '',
     is_active: row.is_active !== false,
-    sort_order: row.sort_order ?? 0,
   }
 }
 
 async function openRecurringModalEditRow(row) {
   recurringModalError.value = ''
-  await ensureRecurringCatalogLoaded()
   applyRecurringFormFromRow(row)
   recurringFormSectionOpen.value = true
 }
@@ -334,7 +329,6 @@ async function openRecurringEdit(row) {
   recurringModalError.value = ''
   recurringModalListError.value = ''
   await loadRecurringModalList()
-  await ensureRecurringCatalogLoaded()
   applyRecurringFormFromRow(row)
   recurringFormSectionOpen.value = true
 }
@@ -358,9 +352,9 @@ async function submitRecurringModal() {
   recurringModalError.value = ''
   recurringSaving.value = true
   try {
-    const catalogId = Number(recurringForm.value.catalog_id)
-    if (!Number.isFinite(catalogId) || catalogId < 1) {
-      recurringModalError.value = 'Seleccione un ítem del catálogo.'
+    const bk = String(recurringForm.value.billing_kind || '').trim()
+    if (!['venta', 'servicio', 'alquiler'].includes(bk)) {
+      recurringModalError.value = 'Seleccione el tipo de cargo: Venta, Servicio o Alquiler.'
       return
     }
     const amt = Number(String(recurringForm.value.amount).replace(/\s/g, '').replace(',', '.'))
@@ -369,12 +363,11 @@ async function submitRecurringModal() {
       return
     }
     const payload = {
-      catalog_id: catalogId,
+      billing_kind: bk,
       amount: amt,
       description: recurringForm.value.description.trim() || null,
       service_type: recurringForm.value.service_type.trim() || null,
       is_active: Boolean(recurringForm.value.is_active),
-      sort_order: Number(recurringForm.value.sort_order) || 0,
     }
     if (recurringModalMode.value === 'create') {
       await createCompanyRecurringService(companyId, payload)
@@ -629,6 +622,7 @@ function openCreate() {
     nombre: '',
     factura_sigla: '',
     nit: '',
+    direccion: '',
     telefono: '',
     correo: '',
     estado: 'activo',
@@ -646,6 +640,7 @@ function openEdit(row) {
     nombre: row.nombre || '',
     factura_sigla: (row.factura_sigla || '').toString().toUpperCase().slice(0, 3),
     nit: row.nit || '',
+    direccion: row.direccion || '',
     telefono: row.telefono || '',
     correo: row.correo || '',
     estado: row.estado === 'inactivo' ? 'inactivo' : 'activo',
@@ -718,6 +713,7 @@ async function onSubmitModal() {
       nombre: form.value.nombre.trim(),
       factura_sigla: form.value.factura_sigla.trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3),
       nit: form.value.nit.trim() || null,
+      direccion: form.value.direccion.trim(),
       telefono: form.value.telefono.trim() || null,
       correo: form.value.correo.trim() || null,
       estado: form.value.estado,
@@ -1092,7 +1088,7 @@ async function submitDeleteCompanyModal() {
                 <table class="panel-table">
                   <thead>
                     <tr>
-                      <th scope="col">Catálogo</th>
+                      <th scope="col">Tipo</th>
                       <th scope="col">Detalle</th>
                       <th class="num" scope="col">Importe</th>
                       <th scope="col">Estado</th>
@@ -1101,7 +1097,7 @@ async function submitDeleteCompanyModal() {
                   </thead>
                   <tbody>
                     <tr v-for="r in recurringRows" :key="'rec-' + r.id">
-                      <td>{{ r.catalog?.name || '—' }}</td>
+                      <td>{{ recurringBillingKindLabel(r.billing_kind) }}</td>
                       <td class="muted">
                         <span v-if="r.service_type" class="recurring-type">{{ r.service_type }}</span>
                         <span v-if="r.description">{{ r.description }}</span>
@@ -1385,6 +1381,19 @@ async function submitDeleteCompanyModal() {
               <small v-if="fieldErrors.nit" class="err">{{ fieldErrors.nit[0] }}</small>
             </label>
             <label class="field">
+              <span>Dirección <abbr title="obligatorio">*</abbr></span>
+              <textarea
+                v-model="form.direccion"
+                class="input"
+                rows="2"
+                required
+                maxlength="512"
+                placeholder="Dirección comercial o fiscal que aparecerá en la factura"
+              />
+              <small class="muted">Se muestra en el PDF de factura (bloque «Facturar a»).</small>
+              <small v-if="fieldErrors.direccion" class="err">{{ fieldErrors.direccion[0] }}</small>
+            </label>
+            <label class="field">
               <span>Teléfono</span>
               <input v-model="form.telefono" class="input" maxlength="64" placeholder="Opcional" />
               <small v-if="fieldErrors.telefono" class="err">{{ fieldErrors.telefono[0] }}</small>
@@ -1454,7 +1463,7 @@ async function submitDeleteCompanyModal() {
               <table class="recurring-modal-table">
                 <thead>
                   <tr>
-                    <th scope="col">Catálogo</th>
+                    <th scope="col">Tipo</th>
                     <th scope="col">Detalle</th>
                     <th class="num" scope="col">Importe</th>
                     <th scope="col">Estado</th>
@@ -1463,7 +1472,7 @@ async function submitDeleteCompanyModal() {
                 </thead>
                 <tbody>
                   <tr v-for="r in recurringModalRows" :key="'mod-rec-' + r.id">
-                    <td>{{ r.catalog?.name || '—' }}</td>
+                    <td>{{ recurringBillingKindLabel(r.billing_kind) }}</td>
                     <td class="muted recurring-modal-detail">
                       <span v-if="r.service_type" class="recurring-type">{{ r.service_type }}</span>
                       <span v-if="r.description">{{ r.description }}</span>
@@ -1513,10 +1522,12 @@ async function submitDeleteCompanyModal() {
             </h3>
             <form class="modal-form" @submit.prevent="submitRecurringModal">
               <label class="field">
-                <span>Ítem del catálogo <abbr title="obligatorio">*</abbr></span>
-                <select v-model.number="recurringForm.catalog_id" class="input" required>
+                <span>Tipo de cargo <abbr title="obligatorio">*</abbr></span>
+                <select v-model="recurringForm.billing_kind" class="input" required>
                   <option disabled value="">Seleccione…</option>
-                  <option v-for="c in recurringCatalogOptions" :key="c.id" :value="c.id">{{ c.name }}</option>
+                  <option v-for="opt in RECURRING_BILLING_KIND_OPTIONS" :key="opt.value" :value="opt.value">
+                    {{ opt.label }}
+                  </option>
                 </select>
               </label>
               <label class="field">
@@ -1536,16 +1547,12 @@ async function submitDeleteCompanyModal() {
                   v-model="recurringForm.service_type"
                   class="input"
                   maxlength="255"
-                  placeholder="Si vacío, se usa el nombre del catálogo"
+                  placeholder="Si vacío, se usa una etiqueta según el tipo (Venta / Servicio / Alquiler)"
                 />
               </label>
               <label class="field">
                 <span>Descripción / detalle (opcional)</span>
                 <textarea v-model="recurringForm.description" class="input" rows="2" placeholder="Texto en el cuerpo de la línea" />
-              </label>
-              <label class="field">
-                <span>Orden en factura</span>
-                <input v-model.number="recurringForm.sort_order" class="input" type="number" min="0" step="1" />
               </label>
               <fieldset class="field">
                 <legend>Plantilla</legend>

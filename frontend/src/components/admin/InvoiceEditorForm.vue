@@ -39,6 +39,9 @@ const saveError = ref('')
 const companyId = ref('')
 const periodYear = ref(new Date().getFullYear())
 const periodMonth = ref(new Date().getMonth() + 1)
+/** Opcional: primer mes a incluir cargos fijos no facturados hasta el periodo (misma factura). */
+const recurringBacklogStartYear = ref('')
+const recurringBacklogStartMonth = ref('')
 
 const available = ref([])
 const selectedIds = ref([])
@@ -90,7 +93,9 @@ function isSelected(id) {
   return selectedIds.value.includes(id)
 }
 
-function toggleId(id) {
+function toggleId(row) {
+  if (row?.is_recurring) return
+  const id = row.id
   const i = selectedIds.value.indexOf(id)
   if (i >= 0) {
     selectedIds.value = selectedIds.value.filter((x) => x !== id)
@@ -117,7 +122,8 @@ function selectAllAvailableServices() {
 }
 
 function clearServiceSelection() {
-  selectedIds.value = []
+  const recurring = (available.value || []).filter((r) => r.is_recurring).map((r) => r.id)
+  selectedIds.value = [...recurring]
 }
 
 function toggleSelectAllCheckbox() {
@@ -154,6 +160,13 @@ function money(v) {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
 }
 
+function backlogQueryParams() {
+  const y = Number(recurringBacklogStartYear.value)
+  const m = Number(recurringBacklogStartMonth.value)
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return {}
+  return { recurring_backlog_start_year: y, recurring_backlog_start_month: m }
+}
+
 async function loadAvailable() {
   loadError.value = ''
   if (!companyId.value) {
@@ -167,10 +180,13 @@ async function loadAvailable() {
       period_year: Number(periodYear.value),
       period_month: Number(periodMonth.value),
       invoice_id: isEdit.value ? resolvedId.value : undefined,
+      ...backlogQueryParams(),
     })
     available.value = data
     const valid = new Set(data.map((r) => r.id))
-    selectedIds.value = selectedIds.value.filter((id) => valid.has(id))
+    const recurringIds = data.filter((r) => r.is_recurring).map((r) => r.id)
+    const kept = selectedIds.value.filter((id) => valid.has(id))
+    selectedIds.value = [...new Set([...kept, ...recurringIds])]
   } catch (e) {
     loadError.value = e.data?.message || e.message || 'No se pudieron cargar los servicios.'
     available.value = []
@@ -179,7 +195,7 @@ async function loadAvailable() {
   }
 }
 
-watch([companyId, periodYear, periodMonth], () => {
+watch([companyId, periodYear, periodMonth, recurringBacklogStartYear, recurringBacklogStartMonth], () => {
   if (skipWatch.value) return
   loadAvailable()
 })
@@ -249,7 +265,7 @@ async function onSubmit() {
 
   const service_ids = [...selectedIds.value]
   if (service_ids.length === 0) {
-    saveError.value = 'Seleccione al menos un servicio del periodo.'
+    saveError.value = 'No hay líneas seleccionables. Elija empresa y periodo; los cargos fijos se marcan solos si aplican.'
     return
   }
 
@@ -259,6 +275,7 @@ async function onSubmit() {
       period_year: Number(periodYear.value),
       period_month: Number(periodMonth.value),
       service_ids,
+      ...backlogQueryParams(),
     }
     const payload = { ...base, company_id: Number(companyId.value) }
     let result
@@ -328,13 +345,37 @@ async function onSubmit() {
             <option v-for="[val, label] in MONTHS" :key="val" :value="val">{{ label }}</option>
           </select>
         </label>
+        <label class="field field--wide">
+          <span>Regularizar cargos fijos desde (opcional)</span>
+          <div class="backlog-row">
+            <input
+              v-model="recurringBacklogStartYear"
+              class="input backlog-year"
+              type="number"
+              min="2000"
+              max="2100"
+              placeholder="Año"
+              :disabled="saving"
+            />
+            <select v-model="recurringBacklogStartMonth" class="input backlog-month" :disabled="saving">
+              <option value="">Mes (no regularizar)</option>
+              <option v-for="[val, label] in MONTHS" :key="'bl-' + val" :value="String(val)">{{ label }}</option>
+            </select>
+          </div>
+          <span class="field-hint">
+            Si el cliente dejó de facturar varios meses, indique el <strong>primer mes</strong> de cargos fijos a incluir; se
+            listarán hasta el mes del periodo. Lo ya facturado no se duplica.
+          </span>
+        </label>
       </div>
 
       <div v-if="canSubmitInvoice" class="services-block">
         <div class="services-head">
           <h2>Servicios del periodo</h2>
           <p class="hint">
-            Solo servicios visibles del periodo que aún no están en otra factura. Al editar un borrador, puede marcar líneas.
+            Incluye servicios de campo y, si hay plantillas activas, los <strong>cargos fijos mensuales</strong> materializados
+            para la ventana (se seleccionan solos y no se pueden quitar aquí; suspenda la plantilla en Empresas si no debe
+            facturarse). Solo líneas aún no ligadas a otra factura.
           </p>
           <p v-if="loadingServices" class="muted">Cargando servicios…</p>
           <div
@@ -396,9 +437,18 @@ async function onSubmit() {
             <tbody>
               <tr v-for="row in sortedAvailable" :key="row.id">
                 <td class="chk">
-                  <input type="checkbox" :checked="isSelected(row.id)" @change="toggleId(row.id)" />
+                  <input
+                    type="checkbox"
+                    :checked="isSelected(row.id)"
+                    :disabled="row.is_recurring"
+                    :title="row.is_recurring ? 'Cargo fijo: se incluye siempre en el borrador (suspenda la plantilla si no aplica).' : ''"
+                    @change="toggleId(row)"
+                  />
                 </td>
-                <td class="mono">{{ row.code }}</td>
+                <td class="mono">
+                  {{ row.code }}
+                  <span v-if="row.is_recurring" class="tag-recurring">Fijo</span>
+                </td>
                 <td>{{ row.service_date }}</td>
                 <td class="desc">{{ row.description }}</td>
                 <td class="num">{{ money(row.amount) }}</td>
@@ -498,6 +548,41 @@ h1 {
 
 .field--wide {
   grid-column: 1 / -1;
+}
+
+.backlog-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.backlog-year {
+  max-width: 8rem;
+}
+
+.backlog-month {
+  flex: 1;
+  min-width: 12rem;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 0.4rem;
+  font-size: 0.75rem;
+  color: #64748b;
+  line-height: 1.35;
+}
+
+.tag-recurring {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  vertical-align: middle;
+  background: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
 }
 
 .field span {

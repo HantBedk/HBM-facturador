@@ -22,7 +22,9 @@ export function fetchAdminInvoice(id) {
  *   company_id: number|string,
  *   period_year: number,
  *   period_month: number,
- *   invoice_id?: number|string
+ *   invoice_id?: number|string,
+ *   recurring_backlog_start_year?: number,
+ *   recurring_backlog_start_month?: number,
  * }} q
  */
 export function fetchAvailableServicesForInvoice(q) {
@@ -32,6 +34,10 @@ export function fetchAvailableServicesForInvoice(q) {
     period_month: String(q.period_month),
   })
   if (q.invoice_id != null && q.invoice_id !== '') qs.set('invoice_id', String(q.invoice_id))
+  if (q.recurring_backlog_start_year != null && q.recurring_backlog_start_year !== '')
+    qs.set('recurring_backlog_start_year', String(q.recurring_backlog_start_year))
+  if (q.recurring_backlog_start_month != null && q.recurring_backlog_start_month !== '')
+    qs.set('recurring_backlog_start_month', String(q.recurring_backlog_start_month))
   return api(`/admin/invoices/available-services?${qs}`).then((r) => r.data)
 }
 
@@ -40,7 +46,9 @@ export function fetchAvailableServicesForInvoice(q) {
  *   company_id: number|string,
  *   period_year: number,
  *   period_month: number,
- *   service_ids: number[]
+ *   service_ids: number[],
+ *   recurring_backlog_start_year?: number,
+ *   recurring_backlog_start_month?: number,
  * }} payload
  */
 export function createInvoice(payload) {
@@ -56,7 +64,9 @@ export function createInvoice(payload) {
  *   company_id: number|string,
  *   period_year: number,
  *   period_month: number,
- *   service_ids: number[]
+ *   service_ids: number[],
+ *   recurring_backlog_start_year?: number,
+ *   recurring_backlog_start_month?: number,
  * }} payload
  */
 export function updateInvoice(id, payload) {

@@ -11,6 +11,7 @@ use App\Models\Payment;
 use App\Models\Service;
 use App\Models\User;
 use App\Services\ActivityLogger;
+use App\Services\CompanyRecurringInvoiceLinesService;
 use App\Services\InvoiceCodeGenerator;
 use App\Services\InvoicePublicAccessService;
 use App\Services\MailNotificationTemplatesService;
@@ -35,6 +36,7 @@ class AdminInvoiceController extends Controller
 {
     public function __construct(
         private readonly PanelNotificationMailSender $panelMail,
+        private readonly CompanyRecurringInvoiceLinesService $recurringLines,
     ) {}
 
     public function index(Request $request): AnonymousResourceCollection
@@ -124,11 +126,24 @@ class AdminInvoiceController extends Controller
             'period_year' => ['required', 'integer', 'min:2000', 'max:2100'],
             'period_month' => ['required', 'integer', 'min:1', 'max:12'],
             'invoice_id' => ['sometimes', 'nullable', 'exists:invoices,id'],
+            'recurring_backlog_start_year' => ['nullable', 'integer', 'min:2000', 'max:2100', 'required_with:recurring_backlog_start_month'],
+            'recurring_backlog_start_month' => ['nullable', 'integer', 'min:1', 'max:12', 'required_with:recurring_backlog_start_year'],
         ]);
 
-        $tz = config('app.timezone');
-        $start = Carbon::createFromDate($validated['period_year'], $validated['period_month'], 1, $tz)->startOfMonth();
-        $end = (clone $start)->endOfMonth();
+        $company = Company::query()->findOrFail((int) $validated['company_id']);
+
+        [$windowStart, $windowEnd] = $this->resolveAttachWindow(
+            (int) $validated['period_year'],
+            (int) $validated['period_month'],
+            isset($validated['recurring_backlog_start_year']) ? (int) $validated['recurring_backlog_start_year'] : null,
+            isset($validated['recurring_backlog_start_month']) ? (int) $validated['recurring_backlog_start_month'] : null,
+        );
+
+        try {
+            $this->recurringLines->ensureServicesForCalendarRange($company, $windowStart, $windowEnd);
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         $exceptInvoiceId = isset($validated['invoice_id']) ? (int) $validated['invoice_id'] : null;
 
@@ -143,7 +158,7 @@ class AdminInvoiceController extends Controller
 
         $rows = Service::query()
             ->where('company_id', $validated['company_id'])
-            ->whereBetween('service_date', [$start->toDateString(), $end->toDateString()])
+            ->whereBetween('service_date', [$windowStart->toDateString(), $windowEnd->toDateString()])
             ->visibles()
             ->with(['user:id,nombre'])
             ->orderByDesc('service_date')
@@ -163,6 +178,7 @@ class AdminInvoiceController extends Controller
                 'service_type' => $s->service_type,
                 'amount' => (string) $s->amount,
                 'empleado' => $s->user ? ['nombre' => $s->user->nombre] : null,
+                'is_recurring' => $s->recurring_service_id !== null,
             ])->all(),
         ]);
     }
@@ -173,8 +189,10 @@ class AdminInvoiceController extends Controller
             'company_id' => ['required', 'integer', 'exists:companies,id'],
             'period_year' => ['required', 'integer', 'min:2000', 'max:2100'],
             'period_month' => ['required', 'integer', 'min:1', 'max:12'],
-            'service_ids' => ['required', 'array', 'min:1', 'distinct'],
+            'service_ids' => ['present', 'array', 'distinct'],
             'service_ids.*' => ['integer', 'exists:services,id'],
+            'recurring_backlog_start_year' => ['nullable', 'integer', 'min:2000', 'max:2100', 'required_with:recurring_backlog_start_month'],
+            'recurring_backlog_start_month' => ['nullable', 'integer', 'min:1', 'max:12', 'required_with:recurring_backlog_start_year'],
         ]);
 
         $cid = (int) $data['company_id'];
@@ -192,17 +210,46 @@ class AdminInvoiceController extends Controller
             ]);
         }
 
+        [$windowStart, $windowEnd] = $this->resolveAttachWindow(
+            (int) $data['period_year'],
+            (int) $data['period_month'],
+            isset($data['recurring_backlog_start_year']) ? (int) $data['recurring_backlog_start_year'] : null,
+            isset($data['recurring_backlog_start_month']) ? (int) $data['recurring_backlog_start_month'] : null,
+        );
+
+        $blockedIds = DB::table('invoice_service')->pluck('service_id')->all();
+
+        $recurringEnsuredIds = [];
+        try {
+            $recurringEnsuredIds = $this->recurringLines->ensureServicesForCalendarRange($company, $windowStart, $windowEnd);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        $recurringEnsuredIds = array_values(array_filter(
+            $recurringEnsuredIds,
+            fn (int $id) => ! in_array($id, $blockedIds, true)
+        ));
+
+        $mergedIds = array_values(array_unique(array_merge($data['service_ids'], $recurringEnsuredIds)));
+
+        if ($mergedIds === []) {
+            throw ValidationException::withMessages([
+                'service_ids' => ['No hay líneas para facturar. Seleccione servicios o configure cargos fijos activos para el periodo.'],
+            ]);
+        }
+
         $this->assertServicesAttachable(
             $cid,
-            $data['period_year'],
-            $data['period_month'],
-            $data['service_ids'],
+            $windowStart,
+            $windowEnd,
+            $mergedIds,
             null
         );
 
-        $totals = InvoiceTotalsFromServices::fromServiceIds($data['service_ids']);
+        $totals = InvoiceTotalsFromServices::fromServiceIds($mergedIds);
 
-        $invoice = DB::transaction(function () use ($data, $totals, $codes, $cid) {
+        $invoice = DB::transaction(function () use ($data, $totals, $codes, $cid, $mergedIds) {
             $tz = config('app.timezone');
             $now = Carbon::now($tz);
 
@@ -228,7 +275,7 @@ class AdminInvoiceController extends Controller
                 'total' => $totals['total'],
                 'sent_at' => null,
             ]);
-            $inv->services()->sync($data['service_ids']);
+            $inv->services()->sync($mergedIds);
 
             return $inv;
         });
@@ -271,8 +318,10 @@ class AdminInvoiceController extends Controller
             'company_id' => ['required', 'integer', 'exists:companies,id'],
             'period_year' => ['required', 'integer', 'min:2000', 'max:2100'],
             'period_month' => ['required', 'integer', 'min:1', 'max:12'],
-            'service_ids' => ['required', 'array', 'min:1', 'distinct'],
+            'service_ids' => ['present', 'array', 'distinct'],
             'service_ids.*' => ['integer', 'exists:services,id'],
+            'recurring_backlog_start_year' => ['nullable', 'integer', 'min:2000', 'max:2100', 'required_with:recurring_backlog_start_month'],
+            'recurring_backlog_start_month' => ['nullable', 'integer', 'min:1', 'max:12', 'required_with:recurring_backlog_start_year'],
         ]);
 
         $cid = (int) $data['company_id'];
@@ -284,22 +333,54 @@ class AdminInvoiceController extends Controller
             ]);
         }
 
+        [$windowStart, $windowEnd] = $this->resolveAttachWindow(
+            (int) $data['period_year'],
+            (int) $data['period_month'],
+            isset($data['recurring_backlog_start_year']) ? (int) $data['recurring_backlog_start_year'] : null,
+            isset($data['recurring_backlog_start_month']) ? (int) $data['recurring_backlog_start_month'] : null,
+        );
+
+        $blockedIds = DB::table('invoice_service')
+            ->where('invoice_id', '!=', $invoice->id)
+            ->pluck('service_id')
+            ->all();
+
+        $recurringEnsuredIds = [];
+        try {
+            $recurringEnsuredIds = $this->recurringLines->ensureServicesForCalendarRange($company, $windowStart, $windowEnd);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        $recurringEnsuredIds = array_values(array_filter(
+            $recurringEnsuredIds,
+            fn (int $id) => ! in_array($id, $blockedIds, true)
+        ));
+
+        $mergedIds = array_values(array_unique(array_merge($data['service_ids'], $recurringEnsuredIds)));
+
+        if ($mergedIds === []) {
+            throw ValidationException::withMessages([
+                'service_ids' => ['No hay líneas para facturar. Seleccione servicios o configure cargos fijos activos para el periodo.'],
+            ]);
+        }
+
         $this->assertServicesAttachable(
             $cid,
-            $data['period_year'],
-            $data['period_month'],
-            $data['service_ids'],
+            $windowStart,
+            $windowEnd,
+            $mergedIds,
             $invoice->id
         );
 
-        $totals = InvoiceTotalsFromServices::fromServiceIds($data['service_ids']);
+        $totals = InvoiceTotalsFromServices::fromServiceIds($mergedIds);
 
         $prevServiceIds = DB::table('invoice_service')
             ->where('invoice_id', $invoice->id)
             ->pluck('service_id')
             ->all();
 
-        DB::transaction(function () use ($invoice, $data, $totals, $cid) {
+        DB::transaction(function () use ($invoice, $data, $totals, $cid, $mergedIds) {
             $invoice->company_id = $cid;
             $invoice->bill_to_nombre = null;
             $invoice->bill_to_telefono = null;
@@ -309,12 +390,12 @@ class AdminInvoiceController extends Controller
             $invoice->subtotal = $totals['subtotal'];
             $invoice->total = $totals['total'];
             $invoice->save();
-            $invoice->services()->sync($data['service_ids']);
+            $invoice->services()->sync($mergedIds);
         });
 
         $invoice->refresh()->load(['company:id,nombre,nit,telefono,correo,es_cliente_puntual', 'services.user', 'services.catalog:id,name,iva_percent', 'payments']);
 
-        $removedIds = array_values(array_diff($prevServiceIds, $data['service_ids']));
+        $removedIds = array_values(array_diff($prevServiceIds, $mergedIds));
         if ($removedIds !== []) {
             $dispatcher = app(PanelNotificationDispatcher::class);
             foreach ($removedIds as $sid) {
@@ -351,21 +432,45 @@ class AdminInvoiceController extends Controller
     /**
      * @param  list<int>  $serviceIds
      */
+    /**
+     * Ventana de fechas de servicio permitida: desde el primer mes de regularización (o el mes del periodo)
+     * hasta el fin del mes del periodo de la factura.
+     *
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    private function resolveAttachWindow(int $periodYear, int $periodMonth, ?int $backlogStartYear, ?int $backlogStartMonth): array
+    {
+        $tz = config('app.timezone');
+        $windowEnd = Carbon::createFromDate($periodYear, $periodMonth, 1, $tz)->endOfMonth();
+
+        if ($backlogStartYear !== null && $backlogStartMonth !== null) {
+            $windowStart = Carbon::createFromDate($backlogStartYear, $backlogStartMonth, 1, $tz)->startOfMonth();
+            if ($windowStart->gt($windowEnd)) {
+                throw ValidationException::withMessages([
+                    'recurring_backlog_start_year' => ['El mes inicial de regularización no puede ser posterior al periodo de la factura.'],
+                ]);
+            }
+        } else {
+            $windowStart = Carbon::createFromDate($periodYear, $periodMonth, 1, $tz)->startOfMonth();
+        }
+
+        return [$windowStart, $windowEnd];
+    }
+
     private function assertServicesAttachable(
         int $companyId,
-        int $year,
-        int $month,
+        Carbon $windowStart,
+        Carbon $windowEnd,
         array $serviceIds,
         ?int $exceptInvoiceId
     ): void {
-        $tz = config('app.timezone');
-        $start = Carbon::createFromDate($year, $month, 1, $tz)->startOfMonth();
-        $end = (clone $start)->endOfMonth();
-
         $blockedIds = DB::table('invoice_service')
             ->when($exceptInvoiceId, fn ($q) => $q->where('invoice_id', '!=', $exceptInvoiceId))
             ->pluck('service_id')
             ->all();
+
+        $from = $windowStart->toDateString();
+        $to = $windowEnd->toDateString();
 
         foreach ($serviceIds as $sid) {
             $s = Service::query()->findOrFail($sid);
@@ -375,9 +480,9 @@ class AdminInvoiceController extends Controller
                 ]);
             }
             $sd = $s->service_date?->toDateString();
-            if ($sd === null || $sd < $start->toDateString() || $sd > $end->toDateString()) {
+            if ($sd === null || $sd < $from || $sd > $to) {
                 throw ValidationException::withMessages([
-                    'service_ids' => ['El servicio '.$s->code.' no corresponde al periodo (mes/año) seleccionado.'],
+                    'service_ids' => ['El servicio '.$s->code.' no corresponde a la ventana de facturación (mes inicial al periodo seleccionado).'],
                 ]);
             }
             if (! in_array($s->status, [Service::STATUS_ACTIVO, Service::STATUS_CORREGIDO], true)) {

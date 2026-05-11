@@ -24,6 +24,7 @@ export function fetchWelcomeMailAttachmentReady() {
  *   nombre: string,
  *   factura_sigla: string,
  *   nit?: string | null,
+ *   direccion: string,
  *   telefono?: string | null,
  *   correo?: string | null,
  *   estado?: string
@@ -45,6 +46,7 @@ export function createCompany(payload) {
  *   nombre: string,
  *   factura_sigla: string,
  *   nit?: string | null,
+ *   direccion: string,
  *   telefono?: string | null,
  *   correo?: string | null,
  *   estado: string

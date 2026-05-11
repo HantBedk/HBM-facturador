@@ -15,6 +15,8 @@ class CompanyRecurringService extends Model
     protected $fillable = [
         'company_id',
         'catalog_id',
+        /** venta | servicio | alquiler: clasificación del cargo fijo (prefijo de código al materializar). */
+        'billing_kind',
         'service_type',
         'description',
         'amount',
