@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\User;
+use App\Services\DevEmpresaSistemaSnapshotService;
 use Database\Seeders\EnsureDevLoginSeeder;
 use Illuminate\Console\Command;
 
@@ -15,7 +16,7 @@ class HbmEnsureDevUsersCommand extends Command
 
     protected $description = 'Asegura usuarios de login local (admin, super_admin, empleado) si users está vacío';
 
-    public function handle(): int
+    public function handle(DevEmpresaSistemaSnapshotService $empresaSnapshots): int
     {
         $hadUsers = User::query()->exists();
 
@@ -34,6 +35,12 @@ class HbmEnsureDevUsersCommand extends Command
         $this->newLine();
         $this->line('Correos: admin@hbm.local, sadmin@hbm.local, tc1@hbm.local');
         $this->comment('Contraseña: ver database/seeders/EnsureDevLoginSeeder.php');
+
+        $this->newLine();
+        $this->info('Empresa del sistema (factura PDF / remitente correo):');
+        foreach ($empresaSnapshots->syncForDevEnvironment() as $line) {
+            $this->line('  '.$line);
+        }
 
         return self::SUCCESS;
     }

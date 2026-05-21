@@ -143,6 +143,33 @@ class SystemOrganizationProfileService
         return '';
     }
 
+    /** Correo de contacto de Empresa del sistema (remitente y {{nombre_sistema}} en plantillas). */
+    public function emailForMail(): string
+    {
+        $email = trim($this->profileForForm()['email'] ?? '');
+        if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return $email;
+        }
+
+        return '';
+    }
+
+    /** Hay al menos un dato de perfil o logo guardado en BD. */
+    public function profileHasContent(): bool
+    {
+        if ($this->logoConfigured()) {
+            return true;
+        }
+
+        foreach ($this->profileForForm() as $value) {
+            if (trim((string) $value) !== '') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /**
      * @param  array<string, mixed>  $validated
      */

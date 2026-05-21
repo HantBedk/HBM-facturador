@@ -33,8 +33,9 @@ const helpInvoicePdf = ref('')
 const helpMaintenancePdf = ref('')
 const helpGmailSmtp = ref('')
 
-const fromAddress = ref('')
-const fromName = ref('')
+const effectiveFromAddress = ref('')
+const effectiveFromName = ref('')
+const organizationSenderReady = ref(false)
 const smtpHost = ref('smtp.gmail.com')
 const smtpPort = ref(587)
 const smtpEncryption = ref('tls')
@@ -68,8 +69,9 @@ const uiDialog = useUiDialogStore()
 
 function applyDataFromResponse(r) {
   const d = r.data || {}
-  fromAddress.value = d.from_address || ''
-  fromName.value = d.from_name || ''
+  effectiveFromAddress.value = d.effective_from_address || ''
+  effectiveFromName.value = d.effective_from_name || ''
+  organizationSenderReady.value = Boolean(d.organization_sender_ready)
   const smtp = d.smtp || {}
   smtpHost.value = (smtp.host && String(smtp.host).trim()) || 'smtp.gmail.com'
   smtpPort.value = Number(smtp.port || 587)
@@ -252,8 +254,6 @@ async function saveGmailFromModal() {
   gmailModalSaving.value = true
   try {
     const r = await updateMailNotificationsSettings({
-      from_address: fromAddress.value.trim() || null,
-      from_name: fromName.value.trim() || null,
       smtp_host: smtpHost.value.trim() || null,
       smtp_port: Number(smtpPort.value) || 587,
       smtp_encryption: smtpEncryption.value || null,
@@ -487,11 +487,9 @@ onMounted(init)
             <strong class="text-slate-300">razón social</strong>
             de
             <RouterLink to="/admin/configuracion/empresa-sistema" class="text-sky-400 hover:underline">Empresa sistema</RouterLink>.
-            Si esos datos están vacíos, se usa el
-            <strong class="text-slate-300">nombre comercial del remitente</strong>
-            que guarda al conectar Gmail (mismo valor que el encabezado «De» del correo). Si todo está vacío,
-            <span v-pre class="font-mono text-slate-300">{{nombre_sistema}}</span>
-            quedará sin texto en el mensaje.
+            Si faltan, complete
+            <RouterLink to="/admin/configuracion/empresa-sistema" class="text-sky-400 hover:underline">Empresa del sistema</RouterLink>
+            antes de enviar correos.
           </p>
           <p>
             <span v-pre class="font-mono text-slate-300">{{nombre_empresa}}</span>
@@ -541,7 +539,7 @@ onMounted(init)
             <span v-pre class="whitespace-nowrap">{{nombre_sistema}}</span>
             en todas las plantillas (bienvenida, factura, mantenimiento) sale primero de
             <RouterLink to="/admin/configuracion/empresa-sistema" class="text-sky-400 hover:underline">Empresa sistema</RouterLink>
-            ; si no hay datos, del nombre comercial del remitente al conectar Gmail.
+            .
           </p>
           <label class="block text-sm">
             <span class="text-slate-400">Asunto</span>
@@ -792,7 +790,7 @@ onMounted(init)
                   <code class="rounded bg-slate-800 px-1">tls</code>
                   .
                 </li>
-                <li>El «Correo remitente» debe ser esa misma cuenta o un alias verificado en Google.</li>
+                <li>El remitente visible (From) sale de <strong class="text-slate-300">Empresa del sistema</strong>; el usuario SMTP debe poder enviar con ese correo o un alias verificado en Google.</li>
               </ol>
             </details>
 
@@ -848,28 +846,25 @@ onMounted(init)
               <input v-model="clearSmtpPassword" type="checkbox" class="h-4 w-4 rounded border-slate-500 bg-slate-900 text-sky-500" />
               Borrar contraseña guardada ({{ hasSmtpPassword ? 'hay valor' : 'vacía' }})
             </label>
-            <div class="border-t border-slate-700/40 pt-3 space-y-3">
+            <div class="border-t border-slate-700/40 pt-3 space-y-2">
               <p class="text-xs font-medium text-slate-400">Remitente visible (From)</p>
-              <p class="text-xs text-slate-500">Debe coincidir con el correo Gmail o un alias verificado en Google.</p>
-              <label class="block text-sm">
-                <span class="text-slate-400">Correo remitente</span>
-                <input
-                  v-model="fromAddress"
-                  type="email"
-                  autocomplete="off"
-                  class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
-                />
-              </label>
-              <label class="block text-sm">
-                <span class="text-slate-400">Nombre comercial</span>
-                <input
-                  v-model="fromName"
-                  type="text"
-                  maxlength="120"
-                  class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
-                  placeholder="Nombre visible para el destinatario; respaldo del marcador nombre_sistema en plantillas"
-                />
-              </label>
+              <p class="text-xs text-slate-500">
+                Se toma de
+                <RouterLink to="/admin/configuracion/empresa-sistema" class="text-sky-400 hover:underline">Empresa del sistema</RouterLink>
+                (correo y nombre comercial o razón social). Debe ser una cuenta o alias que Gmail permita enviar.
+              </p>
+              <div
+                class="rounded-lg border px-3 py-2 text-sm"
+                :class="
+                  organizationSenderReady
+                    ? 'border-slate-600/50 bg-slate-900/40 text-slate-200'
+                    : 'border-amber-600/45 bg-amber-950/25 text-amber-100'
+                "
+              >
+                <p v-if="effectiveFromName" class="font-medium text-white">{{ effectiveFromName }}</p>
+                <p v-else class="text-amber-200">Falta nombre en Empresa del sistema</p>
+                <p class="mt-1 font-mono text-xs text-slate-400">{{ effectiveFromAddress || '— sin correo de contacto —' }}</p>
+              </div>
             </div>
           </div>
           <div class="flex flex-wrap justify-end gap-2 border-t border-slate-700/50 px-4 py-3">

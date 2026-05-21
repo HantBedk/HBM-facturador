@@ -166,7 +166,7 @@ class AdminMailNotificationsSettingsTest extends TestCase
         $this->assertDatabaseMissing('app_settings', ['key' => AppSetting::KEY_MAIL_RUNTIME_TRANSPORT]);
     }
 
-    public function test_save_smtp_rejects_when_no_organization_or_commercial_name(): void
+    public function test_save_smtp_rejects_when_organization_missing_mail_fields(): void
     {
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
         Sanctum::actingAs($admin);
@@ -182,10 +182,8 @@ class AdminMailNotificationsSettingsTest extends TestCase
             'smtp_encryption' => 'tls',
             'smtp_username' => 'cuenta@gmail.com',
             'smtp_password' => 'app-password-16chars',
-            'from_address' => 'cuenta@gmail.com',
-            'from_name' => '',
         ])->assertUnprocessable()
-            ->assertJsonValidationErrors(['from_name']);
+            ->assertJsonValidationErrors(['smtp_username']);
     }
 
     public function test_admin_can_save_gmail_smtp_from_panel(): void
@@ -194,19 +192,27 @@ class AdminMailNotificationsSettingsTest extends TestCase
         Sanctum::actingAs($admin);
         $this->unlockMailNotificationsFor($admin);
 
+        app(\App\Services\SystemOrganizationProfileService::class)->persist([
+            'trade_name' => 'Mi Empresa',
+            'email' => 'facturacion@miempresa.test',
+        ]);
+
+        $verifier = \Mockery::mock(SmtpConnectionVerifier::class);
+        $verifier->shouldReceive('verify')->once()->andReturn(true);
+        $this->app->instance(SmtpConnectionVerifier::class, $verifier);
+
         $this->putJson('/api/admin/settings/mail-notifications', [
             'smtp_host' => 'smtp.gmail.com',
             'smtp_port' => 587,
             'smtp_encryption' => 'tls',
             'smtp_username' => 'cuenta@gmail.com',
             'smtp_password' => 'app-password-16chars',
-            'from_address' => 'cuenta@gmail.com',
-            'from_name' => 'Mi Empresa',
         ])->assertOk()
             ->assertJsonPath('data.smtp.host', 'smtp.gmail.com')
             ->assertJsonPath('data.smtp.username', 'cuenta@gmail.com')
             ->assertJsonPath('data.smtp.panel_smtp_ready', true)
-            ->assertJsonPath('data.from_address', 'cuenta@gmail.com');
+            ->assertJsonPath('data.effective_from_address', 'facturacion@miempresa.test')
+            ->assertJsonPath('data.effective_from_name', 'Mi Empresa');
 
         $smtpRow = AppSetting::query()->where('key', AppSetting::KEY_MAIL_RUNTIME_TRANSPORT)->first();
         $this->assertIsArray($smtpRow->value);
@@ -215,7 +221,8 @@ class AdminMailNotificationsSettingsTest extends TestCase
 
         $fromRow = AppSetting::query()->where('key', AppSetting::KEY_MAIL_NOTIFICATIONS_FROM)->first();
         $this->assertIsArray($fromRow->value);
-        $this->assertSame('cuenta@gmail.com', $fromRow->value['address']);
+        $this->assertSame('facturacion@miempresa.test', $fromRow->value['address']);
+        $this->assertSame('Mi Empresa', $fromRow->value['name']);
     }
 
     public function test_admin_can_upload_welcome_template_pdf(): void

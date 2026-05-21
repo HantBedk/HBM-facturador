@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\ActivityLogger;
+use App\Services\DevEmpresaSistemaSnapshotService;
 use App\Services\SystemOrganizationProfileService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -56,6 +57,7 @@ class AdminSystemOrganizationController extends Controller
         }
 
         $this->organization->persist($data);
+        $this->exportDevSnapshotIfLocal();
 
         ActivityLogger::log(
             $request->user(),
@@ -76,6 +78,7 @@ class AdminSystemOrganizationController extends Controller
         ]);
 
         $this->organization->storeLogo($request->file('file'));
+        $this->exportDevSnapshotIfLocal();
 
         ActivityLogger::log(
             $request->user(),
@@ -92,6 +95,7 @@ class AdminSystemOrganizationController extends Controller
     public function deleteLogo(Request $request): JsonResponse
     {
         $this->organization->deleteLogo();
+        $this->exportDevSnapshotIfLocal();
 
         ActivityLogger::log(
             $request->user(),
@@ -132,5 +136,14 @@ class AdminSystemOrganizationController extends Controller
             'logo_filename' => $logo['original_filename'] ?? null,
             'invoice_emitter' => $this->organization->invoiceEmitterStatus(),
         ]);
+    }
+
+    private function exportDevSnapshotIfLocal(): void
+    {
+        if (! app()->environment('local')) {
+            return;
+        }
+
+        app(DevEmpresaSistemaSnapshotService::class)->exportCurrentProfileSnapshot();
     }
 }

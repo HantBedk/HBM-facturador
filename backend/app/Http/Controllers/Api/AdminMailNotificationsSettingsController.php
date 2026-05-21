@@ -11,6 +11,7 @@ use App\MailTransport\SmtpConnectionVerifier;
 use App\Services\AdminMailSettingsUnlockService;
 use App\Services\MailRuntimeSettingsService;
 use App\Services\MailNotificationTemplatesService;
+use App\Services\MailSenderIdentityService;
 use App\Services\MailTemplatePdfService;
 use App\Services\SystemOrganizationProfileService;
 use Illuminate\Http\JsonResponse;
@@ -29,6 +30,7 @@ class AdminMailNotificationsSettingsController extends Controller
         private readonly MailRuntimeSettingsService $runtimeSmtp,
         private readonly SmtpConnectionVerifier $smtpVerifier,
         private readonly SystemOrganizationProfileService $organizationProfile,
+        private readonly MailSenderIdentityService $mailSender,
     ) {}
 
     public function unlockStatus(Request $request): JsonResponse
@@ -75,12 +77,17 @@ class AdminMailNotificationsSettingsController extends Controller
         $name = trim((string) ($stored['name'] ?? ''));
         $tpl = $this->templates->templatesForForm();
 
+        $orgSender = $this->mailSender->organizationSenderPreview();
+
         return response()->json([
             'data' => array_merge([
                 'from_address' => $addr,
                 'from_name' => $name,
-                'effective_from_address' => $this->effectiveAddress($addr),
-                'effective_from_name' => $this->effectiveName($name),
+                'effective_from_address' => $this->mailSender->effectiveAddress(),
+                'effective_from_name' => $this->mailSender->effectiveName(),
+                'sender_from_organization' => true,
+                'organization_sender' => $orgSender,
+                'organization_sender_ready' => $this->mailSender->organizationHasMailSenderFields(),
                 'company_welcome_pdf_configured' => $this->templatePdfs->configured(MailTemplatePdfService::KIND_WELCOME),
                 'company_welcome_pdf_filename' => $this->templatePdfs->meta(MailTemplatePdfService::KIND_WELCOME)['original_filename'] ?? null,
                 'invoice_supplement_pdf_configured' => $this->templatePdfs->configured(MailTemplatePdfService::KIND_INVOICE_SUPPLEMENT),
@@ -151,31 +158,12 @@ class AdminMailNotificationsSettingsController extends Controller
                         'smtp_password' => [$hint],
                     ]);
                 }
-                $this->assertSmtpSaveHasCommercialIdentity($data);
+                $this->assertSmtpSaveHasCommercialIdentity();
             }
             $this->runtimeSmtp->persistFromForm($data);
-        }
-
-        if (array_key_exists('from_address', $data) || array_key_exists('from_name', $data)) {
-            $row = AppSetting::query()->where('key', AppSetting::KEY_MAIL_NOTIFICATIONS_FROM)->first();
-            $stored = is_array($row?->value) ? $row->value : [];
-            $addr = array_key_exists('from_address', $data)
-                ? trim((string) $data['from_address'])
-                : trim((string) ($stored['address'] ?? ''));
-            $name = array_key_exists('from_name', $data)
-                ? trim((string) $data['from_name'])
-                : trim((string) ($stored['name'] ?? ''));
-
-            if ($addr !== '' && ! filter_var($addr, FILTER_VALIDATE_EMAIL)) {
-                throw ValidationException::withMessages([
-                    'from_address' => ['Indique un correo electrónico válido o déjelo vacío para usar el .env.'],
-                ]);
+            if ($smtpVerifyOk) {
+                $this->mailSender->syncStoredFromOrganization();
             }
-
-            AppSetting::setJsonValue(AppSetting::KEY_MAIL_NOTIFICATIONS_FROM, [
-                'address' => $addr,
-                'name' => $name,
-            ]);
         }
 
         $this->templates->persistPartial($data);
@@ -209,15 +197,12 @@ class AdminMailNotificationsSettingsController extends Controller
         ]);
 
         $row = AppSetting::query()->where('key', AppSetting::KEY_MAIL_NOTIFICATIONS_FROM)->first();
-        $stored = is_array($row?->value) ? $row->value : [];
-        $addr = trim((string) ($stored['address'] ?? ''));
-        $name = trim((string) ($stored['name'] ?? ''));
-        $fromEmail = $this->effectiveAddress($addr);
-        $fromName = $this->effectiveName($name);
+        $fromEmail = $this->mailSender->effectiveAddress();
+        $fromName = $this->mailSender->effectiveName();
 
         if ($fromEmail === '' || ! filter_var($fromEmail, FILTER_VALIDATE_EMAIL)) {
             throw ValidationException::withMessages([
-                'to' => ['Indique un correo remitente válido en la sección Gmail o configure MAIL_FROM_ADDRESS en .env antes de probar.'],
+                'to' => ['Complete el correo de contacto en Configuración → Empresa del sistema o configure MAIL_FROM_ADDRESS en .env antes de probar.'],
             ]);
         }
 
@@ -333,8 +318,11 @@ class AdminMailNotificationsSettingsController extends Controller
         return array_merge([
             'from_address' => $addr,
             'from_name' => $name,
-            'effective_from_address' => $this->effectiveAddress($addr),
-            'effective_from_name' => $this->effectiveName($name),
+            'effective_from_address' => $this->mailSender->effectiveAddress(),
+            'effective_from_name' => $this->mailSender->effectiveName(),
+            'sender_from_organization' => true,
+            'organization_sender' => $this->mailSender->organizationSenderPreview(),
+            'organization_sender_ready' => $this->mailSender->organizationHasMailSenderFields(),
             'company_welcome_pdf_configured' => $this->templatePdfs->configured(MailTemplatePdfService::KIND_WELCOME),
             'company_welcome_pdf_filename' => $this->templatePdfs->meta(MailTemplatePdfService::KIND_WELCOME)['original_filename'] ?? null,
             'invoice_supplement_pdf_configured' => $this->templatePdfs->configured(MailTemplatePdfService::KIND_INVOICE_SUPPLEMENT),
@@ -345,49 +333,27 @@ class AdminMailNotificationsSettingsController extends Controller
         ], $this->templates->templatesForForm());
     }
 
-    private function effectiveAddress(string $stored): string
-    {
-        if ($stored !== '' && filter_var($stored, FILTER_VALIDATE_EMAIL)) {
-            return $stored;
-        }
-
-        return (string) config('mail.from.address', '');
-    }
-
-    private function effectiveName(string $stored): string
-    {
-        if (trim($stored) !== '') {
-            return trim($stored);
-        }
-        $org = $this->organizationProfile->displayNameForMail();
-        if ($org !== '') {
-            return $org;
-        }
-
-        return trim((string) config('mail.from.name', ''));
-    }
-
     /**
-     * Al guardar SMTP con credenciales válidas debe existir nombre de marca: Empresa sistema o nombre comercial del remitente en el mismo guardado o ya guardado.
-     *
-     * @param  array<string, mixed>  $data
+     * Al guardar SMTP debe existir identidad en Empresa del sistema (nombre y correo de contacto).
      */
-    private function assertSmtpSaveHasCommercialIdentity(array $data): void
+    private function assertSmtpSaveHasCommercialIdentity(): void
     {
-        $org = $this->organizationProfile->displayNameForMail();
-        $row = AppSetting::query()->where('key', AppSetting::KEY_MAIL_NOTIFICATIONS_FROM)->first();
-        $stored = is_array($row?->value) ? $row->value : [];
-        $storedName = trim((string) ($stored['name'] ?? ''));
-        $pendingName = array_key_exists('from_name', $data)
-            ? trim((string) ($data['from_name'] ?? ''))
-            : $storedName;
-
-        if ($org !== '' || $pendingName !== '') {
+        if ($this->mailSender->organizationHasMailSenderFields()) {
             return;
         }
 
+        $missing = [];
+        if ($this->organizationProfile->displayNameForMail() === '') {
+            $missing[] = 'nombre comercial o razón social';
+        }
+        if ($this->organizationProfile->emailForMail() === '') {
+            $missing[] = 'correo de contacto';
+        }
+
         throw ValidationException::withMessages([
-            'from_name' => ['Indique el nombre comercial del remitente o complete nombre comercial o razón social en Configuración → Empresa sistema.'],
+            'smtp_username' => [
+                'Complete en Configuración → Empresa del sistema: '.implode(' y ', $missing).'. El remitente visible del correo se tomará de ahí.',
+            ],
         ]);
     }
 }
