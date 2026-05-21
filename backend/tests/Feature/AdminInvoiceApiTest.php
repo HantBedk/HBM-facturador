@@ -255,7 +255,7 @@ class AdminInvoiceApiTest extends TestCase
             ->assertStatus(422);
     }
 
-    public function test_store_invoice_generates_fac_code_one_per_company_per_day(): void
+    public function test_store_invoice_generates_fac_code_with_sequence_same_day(): void
     {
         $tz = config('app.timezone');
         $company = Company::query()->create([
@@ -293,12 +293,13 @@ class AdminInvoiceApiTest extends TestCase
 
         Carbon::setTestNow(Carbon::parse('2026-04-03 11:00:00', $tz));
         $s2 = $makeService('T-FAC-SVC-B', '2026-04-20');
-        $this->postJson('/api/admin/invoices', [
+        $r2 = $this->postJson('/api/admin/invoices', [
             'company_id' => $company->id,
             'period_year' => 2026,
             'period_month' => 4,
             'service_ids' => [$s2->id],
-        ])->assertStatus(422)->assertJsonValidationErrors('company_id');
+        ]);
+        $r2->assertCreated()->assertJsonPath('data.code', 'FAC-260403-TST-2');
 
         Carbon::setTestNow(Carbon::parse('2026-05-08 09:00:00', $tz));
         $s3 = $makeService('T-FAC-SVC-C', '2026-05-08');

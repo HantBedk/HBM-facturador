@@ -501,7 +501,7 @@ class ServiceController extends Controller
             'quick_client' => ['nullable', 'array'],
             'quick_client.nombre' => ['nullable', 'string', 'max:255'],
             'quick_client.telefono' => ['nullable', 'string', 'max:32'],
-            'catalog_id' => ['required', 'integer', 'exists:service_catalog,id'],
+            'catalog_id' => ['nullable', 'integer', 'exists:service_catalog,id'],
             'client_name' => ['nullable', 'string', 'max:255'],
         ]);
 
@@ -566,19 +566,37 @@ class ServiceController extends Controller
             ]);
         }
 
-        $catalogId = (int) $data['catalog_id'];
-        $cat = ServiceCatalog::query()->findOrFail($catalogId);
-        if ($cat->status !== ServiceCatalog::STATUS_ACTIVO) {
-            throw ValidationException::withMessages([
-                'catalog_id' => ['El ítem de catálogo no está activo.'],
-            ]);
+        $assignPlaceholderDesc = 'Asignación desde administración: complete el detalle del trabajo realizado en obra (importes y líneas) antes de facturar.';
+
+        $catalogIdRaw = $data['catalog_id'] ?? null;
+        $hasCatalog = $catalogIdRaw !== null && $catalogIdRaw !== '';
+
+        if ($hasCatalog) {
+            $catalogId = (int) $catalogIdRaw;
+            $cat = ServiceCatalog::query()->findOrFail($catalogId);
+            if ($cat->status !== ServiceCatalog::STATUS_ACTIVO) {
+                throw ValidationException::withMessages([
+                    'catalog_id' => ['El ítem de catálogo no está activo.'],
+                ]);
+            }
+            $itemsPayload = [[
+                'catalog_id' => $catalogId,
+                'amount' => 0.01,
+                'line_description' => $assignPlaceholderDesc,
+            ]];
+            $firstCatalogId = $catalogId;
+            $serviceType = $cat->name;
+        } else {
+            $cat = null;
+            $itemsPayload = [[
+                'custom_name' => 'Por completar',
+                'amount' => 0.01,
+                'line_description' => $assignPlaceholderDesc,
+            ]];
+            $firstCatalogId = null;
+            $serviceType = 'Servicio asignado';
         }
 
-        $itemsPayload = [[
-            'catalog_id' => $catalogId,
-            'amount' => 0.01,
-            'line_description' => 'Asignación desde administración: complete el detalle del trabajo realizado en obra (importes y líneas) antes de facturar.',
-        ]];
         $normalized = $this->validateAndNormalizeServiceItems($itemsPayload);
 
         $serviceDate = Carbon::now(config('app.timezone'))->startOfDay();
@@ -609,8 +627,6 @@ class ServiceController extends Controller
             ]);
         }
 
-        $firstCatalogId = $catalogId;
-
         $admin = $request->user();
         $service = DB::transaction(function () use (
             $code,
@@ -623,7 +639,7 @@ class ServiceController extends Controller
             $normalized,
             $firstCatalogId,
             $clientNameFinal,
-            $cat,
+            $serviceType,
             $clientTelefono,
             $contactPhoneKey,
         ) {
@@ -636,7 +652,7 @@ class ServiceController extends Controller
                 'client_name' => $clientNameFinal,
                 'client_telefono' => $clientTelefono,
                 'contact_phone_key' => $contactPhoneKey,
-                'service_type' => $cat->name,
+                'service_type' => $serviceType,
                 'description' => $masterDescription,
                 'amount' => $totalAmount,
                 'service_date' => $serviceDate->toDateString(),

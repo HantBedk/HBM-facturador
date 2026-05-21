@@ -57,7 +57,9 @@ async function submit() {
   try {
     const payload = {
       technician_user_id: props.technician.id,
-      catalog_id: Number(catalogId.value),
+    }
+    if (catalogId.value) {
+      payload.catalog_id = Number(catalogId.value)
     }
     if (useQuick.value) {
       payload.quick_client = {
@@ -104,9 +106,9 @@ async function submit() {
         <div v-if="loading" class="muted pad">Cargando…</div>
         <template v-else>
           <label class="field">
-            <span>Ítem de catálogo (obligatorio)</span>
-            <select v-model="catalogId" class="input" required>
-              <option disabled value="">Seleccionar…</option>
+            <span>Ítem de catálogo (opcional)</span>
+            <select v-model="catalogId" class="input">
+              <option value="">Sin ítem de catálogo</option>
               <option v-for="c in catalogItems" :key="c.id" :value="String(c.id)">{{ c.name }}</option>
             </select>
           </label>
@@ -143,7 +145,6 @@ async function submit() {
               class="btn primary"
               :disabled="
                 saving ||
-                !catalogId ||
                 (!useQuick && !companyId) ||
                 (useQuick && (!qcNombre.trim() || !qcTel.trim()))
               "

@@ -1372,7 +1372,7 @@ async function submitDeleteCompanyModal() {
                 autocapitalize="characters"
                 autocomplete="off"
               />
-              <small class="muted">En facturas: <strong>FAC-YYMMDD-XXX</strong> (1 por día y empresa). Debe ser única entre empresas.</small>
+              <small class="muted">En facturas: <strong>FAC-YYMMDD-XXX</strong> (varias el mismo día: <strong>-2</strong>, <strong>-3</strong>, …). La sigla debe ser única entre empresas.</small>
               <small v-if="fieldErrors.factura_sigla" class="err">{{ fieldErrors.factura_sigla[0] }}</small>
             </label>
             <label class="field">

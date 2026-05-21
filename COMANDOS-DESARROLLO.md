@@ -16,14 +16,14 @@ Los de Vite desde la carpeta **`frontend`**.
 | Comando | Para qué sirve |
 |--------|------------------|
 | `docker compose up -d` | Arranca MySQL, PHP (Laravel), Nginx (API en **8080**), Adminer. |
-| `.\HBM.ps1 -Levantar` o `HBM.cmd -Levantar` o `HBM-Levantar.cmd` | Sube Docker **sin** migraciones ni seeders; luego `npm install` + `npm run dev` (front en **5173**). **Recomendado día a día** si no quieres tocar la BD. |
+| `.\HBM.ps1 -Levantar` o `HBM.cmd -Levantar` o `HBM-Levantar.cmd` | Sube **solo** mysql, laravel, nginx, adminer (no el contenedor `frontend`); luego Vite en el **host** en **5173**. Evita el error «puerto 5173 en uso». **No pulses Ctrl+C** mientras espera a PHP (puede tardar ~1 min). |
 | **`HBM-UsuariosDev.cmd`** (doble clic) o `docker compose exec -T laravel php artisan hbm:ensure-dev-users` | Si **`users` está vacía**, crea admin / super_admin / empleado demo (`EnsureDevLoginSeeder`). No borra datos. |
 | `.\HBM.ps1` | Docker + `hbm:sync` (migrate + seeders según reglas del proyecto) + Vite. Útil tras clonar o cuando quieres sincronizar BD y front de una vez. |
 | `.\HBM.ps1 -Build` | Igual que `.\HBM.ps1` pero reconstruye imágenes Docker antes del `up`. |
 | `cd frontend` → `npm install` → `npm run dev` | Solo el front con hot reload (**http://localhost:5173**). Requiere API arriba (Docker o backend en 8080). |
 
-Si el puerto **5173** está ocupado por Vite local, puedes levantar solo backend:  
-`docker compose up -d mysql laravel nginx adminer`
+Si el puerto **5173** está ocupado: cierra la otra ventana con `npm run dev` o el contenedor `hbm_frontend` (`docker compose stop frontend`).  
+`HBM-Levantar` ya no arranca el servicio `frontend` de Compose para evitar el choque con Vite en el PC.
 
 ---
 

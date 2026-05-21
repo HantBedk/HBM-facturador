@@ -116,6 +116,26 @@ class ServiceAssignmentTest extends TestCase
         ]);
     }
 
+    public function test_admin_assigns_service_without_catalog(): void
+    {
+        [$company] = $this->seedCompanyAndCatalog();
+
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        $tech = User::factory()->create(['rol' => User::ROL_EMPLEADO, 'estado' => User::ESTADO_ACTIVO]);
+
+        Sanctum::actingAs($admin);
+
+        $r = $this->postJson('/api/admin/services/assign-to-technician', [
+            'technician_user_id' => $tech->id,
+            'company_id' => $company->id,
+        ]);
+
+        $r->assertCreated();
+        $this->assertNull($r->json('data.catalog_id'));
+        $this->assertSame(Service::ASSIGNMENT_AWAITING_COMPLETION, $r->json('data.assignment_status'));
+        $this->assertSame('Servicio asignado', $r->json('data.service_type'));
+    }
+
     public function test_complete_assignment_forbidden_for_admin(): void
     {
         [$company, $cat] = $this->seedCompanyAndCatalog();

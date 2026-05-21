@@ -3,6 +3,8 @@ set -e
 # Vistas compiladas pueden ir a /tmp (VIEW_COMPILED_PATH) para evitar permisos en volumen montado.
 mkdir -p /tmp/laravel-views
 chmod 1777 /tmp/laravel-views 2>/dev/null || chmod 777 /tmp/laravel-views 2>/dev/null || true
+# migrate/artisan en el entrypoint corren como root; php-fpm es www-data y debe poder recompilar vistas (PDF, correos).
+chown -R www-data:www-data /tmp/laravel-views 2>/dev/null || true
 # Laravel necesita escribir en storage (PDF DomPDF, logs, caché, etc.).
 # Con volumen montado desde el host (p. ej. Windows + Docker Desktop) el propietario
 # puede impedir escritura a www-data; se normalizan permisos al arrancar el contenedor.
