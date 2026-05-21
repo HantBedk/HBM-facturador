@@ -12,7 +12,9 @@ import {
   fetchTechnicianCatalogDiscount,
   updateTechnicianCatalogDiscount,
 } from '@/services/servicesApi.js'
+import { useAuthStore } from '@/stores/auth.js'
 
+const auth = useAuthStore()
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
@@ -33,6 +35,7 @@ const technicianInventoryRentalDiscountPercent = ref(10)
 const marginFloorService = ref(5)
 const marginFloorSale = ref(10)
 const marginFloorRental = ref(8)
+const canEditMarginFloors = ref(false)
 
 const techDiscountSaving = ref(false)
 const techDiscountError = ref('')
@@ -58,6 +61,8 @@ const dayOptions = computed(() =>
     label: String(i + 1),
   })),
 )
+
+const marginFloorsEditable = computed(() => canEditMarginFloors.value)
 
 async function load() {
   error.value = ''
@@ -94,6 +99,7 @@ async function loadTechnicianDiscount() {
     marginFloorService.value = clampPct(fSvc, 0, MARGIN_PERCENT_MAX)
     marginFloorSale.value = clampPct(fSale, 0, MARGIN_PERCENT_MAX)
     marginFloorRental.value = clampPct(fRent, 0, MARGIN_PERCENT_MAX)
+    canEditMarginFloors.value = d?.can_edit_margin_floors === true || auth.user?.rol === 'super_admin'
 
     const svc = Number(d?.technician_service_discount_percent ?? d?.technician_catalog_discount_percent ?? 10)
     const sale = Number(d?.technician_inventory_sale_discount_percent ?? 10)
@@ -127,7 +133,7 @@ async function saveTechnicianDiscount() {
   clampMarginFieldsToFloors()
   techDiscountSaving.value = true
   try {
-    await updateTechnicianCatalogDiscount({
+    const payload = {
       technician_service_discount_percent: clampPct(
         technicianServiceDiscountPercent.value,
         marginFloorService.value,
@@ -140,12 +146,17 @@ async function saveTechnicianDiscount() {
         technicianInventoryRentalDiscountPercent.value,
         marginFloorRental.value,
       ),
-      technician_service_margin_floor_percent: clampPct(marginFloorService.value, 0, MARGIN_PERCENT_MAX),
-      technician_inventory_sale_margin_floor_percent: clampPct(marginFloorSale.value, 0, MARGIN_PERCENT_MAX),
-      technician_inventory_rental_margin_floor_percent: clampPct(marginFloorRental.value, 0, MARGIN_PERCENT_MAX),
-    })
+    }
+    if (marginFloorsEditable.value) {
+      payload.technician_service_margin_floor_percent = clampPct(marginFloorService.value, 0, MARGIN_PERCENT_MAX)
+      payload.technician_inventory_sale_margin_floor_percent = clampPct(marginFloorSale.value, 0, MARGIN_PERCENT_MAX)
+      payload.technician_inventory_rental_margin_floor_percent = clampPct(marginFloorRental.value, 0, MARGIN_PERCENT_MAX)
+    }
+    await updateTechnicianCatalogDiscount(payload)
     await loadTechnicianDiscount()
-    techDiscountOk.value = 'Pisos y márgenes guardados. Quedan aplicados al facturar.'
+    techDiscountOk.value = marginFloorsEditable.value
+      ? 'Pisos y márgenes guardados. Quedan aplicados al facturar.'
+      : 'Márgenes aplicados guardados. Quedan aplicados al facturar.'
   } catch (e) {
     techDiscountError.value = e.data?.message || e.message || 'No se pudo guardar.'
     if (e.data?.errors) {
@@ -171,6 +182,7 @@ watch(marginFloorRental, (f) => {
 })
 
 function onFloorBlur() {
+  if (!marginFloorsEditable.value) return
   marginFloorService.value = clampPct(marginFloorService.value, 0, MARGIN_PERCENT_MAX)
   marginFloorSale.value = clampPct(marginFloorSale.value, 0, MARGIN_PERCENT_MAX)
   marginFloorRental.value = clampPct(marginFloorRental.value, 0, MARGIN_PERCENT_MAX)
@@ -385,6 +397,9 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
             El <strong>piso mínimo</strong> es el porcentaje que no se puede rebajar al guardar (cada tipo es
             independiente). El <strong>margen aplicado</strong> debe estar entre ese piso y
             {{ MARGIN_PERCENT_MAX }}&nbsp;%. Al facturar: facturable = referencia ÷ ((100 − <em>p</em>) / 100).
+            <template v-if="!marginFloorsEditable">
+              Solo un <strong>super administrador</strong> puede cambiar los pisos; usted puede ajustar los márgenes aplicados.
+            </template>
           </p>
         </header>
 
@@ -413,6 +428,8 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
                     :max="MARGIN_PERCENT_MAX"
                     step="0.5"
                     class="select mg-input"
+                    :disabled="!marginFloorsEditable"
+                    :title="marginFloorsEditable ? '' : 'Solo super administrador'"
                     @blur="onFloorBlur"
                   />
                 </label>
@@ -450,6 +467,8 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
                     :max="MARGIN_PERCENT_MAX"
                     step="0.5"
                     class="select mg-input"
+                    :disabled="!marginFloorsEditable"
+                    :title="marginFloorsEditable ? '' : 'Solo super administrador'"
                     @blur="onFloorBlur"
                   />
                 </label>
@@ -487,6 +506,8 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
                     :max="MARGIN_PERCENT_MAX"
                     step="0.5"
                     class="select mg-input"
+                    :disabled="!marginFloorsEditable"
+                    :title="marginFloorsEditable ? '' : 'Solo super administrador'"
                     @blur="onFloorBlur"
                   />
                 </label>
@@ -513,7 +534,13 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
 
         <div class="margin-footer-actions">
           <button type="button" class="btn primary" :disabled="techDiscountSaving" @click="saveTechnicianDiscount">
-            {{ techDiscountSaving ? 'Guardando…' : 'Guardar pisos y márgenes' }}
+            {{
+              techDiscountSaving
+                ? 'Guardando…'
+                : marginFloorsEditable
+                  ? 'Guardar pisos y márgenes'
+                  : 'Guardar márgenes aplicados'
+            }}
           </button>
         </div>
         <p v-if="techDiscountError" class="banner err banner-tight">{{ techDiscountError }}</p>
@@ -1151,6 +1178,11 @@ h1 {
   font-variant-numeric: tabular-nums;
   text-align: right;
   min-height: 2.1rem;
+}
+
+.mg-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .margin-footer-actions {

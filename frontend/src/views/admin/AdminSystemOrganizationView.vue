@@ -56,6 +56,12 @@ async function refreshLogoPreview() {
   }
 }
 
+/** Solo metadatos del logo; no pisa el formulario con datos aún no guardados en BD. */
+function applyLogoMetaOnly(d) {
+  logoConfigured.value = Boolean(d?.logo_configured)
+  logoFilename.value = d?.logo_filename || ''
+}
+
 function applyData(d) {
   legalName.value = d.legal_name || ''
   tradeName.value = d.trade_name || ''
@@ -91,6 +97,8 @@ const formSnapshot = computed(() => ({
 const invoiceFieldChecklist = computed(() => invoiceEmitterChecklistFromForm(formSnapshot.value))
 
 const invoiceFieldsReady = computed(() => invoiceFieldChecklist.value.every((f) => f.ok))
+
+const showInvoicePdfChecklist = computed(() => !(invoiceFieldsReady.value && logoConfigured.value))
 
 async function load() {
   error.value = ''
@@ -157,7 +165,7 @@ async function onLogoSelected(ev) {
     fd.append('file', file)
     const r = await uploadSystemOrganizationLogo(fd)
     toast.value = r.message || 'Logo actualizado.'
-    applyData(r.data)
+    applyLogoMetaOnly(r.data)
     await refreshLogoPreview()
   } catch (e) {
     error.value = e.data?.message || e.message || 'No se pudo subir el logo.'
@@ -172,7 +180,7 @@ async function removeLogo() {
   try {
     const r = await deleteSystemOrganizationLogo()
     toast.value = r.message || 'Logo eliminado.'
-    applyData(r.data)
+    applyLogoMetaOnly(r.data)
     revokeLogoPreview()
   } catch (e) {
     error.value = e.data?.message || e.message || 'No se pudo eliminar.'
@@ -214,12 +222,8 @@ onUnmounted(revokeLogoPreview)
 
       <div class="rounded-xl border border-slate-700/80 bg-[#111723] p-3 sm:p-4 space-y-4">
         <div
-          class="rounded-lg border p-3 text-sm"
-          :class="
-            invoiceFieldsReady && logoConfigured
-              ? 'border-emerald-700/50 bg-emerald-950/25 text-emerald-100'
-              : 'border-amber-600/45 bg-amber-950/20 text-amber-100'
-          "
+          v-if="showInvoicePdfChecklist"
+          class="rounded-lg border border-amber-600/45 bg-amber-950/20 p-3 text-sm text-amber-100"
         >
           <p class="font-medium text-white">Datos para factura PDF</p>
           <ul class="mt-2 space-y-1 text-xs">
