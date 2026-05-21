@@ -83,7 +83,7 @@ const {
       await router.push('/admin/mantenimientos')
       return
     }
-    await router.push(`/admin/servicios/${created.id}`)
+    await router.push('/admin/servicios')
   },
   async onEmpleadoAfterCreate(created) {
     emit('created', created)

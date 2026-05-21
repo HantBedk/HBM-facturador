@@ -91,9 +91,17 @@ function totalFromLines(list) {
   return t
 }
 
+function lineLabelForServiceType(row) {
+  const desc = String(row?.line_description || '').trim()
+  if (desc) return desc
+  const name = String(row?.custom_name || row?.label || '').trim()
+  if (name && name !== 'Servicio') return name
+  return ''
+}
+
 function syncTypeAndAmount(list) {
-  const labels = list.map((r) => (r.label || r.custom_name || '').trim()).filter(Boolean)
-  const service_type = labels.length ? labels.join(' · ') : props.modelValue.service_type || ''
+  const labels = list.map((r) => lineLabelForServiceType(r)).filter(Boolean)
+  const service_type = labels.length ? labels.join(' · ') : props.modelValue.service_type || 'Servicio'
   return {
     lines: list,
     amount: String(totalFromLines(list).toFixed(2)),
@@ -1090,20 +1098,14 @@ watch(
       Total referencia (lo que ingresas por línea): {{ totalDisplay }}
     </p>
 
-    <!-- Resumen tipo servicio (se sincroniza con los ítems; editable) -->
-    <div v-if="lines.length">
-      <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Resumen en una línea <span class="text-red-400">*</span>
-      </label>
-      <input
-        :value="inner.service_type"
-        type="text"
-        :disabled="disabled"
-        class="w-full rounded-2xl border border-slate-700/90 bg-[#141a22] px-4 py-3.5 text-[0.9375rem] text-white outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
-        @input="patch({ service_type: $event.target.value })"
-      />
-      <p v-if="fieldErrors.service_type" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.service_type[0] }}</p>
-    </div>
+    <!-- Resumen en una línea: oculto; `service_type` se arma desde descripción / conceptos (syncTypeAndAmount). -->
+    <p
+      v-if="lines.length && fieldErrors.service_type"
+      class="text-sm text-red-400"
+      role="alert"
+    >
+      {{ fieldErrors.service_type[0] }}
+    </p>
     </section>
     </div>
 
