@@ -13,13 +13,7 @@ const loading = ref(true)
 const loadError = ref('')
 const data = ref(null)
 
-// Gráfico Area Spline (ApexCharts) idéntico a Dashboard.png
-const chartSeries = ref([
-  { name: 'Este Mes', data: [18000, 25000, 42000, 45680, 52000] },
-  { name: 'Mes Anterior', data: [15000, 24000, 39000, 40580, 43000] }
-])
-
-const chartOptions = ref({
+const chartBaseOptions = {
   chart: {
     type: 'area',
     background: 'transparent',
@@ -35,7 +29,7 @@ const chartOptions = ref({
   dataLabels: { enabled: false },
   stroke: { curve: 'smooth', width: 2.5 },
   xaxis: {
-    categories: ['Jun', 'Jul', 'Aug', 'Sept', 'Oct'],
+    categories: [],
     axisBorder: { show: true, color: '#334155' },
     axisTicks: { show: false },
     labels: { style: { colors: '#94a3b8', fontSize: '12px' } }
@@ -56,9 +50,31 @@ const chartOptions = ref({
   theme: { mode: 'dark' },
   tooltip: {
     theme: 'dark',
-    y: { formatter: (val) => '$ ' + val.toLocaleString() }
+    y: { formatter: (val) => '$ ' + Number(val).toLocaleString('es-CO') }
   }
+}
+
+const chartSeries = computed(() => {
+  const raw = data.value?.monthly_revenue_chart?.series
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return [
+      { name: 'Este mes', data: [] },
+      { name: 'Mes anterior', data: [] },
+    ]
+  }
+  return raw.map((s) => ({
+    name: s.name ?? '',
+    data: (s.data ?? []).map((v) => Number(v) || 0),
+  }))
 })
+
+const chartOptions = computed(() => ({
+  ...chartBaseOptions,
+  xaxis: {
+    ...chartBaseOptions.xaxis,
+    categories: data.value?.monthly_revenue_chart?.categories ?? [],
+  },
+}))
 
 async function loadDashboard() {
   loading.value = true
@@ -328,7 +344,7 @@ const netAfterTechniciansClass = computed(() => {
         <section class="bg-[#1e2532] rounded-2xl shadow-lg border border-transparent overflow-hidden flex flex-col h-[500px]">
           <div class="px-7 py-6 flex items-center justify-between">
             <h2 class="text-xl font-bold text-white tracking-wide m-0">
-              Ingresos mensuales (referencia) — {{ data?.period?.label || '—' }}
+              Ingresos mensuales (cobros) — {{ data?.period?.label || '—' }}
             </h2>
             <div class="flex items-center gap-5 text-sm font-semibold">
                <div class="flex items-center gap-2 text-slate-300">

@@ -2,9 +2,12 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import {
+  downloadBillingExportCsv,
   fetchBillingAutomationSettings,
+  importRecurringFixedChargesFromSpreadsheet,
   updateBillingAutomationSettings,
 } from '@/services/adminBillingAutomationApi.js'
+import { useUiDialogStore } from '@/stores/uiDialog'
 import {
   fetchTechnicianCatalogDiscount,
   updateTechnicianCatalogDiscount,
@@ -34,6 +37,15 @@ const marginFloorRental = ref(8)
 const techDiscountSaving = ref(false)
 const techDiscountError = ref('')
 const techDiscountOk = ref('')
+
+const uiDialog = useUiDialogStore()
+
+const invoicesExportBusy = ref(false)
+const recurringExportBusy = ref(false)
+const recurringImportBusy = ref(false)
+const recurringImportFileRef = ref(null)
+const excelError = ref('')
+const excelOk = ref('')
 
 const passwordModalOpen = ref(false)
 const modalPassword = ref('')
@@ -226,6 +238,104 @@ function usingDb(key) {
   return !!storedInDatabase.value[key]
 }
 
+function triggerCsvDownload(blob, filename) {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
+async function exportInvoicesCsv() {
+  excelError.value = ''
+  excelOk.value = ''
+  invoicesExportBusy.value = true
+  try {
+    const { blob, filename } = await downloadBillingExportCsv('/admin/export/invoices')
+    triggerCsvDownload(blob, filename)
+  } catch (e) {
+    excelError.value = e.message || 'No se pudo exportar facturas.'
+  } finally {
+    invoicesExportBusy.value = false
+  }
+}
+
+async function downloadRecurringTemplate() {
+  excelError.value = ''
+  recurringExportBusy.value = true
+  try {
+    const { blob, filename } = await downloadBillingExportCsv('/admin/export/recurring-fixed-charges/template')
+    triggerCsvDownload(blob, filename)
+  } catch (e) {
+    excelError.value = e.message || 'No se pudo descargar la plantilla.'
+  } finally {
+    recurringExportBusy.value = false
+  }
+}
+
+async function downloadRecurringExport() {
+  excelError.value = ''
+  recurringExportBusy.value = true
+  try {
+    const { blob, filename } = await downloadBillingExportCsv('/admin/export/recurring-fixed-charges')
+    triggerCsvDownload(blob, filename)
+  } catch (e) {
+    excelError.value = e.message || 'No se pudo exportar cargos fijos.'
+  } finally {
+    recurringExportBusy.value = false
+  }
+}
+
+function formatRecurringImportSummary(data) {
+  const lines = [data?.message || 'Importación finalizada.']
+  const issues = data?.issues
+  if (issues?.length) {
+    lines.push('')
+    lines.push('Detalle por fila (máx. 20):')
+    issues.slice(0, 20).forEach((i) => {
+      lines.push(`· Fila ${i.line}: ${i.message}`)
+    })
+    if (issues.length > 20) {
+      lines.push(`… y ${issues.length - 20} más.`)
+    }
+  }
+  return lines.join('\n')
+}
+
+async function onRecurringImportFile(ev) {
+  const input = ev.target
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (file.size < 1) {
+    excelError.value = 'El archivo está vacío. Elija otro CSV o Excel.'
+    return
+  }
+  recurringImportBusy.value = true
+  excelError.value = ''
+  excelOk.value = ''
+  try {
+    const data = await importRecurringFixedChargesFromSpreadsheet(file)
+    excelOk.value = data?.message || 'Importación completada.'
+    await uiDialog.alert({
+      title: 'Cargos fijos mensuales',
+      message: formatRecurringImportSummary(data),
+    })
+  } catch (e) {
+    excelError.value = e.data?.message || e.message || 'No se pudo importar.'
+    const fe = e.data?.errors?.file
+    if (Array.isArray(fe) && fe[0]) {
+      excelError.value = fe[0]
+    }
+  } finally {
+    recurringImportBusy.value = false
+  }
+}
+
+function triggerRecurringImportPick() {
+  recurringImportFileRef.value?.click()
+}
+
 function onDocumentEscape(ev) {
   if (ev.key !== 'Escape' || !passwordModalOpen.value || saving.value) return
   ev.preventDefault()
@@ -267,6 +377,7 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
     <div v-if="loading" class="muted pad">Cargando…</div>
 
     <div v-else class="billing-stack">
+      <div class="billing-main-col">
       <section class="card margin-board" aria-labelledby="margins-heading">
         <header class="margin-board-head">
           <h2 id="margins-heading" class="margin-title">Márgenes globales</h2>
@@ -409,8 +520,73 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
         <p v-else-if="techDiscountOk" class="banner ok banner-tight">{{ techDiscountOk }}</p>
       </section>
 
-      <div class="card billing-primary billing-side-card">
-        <h2 class="card-section-title">Programación de borradores</h2>
+      <section class="card excel-card" aria-labelledby="excel-heading">
+        <h2 id="excel-heading" class="card-section-title">Excel / CSV (facturación)</h2>
+        <p class="field-hint excel-lede">
+          Use el mismo formato para <strong>descargar y volver a subir</strong> cargos fijos mensuales por empresa (columnas:
+          NIT, descripción, importe, tipo, activo, orden). Las facturas se exportan solo para consulta en hoja de cálculo.
+        </p>
+        <p v-if="excelError" class="banner err banner-tight">{{ excelError }}</p>
+        <p v-else-if="excelOk" class="banner ok banner-tight">{{ excelOk }}</p>
+
+        <div class="excel-block">
+          <h3 class="excel-subtitle">Facturas</h3>
+          <button
+            type="button"
+            class="btn secondary"
+            :disabled="invoicesExportBusy"
+            @click="exportInvoicesCsv"
+          >
+            {{ invoicesExportBusy ? 'Exportando…' : 'Exportar listado de facturas (CSV)' }}
+          </button>
+        </div>
+
+        <div class="excel-block">
+          <h3 class="excel-subtitle">Cargos fijos mensuales</h3>
+          <p class="field-hint">
+            Edite en Excel la plantilla o el export actual y súbalo de nuevo. Si el NIT y la descripción coinciden con un cargo
+            existente de esa empresa, se actualiza; si no, se crea.
+          </p>
+          <div class="excel-actions">
+            <button
+              type="button"
+              class="btn secondary"
+              :disabled="recurringExportBusy"
+              @click="downloadRecurringTemplate"
+            >
+              Descargar plantilla
+            </button>
+            <button
+              type="button"
+              class="btn secondary"
+              :disabled="recurringExportBusy"
+              @click="downloadRecurringExport"
+            >
+              {{ recurringExportBusy ? 'Descargando…' : 'Exportar cargos actuales' }}
+            </button>
+            <input
+              ref="recurringImportFileRef"
+              type="file"
+              class="excel-file-input"
+              accept=".csv,.txt,.xlsx,.xls,.xlsm"
+              :disabled="recurringImportBusy"
+              @change="onRecurringImportFile"
+            />
+            <button
+              type="button"
+              class="btn secondary"
+              :disabled="recurringImportBusy"
+              @click="triggerRecurringImportPick"
+            >
+              {{ recurringImportBusy ? 'Importando…' : 'Subir Excel o CSV…' }}
+            </button>
+          </div>
+        </div>
+      </section>
+      </div>
+
+      <aside class="card billing-primary billing-side-card" aria-labelledby="drafts-heading">
+        <h2 id="drafts-heading" class="card-section-title">Programación de borradores</h2>
         <label class="toggle-row">
           <input v-model="draftGenerationEnabled" type="checkbox" class="chk" />
           <span class="toggle-txt">
@@ -453,7 +629,7 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
             Guardar en el sistema
           </button>
         </div>
-      </div>
+      </aside>
     </div>
 
     <Teleport to="body">
@@ -503,7 +679,7 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
 }
 
 .head {
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .crumb {
@@ -547,7 +723,7 @@ h1 {
   font-size: 0.82rem;
   line-height: 1.55;
   color: #94a3b8;
-  margin: 0 0 1rem;
+  margin: 0 0 0.65rem;
   width: 100%;
   max-width: none;
 }
@@ -587,43 +763,45 @@ h1 {
 }
 
 .card {
-  padding: 1.35rem 1.4rem 1.4rem;
-  border-radius: 16px;
+  padding: 1rem 1.1rem 1.1rem;
+  border-radius: 12px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   background: linear-gradient(160deg, rgba(24, 32, 48, 0.92) 0%, rgba(15, 23, 42, 0.72) 100%);
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.04) inset,
-    0 8px 32px rgba(0, 0, 0, 0.22);
+    0 4px 20px rgba(0, 0, 0, 0.18);
 }
 
 .card.margin-board {
-  padding: 1.1rem 1.15rem 1.2rem;
+  padding: 0.95rem 1rem 1rem;
 }
 
 .billing-stack {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1.35rem;
+  gap: 0.65rem;
   align-items: start;
 }
 
-/*
-  Dos columnas solo cuando cabe sidebar (260px) + márgenes (≥36rem) + borradores + paddings.
-  Por debajo: una columna → la tabla de márgenes recupera todo el ancho y no se comprime.
-*/
-@media (min-width: 1280px) {
+.billing-main-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+@media (min-width: 1100px) {
   .billing-stack {
-    grid-template-columns: auto minmax(20rem, 32rem);
-    /* row-gap si el grid pasa a dos filas; column-gap mínimo entre márgenes y borradores */
-    gap: 1.35rem 0.3rem;
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 26rem);
+    gap: 0.75rem 1rem;
     align-items: start;
   }
 }
 
 .card-section-title {
-  margin: 0 0 1rem;
-  padding-bottom: 0.85rem;
-  font-size: 1.05rem;
+  margin: 0 0 0.75rem;
+  padding-bottom: 0.6rem;
+  font-size: 1.02rem;
   font-weight: 600;
   color: #ccfbf1;
   letter-spacing: 0.02em;
@@ -632,6 +810,51 @@ h1 {
 
 .field-last {
   margin-bottom: 0;
+}
+
+.excel-card {
+  margin-top: 0;
+}
+
+.excel-lede {
+  margin: 0 0 0.75rem;
+}
+
+.excel-block {
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.excel-block:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.excel-subtitle {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.excel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.excel-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
 }
 
 .billing-side-card {
@@ -647,8 +870,8 @@ h1 {
   display: flex;
   align-items: flex-start;
   gap: 0.65rem;
-  padding-bottom: 1rem;
-  margin-bottom: 1.1rem;
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.85rem;
   border-bottom: 1px solid rgba(148, 163, 184, 0.1);
   cursor: pointer;
 }
@@ -673,7 +896,7 @@ h1 {
 }
 
 .field {
-  margin-bottom: 1.15rem;
+  margin-bottom: 0.9rem;
 }
 
 .lab {
@@ -756,8 +979,8 @@ h1 {
 }
 
 .actions {
-  margin-top: 1.25rem;
-  padding-top: 1rem;
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
   border-top: 1px solid rgba(148, 163, 184, 0.15);
 }
 
@@ -766,26 +989,16 @@ h1 {
   flex-direction: column;
   min-height: 0;
   width: 100%;
-  max-width: min(44rem, 100%);
-  justify-self: center;
-}
-
-@media (min-width: 1280px) {
-  .margin-board {
-    justify-self: start;
-    width: auto;
-    max-width: min(44rem, 100%);
-  }
 }
 
 .margin-board-head {
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
   padding: 0 0.05rem;
 }
 
 .margin-title {
-  margin: 0 0 0.5rem;
-  padding-bottom: 0.65rem;
+  margin: 0 0 0.4rem;
+  padding-bottom: 0.5rem;
   font-size: 1rem;
   font-weight: 600;
   color: #ccfbf1;
@@ -941,8 +1154,8 @@ h1 {
 }
 
 .margin-footer-actions {
-  margin-top: 1.1rem;
-  padding-top: 0.95rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
   border-top: 1px solid rgba(148, 163, 184, 0.12);
   padding-left: 0.05rem;
   padding-right: 0.05rem;

@@ -25,9 +25,11 @@ final class ServiceCatalogSpreadsheetImporter
     public const MAX_ROWS = 2000;
 
     /**
-     * @return list<array{line: int, name: string, description: ?string, base_price: float}>
+     * Primera hoja o CSV como matriz de celdas (reutilizable por otros importadores).
+     *
+     * @return list<list<mixed>>
      */
-    public function parse(UploadedFile $file): array
+    public function readRawMatrix(UploadedFile $file): array
     {
         $path = $file->getRealPath();
         if ($path === false || ! is_readable($path)) {
@@ -84,6 +86,16 @@ final class ServiceCatalogSpreadsheetImporter
                 'file' => ['El archivo no contiene filas con datos.'],
             ]);
         }
+
+        return $data;
+    }
+
+    /**
+     * @return list<array{line: int, name: string, description: ?string, base_price: float}>
+     */
+    public function parse(UploadedFile $file): array
+    {
+        $data = $this->readRawMatrix($file);
 
         $headerScan = $this->findRecognizedHeaderRow($data);
         if ($headerScan !== null) {

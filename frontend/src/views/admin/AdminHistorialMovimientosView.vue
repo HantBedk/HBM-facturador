@@ -8,6 +8,9 @@ const error = ref('')
 const groups = ref([])
 /** YYYY-MM-DD; el servidor interpreta el día en APP_TIMEZONE y devuelve la fecha canónica en `date`. */
 const selectedDate = ref('')
+/** Borrador del input «Ir a fecha» (sincronizado con `selectedDate` al cargar o elegir en calendario). */
+const dateJumpDraft = ref('')
+const dateJumpError = ref('')
 const timezoneLabel = ref('')
 
 /** Mes mostrado en el calendario (puede diferir del mes de `selectedDate` si el usuario navega con ‹ ›). */
@@ -21,6 +24,10 @@ const calendarMeta = ref({
 })
 
 const scopeLabel = computed(() => (scope.value === 'facturas' ? 'facturas y pagos' : 'toda la actividad registrada'))
+
+const todayYmd = computed(() => calendarMeta.value.today || '')
+
+const selectedDateLabel = computed(() => formatDateEs(selectedDate.value))
 
 const activityDatesSet = computed(() => new Set(calendarMeta.value.dates_with_activity || []))
 
@@ -42,6 +49,66 @@ function syncViewMonthFromYmd(ymd) {
   if (parts.length >= 2 && !parts.some(Number.isNaN)) {
     viewMonth.value = { year: parts[0], month: parts[1] }
   }
+}
+
+function viewMonthMatchesYmd(ymd) {
+  const parts = String(ymd || '')
+    .split('-')
+    .map(Number)
+  if (parts.length < 2 || parts.some(Number.isNaN)) return true
+  return viewMonth.value.year === parts[0] && viewMonth.value.month === parts[1]
+}
+
+function formatDateEs(ymd) {
+  if (!ymd) return ''
+  const parts = String(ymd).split('-').map(Number)
+  if (parts.length < 3 || parts.some(Number.isNaN)) return ymd
+  try {
+    return new Date(parts[0], parts[1] - 1, parts[2]).toLocaleDateString('es-CO', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    })
+  } catch {
+    return ymd
+  }
+}
+
+async function applyDateJump() {
+  dateJumpError.value = ''
+  const ymd = String(dateJumpDraft.value || '').trim()
+  if (!ymd) {
+    dateJumpError.value = 'Elija una fecha.'
+    return
+  }
+  const today = todayYmd.value
+  if (today && ymd > today) {
+    dateJumpError.value = 'No puede consultar fechas futuras.'
+    dateJumpDraft.value = selectedDate.value || today
+    return
+  }
+  const monthChanged = !viewMonthMatchesYmd(ymd)
+  syncViewMonthFromYmd(ymd)
+  if (ymd === selectedDate.value) {
+    if (monthChanged) await load()
+    return
+  }
+  selectedDate.value = ymd
+}
+
+async function goToToday() {
+  const today = todayYmd.value
+  if (!today) return
+  dateJumpError.value = ''
+  dateJumpDraft.value = today
+  const monthChanged = !viewMonthMatchesYmd(today)
+  syncViewMonthFromYmd(today)
+  if (selectedDate.value !== today) {
+    selectedDate.value = today
+    return
+  }
+  if (monthChanged) await load()
 }
 
 function monthTitleEs() {
@@ -229,6 +296,10 @@ async function load() {
   }
 }
 
+watch(selectedDate, (d) => {
+  dateJumpDraft.value = d || ''
+})
+
 watch([scope, selectedDate], async () => {
   if (ignoreNextDateWatch) {
     ignoreNextDateWatch = false
@@ -301,13 +372,54 @@ watch([scope, selectedDate], async () => {
         </div>
       </div>
 
-      <label class="field">
-        <span class="lbl">Tipo de registro</span>
-        <select v-model="scope" class="sel">
-          <option value="all">Todo (servicios y facturas)</option>
-          <option value="facturas">Solo facturas y pagos</option>
-        </select>
-      </label>
+      <div class="toolbar-side">
+        <div class="field field-date-jump">
+          <span class="lbl" id="historial-date-jump-label">Ir a fecha</span>
+          <div class="date-jump-row">
+            <input
+              id="historial-date-jump"
+              v-model="dateJumpDraft"
+              type="date"
+              class="date-inp"
+              aria-labelledby="historial-date-jump-label"
+              :max="todayYmd || undefined"
+              :disabled="loading"
+              @change="applyDateJump"
+              @keydown.enter.prevent="applyDateJump"
+            />
+            <button
+              type="button"
+              class="btn-jump"
+              :disabled="loading || !dateJumpDraft"
+              title="Ir a la fecha indicada"
+              @click="applyDateJump"
+            >
+              Ir
+            </button>
+            <button
+              type="button"
+              class="btn-jump btn-jump--ghost"
+              :disabled="loading || !todayYmd"
+              title="Ir al día de hoy"
+              @click="goToToday"
+            >
+              Hoy
+            </button>
+          </div>
+          <p v-if="dateJumpError" class="date-jump-msg date-jump-msg--err">{{ dateJumpError }}</p>
+          <p v-else-if="selectedDateLabel" class="date-jump-msg">
+            Consultando: <strong>{{ selectedDateLabel }}</strong>
+          </p>
+        </div>
+
+        <label class="field">
+          <span class="lbl">Tipo de registro</span>
+          <select v-model="scope" class="sel">
+            <option value="all">Todo (servicios y facturas)</option>
+            <option value="facturas">Solo facturas y pagos</option>
+          </select>
+        </label>
+      </div>
     </div>
 
     <p v-if="error" class="banner err">{{ error }}</p>
@@ -549,11 +661,99 @@ h1 {
   z-index: 1;
 }
 
+.toolbar-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex: 0 1 16rem;
+  min-width: min(100%, 15rem);
+}
+
 .field {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
   flex: 0 1 14rem;
+}
+
+.field-date-jump {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.date-jump-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.date-inp {
+  flex: 1 1 9.5rem;
+  min-width: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.75);
+  color: #e2e8f0;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.date-inp:disabled {
+  opacity: 0.55;
+}
+
+.date-inp:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.75);
+  outline-offset: 1px;
+}
+
+.btn-jump {
+  flex: 0 0 auto;
+  padding: 0.45rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(37, 99, 235, 0.55);
+  color: #f8fafc;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn-jump:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.75);
+}
+
+.btn-jump--ghost {
+  background: transparent;
+  color: #cbd5e1;
+}
+
+.btn-jump--ghost:hover:not(:disabled) {
+  background: rgba(51, 65, 85, 0.65);
+}
+
+.btn-jump:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.date-jump-msg {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #64748b;
+}
+
+.date-jump-msg strong {
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+.date-jump-msg--err {
+  color: #fca5a5;
 }
 
 .lbl {

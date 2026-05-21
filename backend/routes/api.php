@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AdminCompanyController;
 use App\Http\Controllers\Api\AdminCompanyRecurringServiceController;
 use App\Http\Controllers\Api\AdminDashboardController;
 use App\Http\Controllers\Api\AdminExportController;
+use App\Http\Controllers\Api\AdminRecurringFixedChargesSpreadsheetController;
 use App\Http\Controllers\Api\AdminInvoiceController;
 use App\Http\Controllers\Api\AdminMailNotificationsSettingsController;
 use App\Http\Controllers\Api\AdminSystemOrganizationController;
@@ -168,6 +169,9 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
 
         Route::get('/admin/export/services', [AdminExportController::class, 'services']);
         Route::get('/admin/export/invoices', [AdminExportController::class, 'invoices']);
+        Route::get('/admin/export/recurring-fixed-charges/template', [AdminRecurringFixedChargesSpreadsheetController::class, 'template']);
+        Route::get('/admin/export/recurring-fixed-charges', [AdminRecurringFixedChargesSpreadsheetController::class, 'export']);
+        Route::post('/admin/import/recurring-fixed-charges', [AdminRecurringFixedChargesSpreadsheetController::class, 'import']);
         Route::get('/admin/activity-logs', [AdminActivityLogController::class, 'index']);
 
         Route::post('/admin/services/assign-to-technician', [ServiceController::class, 'assignToTechnician']);

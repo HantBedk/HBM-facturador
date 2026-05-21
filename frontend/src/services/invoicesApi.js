@@ -19,35 +19,26 @@ export function fetchAdminInvoice(id) {
 /**
  * @param {{
  *   company_id: number|string,
- *   period_year: number,
- *   period_month: number,
  *   invoice_id?: number|string,
- *   recurring_backlog_start_year?: number,
- *   recurring_backlog_start_month?: number,
+ *   include_recurring?: boolean,
  * }} q
  */
 export function fetchAvailableServicesForInvoice(q) {
   const qs = new URLSearchParams({
     company_id: String(q.company_id),
-    period_year: String(q.period_year),
-    period_month: String(q.period_month),
   })
   if (q.invoice_id != null && q.invoice_id !== '') qs.set('invoice_id', String(q.invoice_id))
-  if (q.recurring_backlog_start_year != null && q.recurring_backlog_start_year !== '')
-    qs.set('recurring_backlog_start_year', String(q.recurring_backlog_start_year))
-  if (q.recurring_backlog_start_month != null && q.recurring_backlog_start_month !== '')
-    qs.set('recurring_backlog_start_month', String(q.recurring_backlog_start_month))
+  if (q.include_recurring === false) qs.set('include_recurring', '0')
+  else if (q.include_recurring === true) qs.set('include_recurring', '1')
   return api(`/admin/invoices/available-services?${qs}`).then((r) => r.data)
 }
 
 /**
  * @param {{
  *   company_id: number|string,
- *   period_year: number,
- *   period_month: number,
  *   service_ids: number[],
- *   recurring_backlog_start_year?: number,
- *   recurring_backlog_start_month?: number,
+ *   period_year?: number,
+ *   period_month?: number,
  * }} payload
  */
 export function createInvoice(payload) {
@@ -61,11 +52,9 @@ export function createInvoice(payload) {
  * @param {number|string} id
  * @param {{
  *   company_id: number|string,
- *   period_year: number,
- *   period_month: number,
  *   service_ids: number[],
- *   recurring_backlog_start_year?: number,
- *   recurring_backlog_start_month?: number,
+ *   period_year?: number,
+ *   period_month?: number,
  * }} payload
  */
 export function updateInvoice(id, payload) {

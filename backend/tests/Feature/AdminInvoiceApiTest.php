@@ -474,11 +474,11 @@ class AdminInvoiceApiTest extends TestCase
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN, 'estado' => User::ESTADO_ACTIVO]);
         $empleado = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
 
-        CompanyRecurringService::query()->create([
+        $tpl = CompanyRecurringService::query()->create([
             'company_id' => $company->id,
             'catalog_id' => null,
             'billing_kind' => 'servicio',
-            'description' => 'Cuota fija',
+            'description' => 'Cuota fija mensual del contrato',
             'amount' => 25000,
             'is_active' => true,
             'sort_order' => 0,
@@ -496,71 +496,82 @@ class AdminInvoiceApiTest extends TestCase
             'status' => Service::STATUS_ACTIVO,
         ]);
 
+        $recurring = Service::query()->create([
+            'code' => 'REC-MNL-1',
+            'company_id' => $company->id,
+            'user_id' => $empleado->id,
+            'recurring_service_id' => $tpl->id,
+            'client_name' => 'Cliente',
+            'service_type' => 'Cuota fija',
+            'description' => 'Cuota fija mensual del contrato',
+            'amount' => 25000,
+            'service_date' => '2026-04-30',
+            'status' => Service::STATUS_ACTIVO,
+        ]);
+
         Sanctum::actingAs($admin);
 
         $r = $this->postJson('/api/admin/invoices', [
             'company_id' => $company->id,
-            'period_year' => 2026,
-            'period_month' => 4,
-            'service_ids' => [$field->id],
+            'service_ids' => [$field->id, $recurring->id],
         ]);
 
         $r->assertCreated();
         $inv = Invoice::query()->findOrFail((int) $r->json('data.id'));
         $this->assertSame(2, $inv->services()->count());
+        $this->assertSame(4, (int) $inv->period_month);
+        $this->assertSame(2026, (int) $inv->period_year);
 
         Carbon::setTestNow();
     }
 
-    public function test_manual_store_backlog_skips_already_invoiced_recurring_months(): void
+    public function test_store_without_recurring_ids_omits_fixed_charges(): void
     {
         $tz = config('app.timezone');
-        Carbon::setTestNow(Carbon::parse('2026-03-15 10:00:00', $tz));
+        Carbon::setTestNow(Carbon::parse('2026-04-05 12:00:00', $tz));
 
         $company = Company::query()->create([
-            'nombre' => 'Emp Backlog',
-            'factura_sigla' => 'BLG',
-            'nit' => '900555222-1',
+            'nombre' => 'Emp Sin Fijo',
+            'factura_sigla' => 'SNF',
+            'nit' => '900555333-1',
             'estado' => Company::ESTADO_ACTIVO,
         ]);
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN, 'estado' => User::ESTADO_ACTIVO]);
+        $empleado = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
 
         CompanyRecurringService::query()->create([
             'company_id' => $company->id,
             'catalog_id' => null,
             'billing_kind' => 'servicio',
-            'description' => 'Mensual',
-            'amount' => 10000,
+            'description' => 'Cuota',
+            'amount' => 15000,
             'is_active' => true,
             'sort_order' => 0,
         ]);
 
-        Sanctum::actingAs($admin);
-
-        $this->postJson('/api/admin/invoices', [
+        $field = Service::query()->create([
+            'code' => 'FLD-ONLY-1',
             'company_id' => $company->id,
-            'period_year' => 2026,
-            'period_month' => 1,
-            'service_ids' => [],
-        ])->assertCreated();
-
-        Carbon::setTestNow(Carbon::parse('2026-03-16 11:00:00', $tz));
-
-        $r2 = $this->postJson('/api/admin/invoices', [
-            'company_id' => $company->id,
-            'period_year' => 2026,
-            'period_month' => 3,
-            'service_ids' => [],
-            'recurring_backlog_start_year' => 2026,
-            'recurring_backlog_start_month' => 1,
+            'user_id' => $empleado->id,
+            'client_name' => 'Cliente',
+            'service_type' => 'Trabajo',
+            'description' => 'Descripción suficientemente larga para validar.',
+            'amount' => 8000,
+            'service_date' => '2025-11-03',
+            'status' => Service::STATUS_ACTIVO,
         ]);
 
-        $r2->assertCreated();
-        $inv = Invoice::query()->orderByDesc('id')->first();
-        $this->assertNotNull($inv);
-        $this->assertSame(3, (int) $inv->period_month);
-        $this->assertSame(2, $inv->services()->count());
-        $this->assertSame('20000.00', number_format((float) $inv->total, 2, '.', ''));
+        Sanctum::actingAs($admin);
+
+        $r = $this->postJson('/api/admin/invoices', [
+            'company_id' => $company->id,
+            'service_ids' => [$field->id],
+        ]);
+
+        $r->assertCreated();
+        $inv = Invoice::query()->findOrFail((int) $r->json('data.id'));
+        $this->assertSame(1, $inv->services()->count());
+        $this->assertSame('8000.00', number_format((float) $inv->total, 2, '.', ''));
 
         Carbon::setTestNow();
     }

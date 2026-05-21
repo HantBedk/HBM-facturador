@@ -37,11 +37,8 @@ const loadError = ref('')
 const saveError = ref('')
 
 const companyId = ref('')
-const periodYear = ref(new Date().getFullYear())
-const periodMonth = ref(new Date().getMonth() + 1)
-/** Opcional: primer mes a incluir cargos fijos no facturados hasta el periodo (misma factura). */
-const recurringBacklogStartYear = ref('')
-const recurringBacklogStartMonth = ref('')
+/** Incluir cargos fijos mensuales en el listado y marcarlos al cargar (predeterminado: sí). */
+const includeRecurringFixed = ref(true)
 
 const available = ref([])
 const selectedIds = ref([])
@@ -74,27 +71,11 @@ function companyOptionLabel(c) {
 
 const skipWatch = ref(true)
 
-const MONTHS = [
-  [1, 'Enero'],
-  [2, 'Febrero'],
-  [3, 'Marzo'],
-  [4, 'Abril'],
-  [5, 'Mayo'],
-  [6, 'Junio'],
-  [7, 'Julio'],
-  [8, 'Agosto'],
-  [9, 'Septiembre'],
-  [10, 'Octubre'],
-  [11, 'Noviembre'],
-  [12, 'Diciembre'],
-]
-
 function isSelected(id) {
   return selectedIds.value.includes(id)
 }
 
 function toggleId(row) {
-  if (row?.is_recurring) return
   const id = row.id
   const i = selectedIds.value.indexOf(id)
   if (i >= 0) {
@@ -122,8 +103,7 @@ function selectAllAvailableServices() {
 }
 
 function clearServiceSelection() {
-  const recurring = (available.value || []).filter((r) => r.is_recurring).map((r) => r.id)
-  selectedIds.value = [...recurring]
+  selectedIds.value = []
 }
 
 function toggleSelectAllCheckbox() {
@@ -132,6 +112,23 @@ function toggleSelectAllCheckbox() {
   } else {
     selectAllAvailableServices()
   }
+}
+
+function syncSelectionAfterLoad(data) {
+  const valid = new Set(data.map((r) => r.id))
+  let kept = selectedIds.value.filter((id) => valid.has(id))
+  if (!includeRecurringFixed.value) {
+    selectedIds.value = kept.filter((id) => {
+      const row = data.find((r) => r.id === id)
+      return row && !row.is_recurring
+    })
+    return
+  }
+  if (!isEdit.value) {
+    const recurringIds = data.filter((r) => r.is_recurring).map((r) => r.id)
+    kept = [...new Set([...kept, ...recurringIds])]
+  }
+  selectedIds.value = kept
 }
 
 watch([allAvailableSelected, someAvailableSelected, sortedAvailable], () => {
@@ -160,13 +157,6 @@ function money(v) {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
 }
 
-function backlogQueryParams() {
-  const y = Number(recurringBacklogStartYear.value)
-  const m = Number(recurringBacklogStartMonth.value)
-  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return {}
-  return { recurring_backlog_start_year: y, recurring_backlog_start_month: m }
-}
-
 async function loadAvailable() {
   loadError.value = ''
   if (!companyId.value) {
@@ -177,16 +167,11 @@ async function loadAvailable() {
   try {
     const data = await fetchAvailableServicesForInvoice({
       company_id: companyId.value,
-      period_year: Number(periodYear.value),
-      period_month: Number(periodMonth.value),
       invoice_id: isEdit.value ? resolvedId.value : undefined,
-      ...backlogQueryParams(),
+      include_recurring: includeRecurringFixed.value,
     })
     available.value = data
-    const valid = new Set(data.map((r) => r.id))
-    const recurringIds = data.filter((r) => r.is_recurring).map((r) => r.id)
-    const kept = selectedIds.value.filter((id) => valid.has(id))
-    selectedIds.value = [...new Set([...kept, ...recurringIds])]
+    syncSelectionAfterLoad(data)
   } catch (e) {
     loadError.value = e.data?.message || e.message || 'No se pudieron cargar los servicios.'
     available.value = []
@@ -195,8 +180,13 @@ async function loadAvailable() {
   }
 }
 
-watch([companyId, periodYear, periodMonth, recurringBacklogStartYear, recurringBacklogStartMonth], () => {
+watch(companyId, () => {
   if (skipWatch.value) return
+  loadAvailable()
+})
+
+watch(includeRecurringFixed, () => {
+  if (skipWatch.value || !companyId.value) return
   loadAvailable()
 })
 
@@ -228,17 +218,17 @@ async function bootstrap() {
         skipWatch.value = false
         return
       }
-      periodYear.value = invoice.value.period_year
-      periodMonth.value = invoice.value.period_month
       selectedIds.value = (invoice.value.services || []).map((s) => s.id)
       await loadAvailable()
+      includeRecurringFixed.value = available.value.some(
+        (r) => r.is_recurring && selectedIds.value.includes(r.id)
+      )
     } catch (e) {
       loadError.value = e.data?.message || e.message || 'No se pudo cargar la factura.'
     }
   } else {
     companyId.value = ''
-    periodYear.value = new Date().getFullYear()
-    periodMonth.value = new Date().getMonth() + 1
+    includeRecurringFixed.value = true
     invoice.value = null
     available.value = []
     selectedIds.value = []
@@ -265,19 +255,16 @@ async function onSubmit() {
 
   const service_ids = [...selectedIds.value]
   if (service_ids.length === 0) {
-    saveError.value = 'No hay líneas seleccionables. Elija empresa y periodo; los cargos fijos se marcan solos si aplican.'
+    saveError.value = 'Seleccione al menos un servicio para la factura.'
     return
   }
 
   saving.value = true
   try {
-    const base = {
-      period_year: Number(periodYear.value),
-      period_month: Number(periodMonth.value),
+    const payload = {
+      company_id: Number(companyId.value),
       service_ids,
-      ...backlogQueryParams(),
     }
-    const payload = { ...base, company_id: Number(companyId.value) }
     let result
     if (isEdit.value) {
       result = await updateInvoice(resolvedId.value, payload)
@@ -325,57 +312,26 @@ async function onSubmit() {
     <p v-if="loading" class="muted">Cargando…</p>
 
     <form v-else class="card form" @submit.prevent="onSubmit">
-      <div class="grid">
-        <label class="field field--wide">
-          <span>Empresa <abbr title="obligatorio">*</abbr></span>
-          <select v-model="companyId" class="input" required :disabled="saving">
-            <option value="" disabled>Seleccione…</option>
-            <option v-for="c in companiesInPickerTab" :key="c.id" :value="String(c.id)">
-              {{ companyOptionLabel(c) }}
-            </option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Año del periodo <abbr title="obligatorio">*</abbr></span>
-          <input v-model.number="periodYear" type="number" min="2000" max="2100" class="input" required :disabled="saving" />
-        </label>
-        <label class="field">
-          <span>Mes del periodo <abbr title="obligatorio">*</abbr></span>
-          <select v-model.number="periodMonth" class="input" required :disabled="saving">
-            <option v-for="[val, label] in MONTHS" :key="val" :value="val">{{ label }}</option>
-          </select>
-        </label>
-        <label class="field field--wide">
-          <span>Regularizar cargos fijos desde (opcional)</span>
-          <div class="backlog-row">
-            <input
-              v-model="recurringBacklogStartYear"
-              class="input backlog-year"
-              type="number"
-              min="2000"
-              max="2100"
-              placeholder="Año"
-              :disabled="saving"
-            />
-            <select v-model="recurringBacklogStartMonth" class="input backlog-month" :disabled="saving">
-              <option value="">Mes (no regularizar)</option>
-              <option v-for="[val, label] in MONTHS" :key="'bl-' + val" :value="String(val)">{{ label }}</option>
-            </select>
-          </div>
-          <span class="field-hint">
-            Si el cliente dejó de facturar varios meses, indique el <strong>primer mes</strong> de cargos fijos a incluir; se
-            listarán hasta el mes del periodo. Lo ya facturado no se duplica.
-          </span>
-        </label>
-      </div>
+      <label class="field field--wide">
+        <span>Empresa <abbr title="obligatorio">*</abbr></span>
+        <select v-model="companyId" class="input" required :disabled="saving">
+          <option value="" disabled>Seleccione…</option>
+          <option v-for="c in companiesInPickerTab" :key="c.id" :value="String(c.id)">
+            {{ companyOptionLabel(c) }}
+          </option>
+        </select>
+      </label>
 
       <div v-if="canSubmitInvoice" class="services-block">
         <div class="services-head">
-          <h2>Servicios del periodo</h2>
+          <h2>Servicios de la empresa</h2>
+          <label class="recurring-check">
+            <input v-model="includeRecurringFixed" type="checkbox" :disabled="saving || loadingServices" />
+            <span>Incluir cargos fijos mensuales</span>
+          </label>
           <p class="hint">
-            Incluye servicios de campo y, si hay plantillas activas, los <strong>cargos fijos mensuales</strong> materializados
-            para la ventana (se seleccionan solos y no se pueden quitar aquí; suspenda la plantilla en Empresas si no debe
-            facturarse). Solo líneas aún no ligadas a otra factura.
+            Se listan todos los servicios disponibles de la empresa (sin filtrar por mes). Solo líneas aún no ligadas a otra
+            factura.
           </p>
           <p v-if="loadingServices" class="muted">Cargando servicios…</p>
           <div
@@ -437,13 +393,7 @@ async function onSubmit() {
             <tbody>
               <tr v-for="row in sortedAvailable" :key="row.id">
                 <td class="chk">
-                  <input
-                    type="checkbox"
-                    :checked="isSelected(row.id)"
-                    :disabled="row.is_recurring"
-                    :title="row.is_recurring ? 'Cargo fijo: se incluye siempre en el borrador (suspenda la plantilla si no aplica).' : ''"
-                    @change="toggleId(row)"
-                  />
+                  <input type="checkbox" :checked="isSelected(row.id)" @change="toggleId(row)" />
                 </td>
                 <td class="mono">
                   {{ row.code }}
@@ -466,14 +416,8 @@ async function onSubmit() {
       <div class="actions">
         <button v-if="embedded" type="button" class="btn secondary" @click="emit('cancel')">Cancelar</button>
         <RouterLink v-else class="btn secondary" to="/admin/facturas">Cancelar</RouterLink>
-        <button
-          type="submit"
-          class="btn primary"
-          :disabled="saving || !canSubmitInvoice"
-        >
-          {{
-            saving ? 'Procesando…' : isEdit ? 'Guardar cambios' : 'Crear borrador'
-          }}
+        <button type="submit" class="btn primary" :disabled="saving || !canSubmitInvoice">
+          {{ saving ? 'Procesando…' : isEdit ? 'Guardar cambios' : 'Crear borrador' }}
         </button>
       </div>
     </form>
@@ -539,38 +483,9 @@ h1 {
   background: rgba(15, 23, 42, 0.55);
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
-  margin-bottom: 1.25rem;
-}
-
 .field--wide {
-  grid-column: 1 / -1;
-}
-
-.backlog-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.backlog-year {
-  max-width: 8rem;
-}
-
-.backlog-month {
-  flex: 1;
-  min-width: 12rem;
-}
-
-.field-hint {
   display: block;
-  margin-top: 0.4rem;
-  font-size: 0.75rem;
-  color: #64748b;
-  line-height: 1.35;
+  margin-bottom: 1.25rem;
 }
 
 .tag-recurring {
@@ -607,9 +522,25 @@ h1 {
 }
 
 .services-head h2 {
-  margin: 0 0 0.35rem;
+  margin: 0 0 0.5rem;
   font-size: 1rem;
   color: #e2e8f0;
+}
+
+.recurring-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.88rem;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.recurring-check input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: #38bdf8;
 }
 
 .hint {
@@ -642,11 +573,6 @@ h1 {
 
 .bulk-link:hover {
   color: #7dd3fc;
-}
-
-.bulk-link:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 .bulk-sep {

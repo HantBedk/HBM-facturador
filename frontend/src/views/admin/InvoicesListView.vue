@@ -6,7 +6,6 @@ import InvoiceEditorForm from '@/components/admin/InvoiceEditorForm.vue'
 import { fetchAdminCompanies } from '@/services/companiesApi.js'
 import {
   addInvoicePayment,
-  downloadAdminExportCsv,
   fetchAdminInvoice,
   fetchAdminInvoices,
   patchInvoiceStatus,
@@ -20,7 +19,6 @@ const rows = ref([])
 const meta = ref(null)
 const links = ref(null)
 const loading = ref(false)
-const exportBusy = ref(false)
 const error = ref('')
 const filters = ref({
   company_id: '',
@@ -341,28 +339,6 @@ const pageSummary = computed(() => {
   return `${m.from ?? 0}–${m.to ?? 0} de ${m.total} factura(s)`
 })
 
-async function exportInvoicesCsv() {
-  error.value = ''
-  exportBusy.value = true
-  try {
-    const params = {}
-    if (filters.value.company_id) params.company_id = filters.value.company_id
-    if (filters.value.status) params.status = filters.value.status
-    if (filters.value.period_year) params.period_year = filters.value.period_year
-    if (filters.value.period_month) params.period_month = filters.value.period_month
-    if (filters.value.q.trim()) params.q = filters.value.q.trim()
-    const { blob, filename } = await downloadAdminExportCsv('/admin/export/invoices', params)
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = filename
-    a.click()
-    URL.revokeObjectURL(a.href)
-  } catch (e) {
-    error.value = e.message || 'No se pudo exportar.'
-  } finally {
-    exportBusy.value = false
-  }
-}
 </script>
 
 <template>
@@ -377,9 +353,6 @@ async function exportInvoicesCsv() {
         </p>
       </div>
       <div class="head-btns">
-        <button type="button" class="btn secondary" :disabled="exportBusy" @click="exportInvoicesCsv">
-          {{ exportBusy ? 'Exportando…' : 'Exportar CSV (Excel)' }}
-        </button>
         <button type="button" class="btn primary" @click="openCreateInvoicePanel">+ Nueva factura</button>
       </div>
     </header>

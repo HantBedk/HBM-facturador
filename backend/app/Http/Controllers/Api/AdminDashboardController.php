@@ -39,10 +39,66 @@ class AdminDashboardController extends Controller
                 'label' => $this->periodLabel($month, $year),
             ],
             'metrics' => $metrics,
+            'monthly_revenue_chart' => $this->monthlyRevenueChart($now),
             'invoice_status_counts' => $invoiceStatusCounts,
             'recent' => $recent,
             'generated_at' => $now->toIso8601String(),
         ]);
+    }
+
+    /**
+     * Últimos 5 meses calendario: cobros (`payment_date`) del mes del eje vs. mes inmediatamente anterior.
+     *
+     * @return array{
+     *   categories: list<string>,
+     *   series: list<array{name: string, data: list<float>}>
+     * }
+     */
+    private function monthlyRevenueChart(Carbon $now, int $months = 5): array
+    {
+        $end = $now->copy()->startOfMonth();
+        $start = $end->copy()->subMonths($months - 1);
+        $queryFrom = $start->copy()->subMonth()->startOfMonth();
+        $queryTo = $end->copy()->endOfMonth()->endOfDay();
+
+        $rows = Payment::query()
+            ->whereBetween('payment_date', [$queryFrom->toDateString(), $queryTo->toDateString()])
+            ->selectRaw('YEAR(payment_date) as y, MONTH(payment_date) as m, SUM(amount) as total')
+            ->groupByRaw('YEAR(payment_date), MONTH(payment_date)')
+            ->get();
+
+        $totals = [];
+        foreach ($rows as $row) {
+            $totals[((int) $row->y).'-'.((int) $row->m)] = (float) $row->total;
+        }
+
+        $shortMonths = [
+            1 => 'Ene', 2 => 'Feb', 3 => 'Mar', 4 => 'Abr',
+            5 => 'May', 6 => 'Jun', 7 => 'Jul', 8 => 'Ago',
+            9 => 'Sep', 10 => 'Oct', 11 => 'Nov', 12 => 'Dic',
+        ];
+
+        $categories = [];
+        $current = [];
+        $previous = [];
+
+        for ($i = 0; $i < $months; $i++) {
+            $monthDate = $start->copy()->addMonths($i);
+            $y = (int) $monthDate->year;
+            $m = (int) $monthDate->month;
+            $prev = $monthDate->copy()->subMonth();
+            $categories[] = $shortMonths[$m] ?? (string) $m;
+            $current[] = round($totals["{$y}-{$m}"] ?? 0.0, 2);
+            $previous[] = round($totals[$prev->year.'-'.$prev->month] ?? 0.0, 2);
+        }
+
+        return [
+            'categories' => $categories,
+            'series' => [
+                ['name' => 'Este mes', 'data' => $current],
+                ['name' => 'Mes anterior', 'data' => $previous],
+            ],
+        ];
     }
 
     /**
