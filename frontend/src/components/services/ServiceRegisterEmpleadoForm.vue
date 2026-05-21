@@ -14,7 +14,7 @@ const props = defineProps({
   clientSuggestions: { type: Array, default: () => [] },
   fieldErrors: { type: Object, default: () => ({}) },
   disabled: { type: Boolean, default: false },
-  /** No permitir cambiar empresa / cliente puntual (p. ej. completar asignación administrativa). */
+  /** No permitir cambiar empresa (p. ej. completar asignación administrativa). */
   billingLocked: { type: Boolean, default: false },
   /** Ocultar el botón interno de envío (p. ej. la vista padre pone su propio `type="submit"`). */
   hideSubmitButton: { type: Boolean, default: false },
@@ -202,12 +202,7 @@ const totalDisplay = computed(() => {
   }).format(n)
 })
 
-/** Valor sentinela al final del &lt;select&gt; (no es ID de empresa). */
-const QUICK_CLIENT_OPTION = '__quick_client__'
-const quickClientAllowed = computed(() => props.registerKind !== 'mantenimiento')
-
 const companySelectValue = computed(() => {
-  if (props.modelValue.use_quick_client) return QUICK_CLIENT_OPTION
   const id = props.modelValue.company_id
   if (id === '' || id == null) return ''
   return String(id)
@@ -216,13 +211,10 @@ const companySelectValue = computed(() => {
 function onCompanySelectChange(ev) {
   if (props.billingLocked) return
   const v = ev.target.value
-  if (v === QUICK_CLIENT_OPTION) {
-    if (!quickClientAllowed.value) return
-    patch({ use_quick_client: true, company_id: '' })
-  } else if (v) {
-    patch({ use_quick_client: false, company_id: Number(v) })
+  if (v) {
+    patch({ company_id: Number(v) })
   } else {
-    patch({ use_quick_client: false, company_id: '' })
+    patch({ company_id: '' })
   }
 }
 
@@ -482,9 +474,6 @@ watch(
 watch(
   () => props.registerKind,
   (k) => {
-    if (k === 'mantenimiento' && props.modelValue.use_quick_client) {
-      patch({ use_quick_client: false, quick_telefono: '' })
-    }
     if (k === 'venta' || k === 'alquiler') {
       patch({
         inventory_operation_type: k,
@@ -590,10 +579,9 @@ watch(
         Empresa y cliente
       </h2>
 
-    <!-- Empresa / cliente puntual (una sola lista) -->
     <div>
       <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Empresa o cliente a facturar <span class="text-red-400">*</span>
+        Empresa <span class="text-red-400">*</span>
       </label>
       <div class="relative">
         <span
@@ -610,16 +598,12 @@ watch(
         </span>
         <select
           class="w-full appearance-none rounded-2xl border border-slate-700/90 bg-[#141a22] py-3.5 pl-12 pr-10 text-[0.9375rem] text-white outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
-          :class="inner.use_quick_client ? 'border-amber-500/35' : ''"
           :value="companySelectValue"
           :disabled="disabled || billingLocked"
           @change="onCompanySelectChange"
         >
           <option value="" disabled>Seleccionar…</option>
           <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
-          <option v-if="quickClientAllowed" :value="QUICK_CLIENT_OPTION" class="text-amber-200">
-            Cliente sin registro
-          </option>
         </select>
         <span
           class="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500"
@@ -633,8 +617,7 @@ watch(
       <p v-if="fieldErrors.company_id" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.company_id[0] }}</p>
     </div>
 
-    <!-- Cliente -->
-    <div v-if="!inner.use_quick_client">
+    <div>
       <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
         Cliente atendido <span class="text-red-400">*</span>
       </label>
@@ -663,67 +646,6 @@ watch(
       </div>
       <p v-if="fieldErrors.client_name" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.client_name[0] }}</p>
     </div>
-
-    <!-- Cliente puntual: nombre + teléfono -->
-    <template v-else>
-    <div>
-      <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Nombre del cliente <span class="text-red-400">*</span>
-      </label>
-      <div class="relative">
-        <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true">
-          <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-            <path
-              d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </span>
-        <input
-          :value="inner.client_name"
-          :list="clientListId"
-          autocomplete="off"
-          placeholder="Nombre del cliente"
-          :disabled="disabled"
-          class="w-full rounded-2xl border border-slate-700/90 bg-[#141a22] py-3.5 pl-12 pr-4 text-[0.9375rem] text-white placeholder:text-slate-600 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
-          @input="patch({ client_name: $event.target.value })"
-        />
-        <datalist :id="clientListId">
-          <option v-for="s in clientSuggestions" :key="s" :value="s" />
-        </datalist>
-      </div>
-      <p v-if="fieldErrors.client_name" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.client_name[0] }}</p>
-    </div>
-
-    <div>
-      <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Teléfono <span class="text-red-400">*</span>
-      </label>
-      <div class="relative">
-        <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true">
-          <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-            <path
-              d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </span>
-        <input
-          :value="inner.quick_telefono"
-          type="tel"
-          inputmode="tel"
-          autocomplete="tel"
-          placeholder="Ej. 3001234567"
-          :disabled="disabled"
-          class="w-full rounded-2xl border border-slate-700/90 bg-[#141a22] py-3.5 pl-12 pr-4 text-[0.9375rem] text-white placeholder:text-slate-600 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
-          @input="patch({ quick_telefono: $event.target.value })"
-        />
-      </div>
-      <p v-if="fieldErrors.quick_telefono" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.quick_telefono[0] }}</p>
-    </div>
-    </template>
     </section>
 
     <!-- Paso 2 -->

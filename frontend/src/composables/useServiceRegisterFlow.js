@@ -73,8 +73,6 @@ export function useServiceRegisterFlow({
 
   const form = ref({
     company_id: '',
-    use_quick_client: false,
-    quick_telefono: '',
     catalog_id: '',
     client_name: '',
     service_type: '',
@@ -112,8 +110,6 @@ export function useServiceRegisterFlow({
             : ''
     form.value = {
       company_id: '',
-      use_quick_client: false,
-      quick_telefono: '',
       catalog_id: '',
       client_name: '',
       service_type: serviceTypeDefault,
@@ -129,10 +125,6 @@ export function useServiceRegisterFlow({
     }
     photoFiles.value = []
     formResetKey.value += 1
-  }
-
-  function digitsOnly(s) {
-    return String(s ?? '').replace(/\D/g, '')
   }
 
   function buildServiceDescriptionFromLines(rawLines) {
@@ -174,15 +166,8 @@ export function useServiceRegisterFlow({
     fieldErrors.value = {}
     const e = {}
     const rk = String(registerKind.value || 'servicio')
-    if (form.value.use_quick_client) {
-      if (rk === 'mantenimiento') {
-        e.company_id = ['El mantenimiento requiere empresa registrada; no aplica cliente puntual.']
-      }
-      if (digitsOnly(form.value.quick_telefono).length < 7) {
-        e.quick_telefono = ['Indica un teléfono con al menos 7 dígitos (identifica al cliente puntual).']
-      }
-    } else if (!form.value.company_id) {
-      e.company_id = ['Selecciona una empresa o activa «Cliente puntual».']
+    if (!form.value.company_id) {
+      e.company_id = ['Selecciona una empresa registrada.']
     }
     if (!String(form.value.client_name || '').trim()) {
       e.client_name = ['Indica el nombre del cliente atendido.']
@@ -250,7 +235,7 @@ export function useServiceRegisterFlow({
         const lot = inventoryLots.value.find((x) => Number(x.id) === lotId)
         if (!lot) {
           e.inventory_lot_id = ['El equipo seleccionado no existe en el inventario cargado.']
-        } else if (!form.value.use_quick_client && Number(lot.tenant_company_id || 0) !== Number(form.value.company_id || 0)) {
+        } else if (Number(lot.tenant_company_id || 0) !== Number(form.value.company_id || 0)) {
           e.inventory_lot_id = ['El equipo no pertenece a la empresa seleccionada.']
         }
       }
@@ -472,29 +457,10 @@ export function useServiceRegisterFlow({
   watch(
     () => form.value.company_id,
     (cid, prev) => {
-      if (
-        !form.value.use_quick_client &&
-        prev !== undefined &&
-        String(cid) !== String(prev)
-      ) {
+      if (prev !== undefined && String(cid) !== String(prev)) {
         form.value.lines = []
         form.value.amount = ''
         form.value.catalog_id = ''
-      }
-    }
-  )
-
-  watch(
-    () => form.value.use_quick_client,
-    (quick, prev) => {
-      if (prev === undefined) return
-      form.value.lines = []
-      form.value.amount = ''
-      form.value.catalog_id = ''
-      if (quick) {
-        form.value.company_id = ''
-      } else {
-        form.value.quick_telefono = ''
       }
     }
   )
@@ -543,19 +509,7 @@ export function useServiceRegisterFlow({
         payload.kind = 'mantenimiento'
         payload.inventory_lot_id = Number(form.value.inventory_lot_id)
       }
-      if (form.value.use_quick_client) {
-        if (String(registerKind.value || 'servicio') !== 'mantenimiento') {
-          payload.quick_client = {
-            nombre: baseClient,
-            telefono: String(form.value.quick_telefono || '').trim(),
-          }
-        }
-      } else {
-        payload.company_id = Number(form.value.company_id)
-      }
-      if (String(registerKind.value || 'servicio') === 'mantenimiento' && !payload.company_id) {
-        payload.company_id = Number(form.value.company_id)
-      }
+      payload.company_id = Number(form.value.company_id)
       const ls = Array.isArray(form.value.lines) ? form.value.lines : []
       const opType = String(form.value.inventory_operation_type || 'servicio')
       if (isEmpleadoRegistro.value) {
@@ -676,7 +630,7 @@ export function useServiceRegisterFlow({
               rental_days: Number(ri.days || 1),
             })),
             customer_name: baseClient,
-            customer_phone: form.value.use_quick_client ? digitsOnly(form.value.quick_telefono) : '',
+            customer_phone: '',
             notes: String(form.value.description || '').trim() || null,
           },
           q

@@ -65,7 +65,7 @@ const {
 
 const invoice = ref(null)
 
-const companiesInPickerTab = computed(() => (companies.value || []).filter((c) => !c.es_cliente_puntual))
+const companiesInPickerTab = computed(() => companies.value || [])
 
 function companyOptionLabel(c) {
   if (!c) return ''
@@ -205,7 +205,7 @@ async function bootstrap() {
   loading.value = true
   skipWatch.value = true
   try {
-    companies.value = await fetchAdminCompanies({ company_kind: 'registered' })
+    companies.value = await fetchAdminCompanies()
   } catch {
     companies.value = []
   }

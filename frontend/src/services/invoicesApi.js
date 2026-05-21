@@ -2,7 +2,6 @@ import { api, apiBaseUrl, getToken } from './api'
 
 /**
  * @param {Record<string, string|number>} [params]
- * @param {string} [params.company_kind] `registered` — solo facturas ligadas a empresa en directorio
  */
 export function fetchAdminInvoices(params = {}) {
   const qs = new URLSearchParams()

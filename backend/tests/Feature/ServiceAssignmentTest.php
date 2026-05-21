@@ -136,6 +136,27 @@ class ServiceAssignmentTest extends TestCase
         $this->assertSame('Servicio asignado', $r->json('data.service_type'));
     }
 
+    public function test_store_rejects_quick_client_payload(): void
+    {
+        [$company, $cat] = $this->seedCompanyAndCatalog();
+        $tech = User::factory()->create(['rol' => User::ROL_EMPLEADO, 'estado' => User::ESTADO_ACTIVO]);
+        Sanctum::actingAs($tech);
+
+        $this->postJson('/api/services', [
+            'quick_client' => ['nombre' => 'Ana', 'telefono' => '3001234567'],
+            'client_name' => 'Ana',
+            'service_type' => 'Prueba',
+            'description' => 'Descripción larga del trabajo realizado en sitio.',
+            'items' => [
+                [
+                    'catalog_id' => $cat->id,
+                    'amount' => 100,
+                    'line_description' => 'Trabajo realizado en sitio según lo acordado con el cliente.',
+                ],
+            ],
+        ])->assertStatus(422)->assertJsonValidationErrors('company_id');
+    }
+
     public function test_complete_assignment_forbidden_for_admin(): void
     {
         [$company, $cat] = $this->seedCompanyAndCatalog();

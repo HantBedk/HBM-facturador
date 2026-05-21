@@ -23,7 +23,6 @@ use App\Support\ActivityAmountNarrative;
 use App\Support\CatalogPricing;
 use App\Support\DecimalMath;
 use App\Support\Pagination;
-use App\Support\PhoneNormalizer;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -177,16 +176,11 @@ class ServiceController extends Controller
     {
         $this->authorize('create', Service::class);
 
-        $this->mergeQuickClientFromMultipart($request);
-
         $user = $request->user();
         $rules = [
-            'company_id' => ['nullable', 'integer', 'exists:companies,id'],
+            'company_id' => ['required', 'integer', 'exists:companies,id'],
             'inventory_lot_id' => ['nullable', 'integer', 'exists:inventory_lots,id'],
             'kind' => ['nullable', 'string', 'in:servicio,mantenimiento'],
-            'quick_client' => ['nullable', 'array'],
-            'quick_client.nombre' => ['nullable', 'string', 'max:255'],
-            'quick_client.telefono' => ['nullable', 'string', 'max:32'],
             'client_name' => ['required', 'string', 'max:255'],
             'service_type' => ['required', 'string', 'max:255'],
             'description' => ['required', 'string', 'min:8'],
@@ -199,41 +193,12 @@ class ServiceController extends Controller
         $data = $request->validate($rules);
         $kind = (string) ($data['kind'] ?? Service::KIND_SERVICIO);
 
-        $qcNombre = isset($data['quick_client']['nombre']) ? trim((string) $data['quick_client']['nombre']) : '';
-        $qcTel = isset($data['quick_client']['telefono']) ? trim((string) $data['quick_client']['telefono']) : '';
-        $useQuickClient = $qcNombre !== '' && $qcTel !== '';
-        $companyIdRaw = $data['company_id'] ?? null;
-
-        if ($useQuickClient && $companyIdRaw !== null && $companyIdRaw !== '') {
+        $companyId = (int) $data['company_id'];
+        $company = Company::query()->findOrFail($companyId);
+        if ($company->es_cliente_puntual) {
             throw ValidationException::withMessages([
-                'company_id' => ['No selecciones empresa si indicas cliente puntual (nombre y teléfono).'],
+                'company_id' => ['Selecciona una empresa registrada en el directorio.'],
             ]);
-        }
-        if (! $useQuickClient && ($companyIdRaw === null || $companyIdRaw === '')) {
-            throw ValidationException::withMessages([
-                'company_id' => ['Selecciona una empresa o completa cliente puntual: nombre y teléfono.'],
-            ]);
-        }
-
-        $clientTelefono = null;
-        $contactPhoneKey = null;
-        if ($useQuickClient) {
-            $contactPhoneKey = PhoneNormalizer::digitsKey($qcTel);
-            if (strlen($contactPhoneKey) < 7) {
-                throw ValidationException::withMessages([
-                    'quick_client.telefono' => ['El teléfono debe tener al menos 7 dígitos.'],
-                ]);
-            }
-            if (strlen($contactPhoneKey) > 15) {
-                throw ValidationException::withMessages([
-                    'quick_client.telefono' => ['El teléfono no es válido.'],
-                ]);
-            }
-            $companyId = null;
-            $data['client_name'] = $qcNombre;
-            $clientTelefono = trim($qcTel) !== '' ? trim($qcTel) : $contactPhoneKey;
-        } else {
-            $companyId = (int) $companyIdRaw;
         }
 
         $itemsPayload = $this->parseItemsFromRequest($request);
@@ -278,13 +243,10 @@ class ServiceController extends Controller
             $this->assertEmpleadoCommercialInventoryAllowed($normalized);
         }
 
-        if ($companyId !== null) {
-            $company = Company::query()->findOrFail($companyId);
-            if ($company->estado !== Company::ESTADO_ACTIVO) {
-                throw ValidationException::withMessages([
-                    'company_id' => ['Solo se pueden registrar servicios para empresas activas.'],
-                ]);
-            }
+        if ($company->estado !== Company::ESTADO_ACTIVO) {
+            throw ValidationException::withMessages([
+                'company_id' => ['Solo se pueden registrar servicios para empresas activas.'],
+            ]);
         }
 
         $inventoryLotId = isset($data['inventory_lot_id']) && $data['inventory_lot_id'] !== null
@@ -292,11 +254,6 @@ class ServiceController extends Controller
             : null;
         $inventoryLot = null;
         if ($kind === Service::KIND_MANTENIMIENTO) {
-            if ($companyId === null) {
-                throw ValidationException::withMessages([
-                    'company_id' => ['Para mantenimiento debe seleccionar una empresa cliente.'],
-                ]);
-            }
             if ($inventoryLotId === null) {
                 throw ValidationException::withMessages([
                     'inventory_lot_id' => ['Para mantenimiento debe seleccionar un equipo de inventario.'],
@@ -327,7 +284,6 @@ class ServiceController extends Controller
         $dupData = array_merge($data, [
             'amount' => $totalAmount,
             'company_id' => $companyId,
-            'contact_phone_key' => $contactPhoneKey,
         ]);
         if ($this->isDuplicate($request->user(), $dupData, $serviceDate)) {
             throw ValidationException::withMessages([
@@ -361,8 +317,6 @@ class ServiceController extends Controller
             $serviceDate,
             $normalized,
             $firstCatalogId,
-            $clientTelefono,
-            $contactPhoneKey,
             $kind,
             $inventoryLotId,
         ) {
@@ -374,8 +328,8 @@ class ServiceController extends Controller
                 'catalog_id' => $firstCatalogId,
                 'kind' => $kind,
                 'client_name' => $data['client_name'],
-                'client_telefono' => $clientTelefono,
-                'contact_phone_key' => $contactPhoneKey,
+                'client_telefono' => null,
+                'contact_phone_key' => null,
                 'service_type' => $data['service_type'],
                 'description' => $data['description'],
                 'amount' => $totalAmount,
@@ -497,10 +451,7 @@ class ServiceController extends Controller
 
         $data = $request->validate([
             'technician_user_id' => ['required', 'integer', 'exists:users,id'],
-            'company_id' => ['nullable', 'integer', 'exists:companies,id'],
-            'quick_client' => ['nullable', 'array'],
-            'quick_client.nombre' => ['nullable', 'string', 'max:255'],
-            'quick_client.telefono' => ['nullable', 'string', 'max:32'],
+            'company_id' => ['required', 'integer', 'exists:companies,id'],
             'catalog_id' => ['nullable', 'integer', 'exists:service_catalog,id'],
             'client_name' => ['nullable', 'string', 'max:255'],
         ]);
@@ -517,53 +468,22 @@ class ServiceController extends Controller
             ]);
         }
 
-        $qcNombre = isset($data['quick_client']['nombre']) ? trim((string) $data['quick_client']['nombre']) : '';
-        $qcTel = isset($data['quick_client']['telefono']) ? trim((string) $data['quick_client']['telefono']) : '';
-        $useQuickClient = $qcNombre !== '' && $qcTel !== '';
-        $companyIdRaw = $data['company_id'] ?? null;
-
-        if ($useQuickClient && $companyIdRaw !== null && $companyIdRaw !== '') {
+        $companyId = (int) $data['company_id'];
+        $company = Company::query()->findOrFail($companyId);
+        if ($company->es_cliente_puntual) {
             throw ValidationException::withMessages([
-                'company_id' => ['No selecciones empresa si indicas cliente puntual (nombre y teléfono).'],
+                'company_id' => ['Selecciona una empresa registrada en el directorio.'],
             ]);
         }
-        if (! $useQuickClient && ($companyIdRaw === null || $companyIdRaw === '')) {
-            throw ValidationException::withMessages([
-                'company_id' => ['Selecciona una empresa o completa cliente puntual: nombre y teléfono.'],
-            ]);
-        }
-
-        $clientTelefono = null;
-        $contactPhoneKey = null;
-        if ($useQuickClient) {
-            $contactPhoneKey = PhoneNormalizer::digitsKey($qcTel);
-            if (strlen($contactPhoneKey) < 7) {
-                throw ValidationException::withMessages([
-                    'quick_client.telefono' => ['El teléfono debe tener al menos 7 dígitos.'],
-                ]);
-            }
-            if (strlen($contactPhoneKey) > 15) {
-                throw ValidationException::withMessages([
-                    'quick_client.telefono' => ['El teléfono no es válido.'],
-                ]);
-            }
-            $companyId = null;
-            $clientNameFinal = $qcNombre;
-            $clientTelefono = trim($qcTel) !== '' ? trim($qcTel) : $contactPhoneKey;
-            $company = null;
-        } else {
-            $companyId = (int) $companyIdRaw;
-            $company = Company::query()->findOrFail($companyId);
-            $clientNameFinal = trim((string) ($data['client_name'] ?? ''));
-            if ($clientNameFinal === '') {
-                $clientNameFinal = (string) $company->nombre;
-            }
-        }
-
-        if ($company !== null && $company->estado !== Company::ESTADO_ACTIVO) {
+        if ($company->estado !== Company::ESTADO_ACTIVO) {
             throw ValidationException::withMessages([
                 'company_id' => ['Solo se pueden asignar servicios para empresas activas.'],
             ]);
+        }
+
+        $clientNameFinal = trim((string) ($data['client_name'] ?? ''));
+        if ($clientNameFinal === '') {
+            $clientNameFinal = (string) $company->nombre;
         }
 
         $assignPlaceholderDesc = 'Asignación desde administración: complete el detalle del trabajo realizado en obra (importes y líneas) antes de facturar.';
@@ -611,7 +531,6 @@ class ServiceController extends Controller
             'description' => $masterDescription,
             'amount' => $totalAmount,
             'company_id' => $companyId,
-            'contact_phone_key' => $contactPhoneKey,
         ]);
         if ($this->isDuplicate($technician, $dupData, $serviceDate)) {
             throw ValidationException::withMessages([
@@ -640,8 +559,6 @@ class ServiceController extends Controller
             $firstCatalogId,
             $clientNameFinal,
             $serviceType,
-            $clientTelefono,
-            $contactPhoneKey,
         ) {
             $service = Service::create([
                 'code' => $code,
@@ -650,8 +567,8 @@ class ServiceController extends Controller
                 'assigned_by_user_id' => $admin->id,
                 'catalog_id' => $firstCatalogId,
                 'client_name' => $clientNameFinal,
-                'client_telefono' => $clientTelefono,
-                'contact_phone_key' => $contactPhoneKey,
+                'client_telefono' => null,
+                'contact_phone_key' => null,
                 'service_type' => $serviceType,
                 'description' => $masterDescription,
                 'amount' => $totalAmount,
@@ -721,8 +638,6 @@ class ServiceController extends Controller
             ], 422);
         }
 
-        $this->mergeQuickClientFromMultipart($request);
-
         $data = $request->validate([
             'client_name' => ['required', 'string', 'max:255'],
             'service_type' => ['required', 'string', 'max:255'],
@@ -731,6 +646,12 @@ class ServiceController extends Controller
         ]);
 
         $companyId = $service->company_id;
+        if ($companyId === null) {
+            throw ValidationException::withMessages([
+                'company_id' => ['Este servicio no tiene empresa registrada; contacte a administración.'],
+            ]);
+        }
+
         $itemsPayload = $this->parseItemsFromRequest($request);
         if ($itemsPayload === []) {
             throw ValidationException::withMessages([
@@ -742,13 +663,11 @@ class ServiceController extends Controller
 
         $this->assertEmpleadoCommercialInventoryAllowed($normalized);
 
-        if ($companyId !== null) {
-            $company = Company::query()->findOrFail((int) $companyId);
-            if ($company->estado !== Company::ESTADO_ACTIVO) {
-                throw ValidationException::withMessages([
-                    'company_id' => ['La empresa del servicio no está activa.'],
-                ]);
-            }
+        $company = Company::query()->findOrFail((int) $companyId);
+        if ($company->estado !== Company::ESTADO_ACTIVO) {
+            throw ValidationException::withMessages([
+                'company_id' => ['La empresa del servicio no está activa.'],
+            ]);
         }
 
         $builtDescription = $this->descriptionFromNormalizedLines($normalized);
@@ -1267,15 +1186,7 @@ class ServiceController extends Controller
             ->where('amount', $data['amount'])
             ->whereRaw('LOWER(TRIM(description)) = ?', [$desc]);
 
-        if (($data['company_id'] ?? null) !== null && $data['company_id'] !== '') {
-            $q->where('company_id', $data['company_id']);
-        } else {
-            $key = $data['contact_phone_key'] ?? null;
-            if ($key === null || $key === '') {
-                return false;
-            }
-            $q->whereNull('company_id')->where('contact_phone_key', $key);
-        }
+        $q->where('company_id', $data['company_id']);
 
         return $q->exists();
     }
@@ -1344,22 +1255,4 @@ class ServiceController extends Controller
         }
     }
 
-    /** FormData envía `quick_client` como JSON string cuando hay fotos. */
-    private function mergeQuickClientFromMultipart(Request $request): void
-    {
-        $raw = $request->input('quick_client');
-        if (! is_string($raw) || $raw === '') {
-            return;
-        }
-        $decoded = json_decode($raw, true);
-        if (! is_array($decoded)) {
-            return;
-        }
-        $request->merge([
-            'quick_client' => [
-                'nombre' => isset($decoded['nombre']) ? (string) $decoded['nombre'] : '',
-                'telefono' => isset($decoded['telefono']) ? (string) $decoded['telefono'] : '',
-            ],
-        ]);
-    }
 }

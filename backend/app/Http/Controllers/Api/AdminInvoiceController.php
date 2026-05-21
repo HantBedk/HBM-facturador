@@ -50,10 +50,7 @@ class AdminInvoiceController extends Controller
             $q->where('company_id', $request->integer('company_id'));
         }
 
-        $kind = $request->query('company_kind');
-        if ($kind === 'registered') {
-            $q->whereNotNull('company_id');
-        }
+        $q->whereNotNull('company_id');
 
         if ($request->filled('status')) {
             $q->where('status', $request->string('status')->toString());

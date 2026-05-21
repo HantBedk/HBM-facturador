@@ -37,8 +37,6 @@ const formResetKey = ref(0)
 
 const form = ref({
   company_id: '',
-  use_quick_client: false,
-  quick_telefono: '',
   catalog_id: '',
   client_name: '',
   service_type: '',
@@ -99,10 +97,6 @@ function mapItemToLine(it) {
     catalog_hint_price: null,
     catalog_hint_dismissed: true,
   }
-}
-
-function digitsOnly(s) {
-  return String(s ?? '').replace(/\D/g, '')
 }
 
 function buildServiceDescriptionFromLines(rawLines) {
@@ -192,12 +186,8 @@ function lotAllowsRental(lot) {
 function validateBeforeSubmit() {
   fieldErrors.value = {}
   const e = {}
-  if (form.value.use_quick_client) {
-    if (digitsOnly(form.value.quick_telefono).length < 7) {
-      e.quick_telefono = ['Indica un teléfono con al menos 7 dígitos (identifica al cliente puntual).']
-    }
-  } else if (!form.value.company_id) {
-    e.company_id = ['Selecciona una empresa o activa «Cliente puntual».']
+  if (!form.value.company_id) {
+    e.company_id = ['Selecciona una empresa registrada.']
   }
   if (!String(form.value.client_name || '').trim()) {
     e.client_name = ['Indica el nombre del cliente atendido.']
@@ -284,9 +274,7 @@ onMounted(async () => {
       return
     }
     form.value = {
-      company_id: String(svc.company_id),
-      use_quick_client: false,
-      quick_telefono: '',
+      company_id: String(svc.company_id ?? ''),
       catalog_id: '',
       /* Vacío: el técnico debe indicar el contacto en obra (no precargar nombre de empresa). */
       client_name: '',

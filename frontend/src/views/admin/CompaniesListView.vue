@@ -585,7 +585,7 @@ async function load() {
   error.value = ''
   loading.value = true
   try {
-    const params = { q: search.value, company_kind: 'registered' }
+    const params = { q: search.value }
     rows.value = await fetchAdminCompanies(params)
   } catch (e) {
     error.value = e.data?.message || e.message || 'No se pudieron cargar las empresas.'

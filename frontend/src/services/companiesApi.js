@@ -1,15 +1,12 @@
 import { api } from './api'
 
 /**
- * @param {{ q?: string, estado?: string, company_kind?: 'registered' | 'quick' }} [params]
+ * @param {{ q?: string, estado?: string }} [params]
  */
 export function fetchAdminCompanies(params = {}) {
   const qs = new URLSearchParams()
   if (params.q?.trim()) qs.set('q', params.q.trim())
   if (params.estado) qs.set('estado', params.estado)
-  if (params.company_kind === 'registered' || params.company_kind === 'quick') {
-    qs.set('company_kind', params.company_kind)
-  }
   const s = qs.toString()
   return api(`/admin/companies${s ? `?${s}` : ''}`).then((r) => r.data)
 }

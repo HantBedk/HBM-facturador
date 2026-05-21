@@ -31,14 +31,7 @@ const filters = ref({
   page: 1,
 })
 
-/** Por defecto solo facturas ligadas a empresas dadas de alta. */
-const listTab = ref('registered')
-
-const companiesForFilter = computed(() => {
-  const list = companies.value || []
-  if (listTab.value === 'registered') return list.filter((c) => !c.es_cliente_puntual)
-  return list
-})
+const companiesForFilter = computed(() => companies.value || [])
 
 const companyFilterLabel = computed(() => 'Empresa')
 
@@ -63,11 +56,6 @@ const STATUS_OPTIONS = [
   { value: 'pagada', label: 'Pagada' },
 ]
 
-const LIST_VIEW_OPTIONS = [
-  { value: 'all', label: 'Todas las facturas' },
-  { value: 'registered', label: 'Solo empresas registradas' },
-]
-
 const yearOptions = computed(() => {
   const y = new Date().getFullYear()
   return Array.from({ length: 6 }, (_, i) => y - 2 + i)
@@ -78,7 +66,6 @@ async function load() {
   loading.value = true
   try {
     const params = { page: filters.value.page, per_page: 15 }
-    if (listTab.value === 'registered') params.company_kind = 'registered'
     if (filters.value.company_id) params.company_id = filters.value.company_id
     if (filters.value.status) params.status = filters.value.status
     if (filters.value.period_year) params.period_year = filters.value.period_year
@@ -142,20 +129,11 @@ function closeDetailPanel() {
 onMounted(async () => {
   document.addEventListener('keydown', onGlobalEscape)
   try {
-    companies.value = await fetchAdminCompanies({ company_kind: 'registered' })
+    companies.value = await fetchAdminCompanies()
   } catch {
     companies.value = []
   }
   await load()
-})
-
-watch(listTab, () => {
-  filters.value.page = 1
-  const sel = filters.value.company_id
-  if (sel && !companiesForFilter.value.some((c) => String(c.id) === String(sel))) {
-    filters.value.company_id = ''
-  }
-  load()
 })
 
 watch(
@@ -368,7 +346,6 @@ async function exportInvoicesCsv() {
   exportBusy.value = true
   try {
     const params = {}
-    if (listTab.value === 'registered') params.company_kind = 'registered'
     if (filters.value.company_id) params.company_id = filters.value.company_id
     if (filters.value.status) params.status = filters.value.status
     if (filters.value.period_year) params.period_year = filters.value.period_year
@@ -419,12 +396,6 @@ async function exportInvoicesCsv() {
             autocomplete="off"
             @keydown.enter.prevent="flushSearchFromInput"
           />
-        </label>
-        <label class="filters-top-view">
-          <span>Vista del listado</span>
-          <select v-model="listTab" class="input">
-            <option v-for="o in LIST_VIEW_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-          </select>
         </label>
       </div>
       <label>

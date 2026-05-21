@@ -13,9 +13,6 @@ const emit = defineEmits(['close', 'assigned'])
 const companies = ref([])
 const catalogItems = ref([])
 const companyId = ref('')
-const useQuick = ref(false)
-const qcNombre = ref('')
-const qcTel = ref('')
 const catalogId = ref('')
 const loading = ref(false)
 const saving = ref(false)
@@ -27,9 +24,6 @@ watch(
     if (!o) return
     error.value = ''
     companyId.value = ''
-    useQuick.value = false
-    qcNombre.value = ''
-    qcTel.value = ''
     catalogId.value = ''
     loading.value = true
     try {
@@ -57,17 +51,10 @@ async function submit() {
   try {
     const payload = {
       technician_user_id: props.technician.id,
+      company_id: Number(companyId.value),
     }
     if (catalogId.value) {
       payload.catalog_id = Number(catalogId.value)
-    }
-    if (useQuick.value) {
-      payload.quick_client = {
-        nombre: qcNombre.value.trim(),
-        telefono: qcTel.value.trim(),
-      }
-    } else {
-      payload.company_id = Number(companyId.value)
     }
     const created = await assignServiceToTechnician(payload)
     emit('assigned', created)
@@ -106,6 +93,14 @@ async function submit() {
         <div v-if="loading" class="muted pad">Cargando…</div>
         <template v-else>
           <label class="field">
+            <span>Empresa <span class="req">*</span></span>
+            <select v-model="companyId" class="input" required>
+              <option disabled value="">Seleccionar…</option>
+              <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
+            </select>
+          </label>
+
+          <label class="field">
             <span>Ítem de catálogo (opcional)</span>
             <select v-model="catalogId" class="input">
               <option value="">Sin ítem de catálogo</option>
@@ -113,43 +108,9 @@ async function submit() {
             </select>
           </label>
 
-          <label class="field check">
-            <input v-model="useQuick" type="checkbox" />
-            <span>Cliente no registrado</span>
-          </label>
-
-          <template v-if="!useQuick">
-            <label class="field">
-              <span>Empresa</span>
-              <select v-model="companyId" class="input" required>
-                <option disabled value="">Seleccionar…</option>
-                <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
-              </select>
-            </label>
-          </template>
-          <template v-else>
-            <label class="field">
-              <span>Nombre cliente</span>
-              <input v-model="qcNombre" type="text" class="input" required />
-            </label>
-            <label class="field">
-              <span>Teléfono</span>
-              <input v-model="qcTel" type="tel" class="input" inputmode="tel" required />
-            </label>
-          </template>
-
           <div class="assign-svc-footer">
             <button type="button" class="btn secondary" :disabled="saving" @click="close">Cancelar</button>
-            <button
-              type="button"
-              class="btn primary"
-              :disabled="
-                saving ||
-                (!useQuick && !companyId) ||
-                (useQuick && (!qcNombre.trim() || !qcTel.trim()))
-              "
-              @click="submit"
-            >
+            <button type="button" class="btn primary" :disabled="saving || !companyId" @click="submit">
               {{ saving ? 'Asignando…' : 'Asignar' }}
             </button>
           </div>
@@ -168,7 +129,6 @@ async function submit() {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  /* Oscurece la vista detrás sin dejar ver el contenido de la página mezclado */
   background: rgba(2, 6, 23, 0.78);
   backdrop-filter: blur(6px);
 }
@@ -179,7 +139,6 @@ async function submit() {
   max-height: 90vh;
   overflow: auto;
   padding: 1.35rem 1.4rem;
-  /* Superficie opaca: el diálogo no compite con el fondo */
   background: #0f172a;
   color: #e2e8f0;
   border: 1px solid rgba(148, 163, 184, 0.28);
@@ -243,14 +202,8 @@ async function submit() {
   color: #cbd5e1;
 }
 
-.field.check {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.field.check span {
-  color: #e2e8f0;
+.req {
+  color: #f87171;
 }
 
 .input {
