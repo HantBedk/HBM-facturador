@@ -1,8 +1,8 @@
 <?php
 
 /**
- * Datos del emisor en facturas PDF (su negocio / facturador).
- * El cliente facturado sigue siendo el registro Company vinculado a la factura.
+ * Respaldo del emisor en facturas PDF si faltan datos en Configuración → Empresa del sistema.
+ * El origen principal es AppSetting (SystemOrganizationProfileService). El cliente facturado es Company.
  */
 return [
     'issuer' => [

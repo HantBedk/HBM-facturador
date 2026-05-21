@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Models\Invoice;
+use App\Services\SystemOrganizationProfileService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -11,7 +12,9 @@ class AdminInvoiceResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $issuer = config('billing.issuer', []);
+        $org = app(SystemOrganizationProfileService::class);
+        $issuer = $org->issuerBlockForInvoice();
+        $emitter = $org->invoiceEmitterStatus();
 
         return [
             'id' => $this->id,
@@ -89,7 +92,11 @@ class AdminInvoiceResource extends JsonResource
                 'direccion' => (string) ($issuer['direccion'] ?? ''),
                 'telefono' => (string) ($issuer['telefono'] ?? ''),
                 'correo' => (string) ($issuer['correo'] ?? ''),
+                'regimen' => (string) ($issuer['regimen'] ?? ''),
             ],
+            'emitter_ready' => (bool) ($emitter['ready'] ?? false),
+            'emitter_missing' => $emitter['missing'] ?? [],
+            'emitter_logo_configured' => (bool) ($emitter['logo_configured'] ?? false),
         ];
     }
 

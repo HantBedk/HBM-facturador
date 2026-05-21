@@ -45,6 +45,7 @@ class AdminSystemOrganizationController extends Controller
             'department' => ['sometimes', 'nullable', 'string', 'max:120'],
             'country' => ['sometimes', 'nullable', 'string', 'max:120'],
             'postal_code' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'tax_regimen' => ['sometimes', 'nullable', 'string', 'max:255'],
         ]);
 
         $emailCheck = trim((string) ($data['email'] ?? ''));
@@ -129,6 +130,7 @@ class AdminSystemOrganizationController extends Controller
         return array_merge($profile, [
             'logo_configured' => $logo !== null,
             'logo_filename' => $logo['original_filename'] ?? null,
+            'invoice_emitter' => $this->organization->invoiceEmitterStatus(),
         ]);
     }
 }

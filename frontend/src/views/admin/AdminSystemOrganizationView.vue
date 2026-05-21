@@ -1,6 +1,7 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
+import { invoiceEmitterChecklistFromForm } from '@/views/admin/systemOrganizationInvoiceFields.js'
 import {
   deleteSystemOrganizationLogo,
   fetchSystemOrganization,
@@ -28,8 +29,11 @@ const city = ref('')
 const department = ref('')
 const country = ref('')
 const postalCode = ref('')
+const taxRegimen = ref('')
 
 const logoConfigured = ref(false)
+const logoSectionRef = ref(null)
+const route = useRoute()
 const logoFilename = ref('')
 const logoInput = ref(null)
 const logoPreviewUrl = ref('')
@@ -66,9 +70,27 @@ function applyData(d) {
   department.value = d.department || ''
   country.value = d.country || ''
   postalCode.value = d.postal_code || ''
+  taxRegimen.value = d.tax_regimen || ''
   logoConfigured.value = Boolean(d.logo_configured)
   logoFilename.value = d.logo_filename || ''
 }
+
+const formSnapshot = computed(() => ({
+  legal_name: legalName.value,
+  trade_name: tradeName.value,
+  nit: nit.value,
+  email: email.value,
+  phone: phone.value,
+  phone_secondary: phoneSecondary.value,
+  address_line1: addressLine1.value,
+  address_line2: addressLine2.value,
+  city: city.value,
+  department: department.value,
+}))
+
+const invoiceFieldChecklist = computed(() => invoiceEmitterChecklistFromForm(formSnapshot.value))
+
+const invoiceFieldsReady = computed(() => invoiceFieldChecklist.value.every((f) => f.ok))
 
 async function load() {
   error.value = ''
@@ -103,6 +125,7 @@ async function save() {
       department: department.value.trim() || null,
       country: country.value.trim() || null,
       postal_code: postalCode.value.trim() || null,
+      tax_regimen: taxRegimen.value.trim() || null,
     })
     toast.value = r.message || 'Guardado.'
     applyData(r.data)
@@ -158,7 +181,16 @@ async function removeLogo() {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  if (route.query.focus === 'logo') {
+    await nextTick()
+    logoSectionRef.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    if (!logoConfigured.value) {
+      pickLogo()
+    }
+  }
+})
 onUnmounted(revokeLogoPreview)
 </script>
 
@@ -167,9 +199,11 @@ onUnmounted(revokeLogoPreview)
     <div>
       <h1 class="text-xl font-semibold text-white">Empresa del sistema</h1>
       <p class="mt-1 text-sm text-slate-400">
-        Datos de su empresa operadora (facturador): distintos de las empresas cliente del directorio. Se usan como respaldo del nombre en
-        <RouterLink to="/admin/configuracion/correo-notificaciones" class="text-sky-400 hover:underline">correos</RouterLink>
-        <span v-pre> (sustituye {{nombre_sistema}} en correos; si falta aquí, se usa el nombre comercial del remitente al conectar Gmail).</span>
+        Datos de <strong class="font-medium text-slate-300">su empresa operadora</strong> (quien factura con el software). Son distintos de las
+        empresas cliente del directorio. Esta información y el logo aparecen en el <strong class="font-medium text-slate-300">PDF de factura</strong>
+        (centro del documento: NIT, régimen, dirección, teléfono, correo y logo). También alimenta
+        <RouterLink to="/admin/configuracion/correo-notificaciones" class="text-sky-400 hover:underline">correos del sistema</RouterLink>
+        <span v-pre> ({{nombre_sistema}}).</span>
       </p>
     </div>
 
@@ -179,6 +213,27 @@ onUnmounted(revokeLogoPreview)
       <p v-if="toast" class="rounded-lg border border-emerald-600/40 bg-emerald-900/20 px-3 py-2 text-sm text-emerald-100">{{ toast }}</p>
 
       <div class="rounded-xl border border-slate-700/80 bg-[#111723] p-3 sm:p-4 space-y-4">
+        <div
+          class="rounded-lg border p-3 text-sm"
+          :class="
+            invoiceFieldsReady && logoConfigured
+              ? 'border-emerald-700/50 bg-emerald-950/25 text-emerald-100'
+              : 'border-amber-600/45 bg-amber-950/20 text-amber-100'
+          "
+        >
+          <p class="font-medium text-white">Datos para factura PDF</p>
+          <ul class="mt-2 space-y-1 text-xs">
+            <li v-for="item in invoiceFieldChecklist" :key="item.key" class="flex gap-2">
+              <span :class="item.ok ? 'text-emerald-400' : 'text-amber-400'">{{ item.ok ? '✓' : '○' }}</span>
+              <span>{{ item.label }}</span>
+            </li>
+            <li class="flex gap-2">
+              <span :class="logoConfigured ? 'text-emerald-400' : 'text-amber-400'">{{ logoConfigured ? '✓' : '○' }}</span>
+              <span>Logo en factura (recomendado; al enviar por correo se advierte si falta)</span>
+            </li>
+          </ul>
+        </div>
+
         <div class="rounded-lg border border-slate-700/50 bg-slate-900/25 p-3 space-y-3">
           <p class="text-sm font-medium text-white">Identificación</p>
           <div class="grid gap-3 sm:grid-cols-2">
@@ -208,6 +263,16 @@ onUnmounted(revokeLogoPreview)
             <label class="block text-sm">
               <span class="text-slate-400">Correo de contacto</span>
               <input v-model="email" type="email" class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white" />
+            </label>
+            <label class="block text-sm sm:col-span-2">
+              <span class="text-slate-400">Régimen fiscal (texto bajo el NIT en la factura)</span>
+              <input
+                v-model="taxRegimen"
+                type="text"
+                maxlength="255"
+                class="mt-1 w-full rounded-lg border border-slate-600 bg-[#13161f] px-3 py-2 text-white"
+                placeholder="Ej. Régimen simplificado"
+              />
             </label>
           </div>
         </div>
@@ -265,9 +330,13 @@ onUnmounted(revokeLogoPreview)
           </div>
         </div>
 
-        <div class="rounded-lg border border-slate-700/50 bg-slate-900/25 p-3 space-y-3">
-          <p class="text-sm font-medium text-white">Logo</p>
-          <p class="text-xs text-slate-500">PNG, JPG, GIF o WebP; máx. 2 MB. Uso previsto: pie de correos, PDFs o pantallas futuras.</p>
+        <div
+          ref="logoSectionRef"
+          class="rounded-lg border border-slate-700/50 bg-slate-900/25 p-3 space-y-3"
+          :class="!logoConfigured ? 'ring-1 ring-amber-500/40' : ''"
+        >
+          <p class="text-sm font-medium text-white">Logo de factura</p>
+          <p class="text-xs text-slate-500">PNG, JPG, GIF o WebP; máx. 2 MB. Es el mismo logo que se imprime en el PDF de factura.</p>
           <div v-if="logoPreviewUrl" class="flex items-start gap-3">
             <img :src="logoPreviewUrl" alt="Logo" class="h-16 w-auto max-w-[200px] rounded border border-slate-600 object-contain bg-slate-900" />
             <div class="text-xs text-slate-400">

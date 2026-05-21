@@ -461,6 +461,15 @@ class AdminInvoiceController extends Controller
             ], 422);
         }
 
+        $emitter = app(\App\Services\SystemOrganizationProfileService::class)->invoiceEmitterStatus();
+        if (! ($emitter['ready'] ?? false)) {
+            throw ValidationException::withMessages([
+                'emitter' => [
+                    'Complete los datos del emisor en Configuración → Empresa del sistema antes de enviar facturas por correo.',
+                ],
+            ]);
+        }
+
         $invoice->load('company');
         if ($invoice->company_id === null || $invoice->company === null) {
             return response()->json([

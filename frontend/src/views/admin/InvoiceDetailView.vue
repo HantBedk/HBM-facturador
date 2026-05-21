@@ -13,6 +13,7 @@ import {
 import { useUiDialogStore } from '@/stores/uiDialog'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import { openPdfBlobInNewTab, triggerPdfDownload } from '@/utils/pdfBlob.js'
+import { confirmInvoiceEmailSend } from '@/utils/invoiceEmitterSendGate.js'
 
 const uiDialog = useUiDialogStore()
 
@@ -191,6 +192,9 @@ async function onAprobarYEnviar() {
   })
   if (!ok) return
 
+  const canSend = await confirmInvoiceEmailSend({ invoice: invoice.value, uiDialog, router })
+  if (!canSend) return
+
   const invId = id.value
   approveSubmitting.value = true
   try {
@@ -204,6 +208,7 @@ async function onAprobarYEnviar() {
     } catch (emailErr) {
       const msg =
         emailErr.data?.errors?.company?.[0] ||
+        emailErr.data?.errors?.emitter?.[0] ||
         emailErr.data?.message ||
         emailErr.message ||
         'Error desconocido.'
@@ -329,6 +334,8 @@ async function onSendInvoiceEmail() {
     actionError.value = 'Datos de factura inconsistentes. Recargue la página.'
     return
   }
+  const emitterOk = await confirmInvoiceEmailSend({ invoice: invoice.value, uiDialog, router })
+  if (!emitterOk) return
   const ok = await uiDialog.confirm({
     title: 'Enviar factura por correo',
     message: `Se enviará el PDF oficial de la factura ${invoice.value.code} (esta página) a ${invoice.value.company.correo}. ¿Continuar?`,
@@ -344,7 +351,12 @@ async function onSendInvoiceEmail() {
       message: r.message || 'Factura enviada.',
     })
   } catch (e) {
-    const msg = e.data?.errors?.company?.[0] || e.data?.message || e.message || 'No se pudo enviar el correo.'
+    const msg =
+      e.data?.errors?.company?.[0] ||
+      e.data?.errors?.emitter?.[0] ||
+      e.data?.message ||
+      e.message ||
+      'No se pudo enviar el correo.'
     actionError.value = msg
   } finally {
     sendEmailBusy.value = false
