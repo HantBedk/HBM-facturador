@@ -18,3 +18,17 @@ Thumbs.db
 
 # Seeder de datos ficticios solo para máquinas locales (no versionar)
 /backend/database/seeders/DevFakeDataLocalSeeder.php
+
+# Scripts de arranque y utilidades locales (solo para la máquina del desarrollador)
+/HBM
+/HBM.ps1
+/HBM.cmd
+/HBM-Levantar.cmd
+/HBM-UsuariosDev.cmd
+
+# Carpetas de herramientas de IA / IDE (no son código del proyecto)
+/.claude/
+/.cursor/
+
+# Planes y documentación interna de desarrollo
+/Planes/

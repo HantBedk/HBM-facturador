@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\AdminInventoryHolderSettingsController;
 use App\Http\Controllers\Api\AdminInventoryLocationSettingsController;
 use App\Http\Controllers\Api\AdminPanelNotificationController;
 use App\Http\Controllers\Api\AdminServiceCatalogController;
+use App\Http\Controllers\Api\AdminServiceRegistrySpreadsheetController;
 use App\Http\Controllers\Api\AdminServiceCatalogSuggestionController;
 use App\Http\Controllers\Api\AdminTechnicianCatalogPricingController;
 use App\Http\Controllers\Api\AdminCorreoSolicitudController;
@@ -168,6 +169,8 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::post('/admin/notifications/read-all', [AdminPanelNotificationController::class, 'readAll']);
 
         Route::get('/admin/export/services', [AdminExportController::class, 'services']);
+        Route::get('/admin/export/services/template', [AdminServiceRegistrySpreadsheetController::class, 'template']);
+        Route::post('/admin/import/services', [AdminServiceRegistrySpreadsheetController::class, 'import']);
         Route::get('/admin/export/invoices', [AdminExportController::class, 'invoices']);
         Route::get('/admin/export/recurring-fixed-charges/template', [AdminRecurringFixedChargesSpreadsheetController::class, 'template']);
         Route::get('/admin/export/recurring-fixed-charges', [AdminRecurringFixedChargesSpreadsheetController::class, 'export']);

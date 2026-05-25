@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Invoice;
 use App\Models\Service;
+use App\Services\ServiceRegistrySpreadsheetService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -97,22 +98,7 @@ class AdminExportController extends Controller
         return response()->streamDownload(function () use ($serviceQuery) {
             $out = fopen('php://output', 'w');
             fwrite($out, "\xEF\xBB\xBF");
-            fputcsv($out, [
-                'Fecha servicio',
-                'Empresa',
-                'NIT empresa',
-                'Código servicio',
-                'Clase registro',
-                'ID activo inventario',
-                'Equipo (nombre)',
-                'Equipo código interno',
-                'Tipo trabajo',
-                'Descripción',
-                'Empleado',
-                'Cliente u obra',
-                'Valor',
-                'Estado',
-            ], ';');
+            fputcsv($out, ServiceRegistrySpreadsheetService::EXPORT_HEADERS, ';');
 
             $n = 0;
             foreach ($serviceQuery->orderByDesc('service_date')->orderByDesc('id')->cursor() as $svc) {

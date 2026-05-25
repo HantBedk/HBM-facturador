@@ -9,8 +9,10 @@ use App\MailTransport\Contracts\OutgoingMailSender;
 use App\MailTransport\MailMessage;
 use App\Models\Service;
 use App\Models\User;
+use App\Services\ServiceRegistrySpreadsheetService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -474,5 +476,126 @@ class ServiceMaintenanceTest extends TestCase
         } finally {
             Carbon::setTestNow();
         }
+    }
+
+    public function test_admin_services_import_template_matches_export_headers(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        $res = $this->get('/api/admin/export/services/template');
+        $res->assertOk();
+        $body = $res->streamedContent();
+        $this->assertStringStartsWith("\xEF\xBB\xBF", $body);
+        $lines = preg_split("/\r\n|\n|\r/", trim(substr($body, 3)));
+        $header = str_getcsv($lines[0], ';');
+        $this->assertSame(ServiceRegistrySpreadsheetService::EXPORT_HEADERS, $header);
+    }
+
+    public function test_admin_import_services_updates_row_by_code(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN, 'nombre' => 'Admin Import']);
+        $company = Company::query()->create([
+            'nombre' => 'Empresa Import',
+            'factura_sigla' => 'IMP',
+            'nit' => '901-IMP-CSV',
+            'estado' => Company::ESTADO_ACTIVO,
+        ]);
+        $svc = Service::query()->create([
+            'code' => 'SERV-IMP-99',
+            'company_id' => $company->id,
+            'user_id' => $admin->id,
+            'client_name' => 'Cliente original',
+            'service_type' => 'Instalación',
+            'description' => 'Descripción original del servicio importado.',
+            'amount' => '100000.00',
+            'service_date' => '2026-05-01',
+            'status' => Service::STATUS_ACTIVO,
+            'kind' => Service::KIND_SERVICIO,
+        ]);
+
+        $header = implode(';', ServiceRegistrySpreadsheetService::EXPORT_HEADERS);
+        $row = implode(';', [
+            '2026-05-02',
+            'Empresa Import',
+            '901-IMP-CSV',
+            'SERV-IMP-99',
+            'servicio',
+            '',
+            '',
+            '',
+            'Instalación',
+            'Descripción actualizada por importación CSV.',
+            'Admin Import',
+            'Cliente actualizado',
+            '150000.50',
+            'activo',
+        ]);
+        $csv = "\xEF\xBB\xBF".$header."\n".$row."\n";
+        $file = UploadedFile::fake()->createWithContent('servicios.csv', $csv);
+
+        Sanctum::actingAs($admin);
+
+        $res = $this->post('/api/admin/import/services', ['file' => $file]);
+        $res->assertOk();
+        $res->assertJsonPath('updated', 1);
+        $res->assertJsonPath('imported', 0);
+
+        $svc->refresh();
+        $this->assertSame('150000.50', (string) $svc->amount);
+        $this->assertSame('Cliente actualizado', $svc->client_name);
+        $this->assertSame('2026-05-02', $svc->service_date->format('Y-m-d'));
+    }
+
+    public function test_admin_import_services_dry_run_does_not_persist(): void
+    {
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN, 'nombre' => 'Admin Dry']);
+        $company = Company::query()->create([
+            'nombre' => 'Empresa Dry',
+            'factura_sigla' => 'DRY',
+            'nit' => '901-DRY',
+            'estado' => Company::ESTADO_ACTIVO,
+        ]);
+        $svc = Service::query()->create([
+            'code' => 'SERV-DRY-01',
+            'company_id' => $company->id,
+            'user_id' => $admin->id,
+            'client_name' => 'Cliente',
+            'service_type' => 'Trabajo',
+            'description' => 'Descripción larga para dry run de importación.',
+            'amount' => '50000.00',
+            'service_date' => '2026-05-03',
+            'status' => Service::STATUS_ACTIVO,
+            'kind' => Service::KIND_SERVICIO,
+        ]);
+
+        $header = implode(';', ServiceRegistrySpreadsheetService::EXPORT_HEADERS);
+        $row = implode(';', [
+            '2026-05-03',
+            'Empresa Dry',
+            '901-DRY',
+            'SERV-DRY-01',
+            'servicio',
+            '',
+            '',
+            '',
+            'Trabajo',
+            'Descripción larga para dry run de importación.',
+            'Admin Dry',
+            'Cliente',
+            '999999.99',
+            'activo',
+        ]);
+        $csv = "\xEF\xBB\xBF".$header."\n".$row."\n";
+        $file = UploadedFile::fake()->createWithContent('dry.csv', $csv);
+
+        Sanctum::actingAs($admin);
+
+        $this->post('/api/admin/import/services', ['file' => $file, 'dry_run' => true])
+            ->assertOk()
+            ->assertJsonPath('dry_run', true)
+            ->assertJsonPath('updated', 1);
+
+        $this->assertSame('50000.00', (string) $svc->fresh()->amount);
     }
 }

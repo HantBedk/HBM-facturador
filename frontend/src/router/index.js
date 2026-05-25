@@ -16,6 +16,7 @@ const AdminBillingAutomationView = () => import('@/views/admin/AdminBillingAutom
 const AdminMailNotificationsView = () => import('@/views/admin/AdminMailNotificationsView.vue')
 const AdminSystemOrganizationView = () => import('@/views/admin/AdminSystemOrganizationView.vue')
 const AdminInventoryConfigView = () => import('@/views/admin/AdminInventoryConfigView.vue')
+const AdminServicesDataExchangeView = () => import('@/views/admin/AdminServicesDataExchangeView.vue')
 const AdminEmpleadoPerfilView = () => import('@/views/admin/AdminEmpleadoPerfilView.vue')
 const EmpleadosListView = () => import('@/views/admin/EmpleadosListView.vue')
 const EmpleadoDashboardView = () => import('@/views/empleado/EmpleadoDashboardView.vue')
@@ -144,6 +145,11 @@ const routes = [
             path: 'inventario',
             name: 'admin-config-inventario',
             component: AdminInventoryConfigView,
+          },
+          {
+            path: 'servicios-datos',
+            name: 'admin-config-services-data',
+            component: AdminServicesDataExchangeView,
           },
           {
             path: 'ubicaciones-inventario',

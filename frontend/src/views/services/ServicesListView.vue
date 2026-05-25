@@ -5,7 +5,7 @@ import AdminServiceDetailPanel from '@/components/admin/AdminServiceDetailPanel.
 import AdminServiceRegisterPanel from '@/components/admin/AdminServiceRegisterPanel.vue'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminPanelRole } from '@/utils/roles.js'
-import { createInvoice, downloadAdminExportCsv } from '@/services/invoicesApi.js'
+import { createInvoice } from '@/services/invoicesApi.js'
 import { fetchEmpleadoCommercialInventorySettings } from '@/services/inventoryApi.js'
 import { archiveService, fetchCompanies, fetchEmpleados, fetchServices } from '@/services/servicesApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
@@ -39,7 +39,6 @@ const rows = ref([])
 const meta = ref(null)
 const links = ref(null)
 const loading = ref(false)
-const exportBusy = ref(false)
 const error = ref('')
 const archivingId = ref(null)
 /** Admin: creación de borrador de factura desde fila de mantenimiento. */
@@ -404,31 +403,6 @@ const filteredRows = computed(() => {
   return rows.value.filter((s) => detectSavTypeByCode(s) === wanted)
 })
 
-async function exportServicesCsv() {
-  if (!isAdmin.value) return
-  error.value = ''
-  exportBusy.value = true
-  try {
-    const params = {}
-    if (filters.value.company_id) params.company_id = filters.value.company_id
-    if (filters.value.user_id) params.user_id = filters.value.user_id
-    if (filters.value.service_date_from) params.service_date_from = filters.value.service_date_from
-    if (filters.value.service_date_to) params.service_date_to = filters.value.service_date_to
-    if (filters.value.q.trim()) params.q = filters.value.q.trim()
-    if (filters.value.sav_type === 'mantenimiento') params.kind = 'mantenimiento'
-    if (filters.value.sav_type === 'servicio') params.kind = 'servicio'
-    const { blob, filename } = await downloadAdminExportCsv('/admin/export/services', params)
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = filename
-    a.click()
-    URL.revokeObjectURL(a.href)
-  } catch (e) {
-    error.value = e.message || 'No se pudo exportar.'
-  } finally {
-    exportBusy.value = false
-  }
-}
 </script>
 
 <template>
@@ -445,24 +419,18 @@ async function exportServicesCsv() {
         </p>
       </div>
       <div class="head-btns">
-        <button
-          v-if="isAdmin"
-          type="button"
-          class="btn secondary"
-          :disabled="exportBusy"
-          @click="exportServicesCsv"
-        >
-          {{ exportBusy ? 'Exportando…' : 'Exportar CSV (Excel)' }}
-        </button>
         <template v-if="isAdmin">
           <template v-if="isMaintenanceListing">
             <button type="button" class="btn primary register-btn" @click="openRegisterPanel('mantenimiento')">+ Mantenimiento</button>
           </template>
           <template v-else>
             <button type="button" class="btn primary register-btn" @click="openRegisterPanel('servicio')">+ Servicio</button>
-            <button type="button" class="btn secondary register-btn" @click="openRegisterPanel('mantenimiento')">+ Mantenimiento</button>
-            <button type="button" class="btn secondary register-btn" @click="openRegisterPanel('venta')">+ Venta</button>
-            <button type="button" class="btn secondary register-btn" @click="openRegisterPanel('alquiler')">+ Alquiler</button>
+            <button type="button" class="btn register-btn register-btn--alquiler" @click="openRegisterPanel('alquiler')">
+              + Alquiler
+            </button>
+            <button type="button" class="btn register-btn register-btn--venta" @click="openRegisterPanel('venta')">
+              + Venta
+            </button>
           </template>
         </template>
         <template v-else>
@@ -471,24 +439,23 @@ async function exportServicesCsv() {
           </template>
           <template v-else>
             <button type="button" class="btn primary register-btn" @click="openRegisterPanel('servicio')">+ Servicio</button>
-            <button type="button" class="btn secondary register-btn" @click="openRegisterPanel('mantenimiento')">+ Mantenimiento</button>
             <button
               type="button"
-              class="btn secondary register-btn"
-              :disabled="!empleadoCommercial.venta"
-              :title="empleadoCommercial.venta ? 'Registrar venta' : 'Venta no habilitada por administración'"
-              @click="openRegisterPanel('venta')"
-            >
-              + Venta
-            </button>
-            <button
-              type="button"
-              class="btn secondary register-btn"
+              class="btn register-btn register-btn--alquiler"
               :disabled="!empleadoCommercial.alquiler"
               :title="empleadoCommercial.alquiler ? 'Registrar alquiler' : 'Alquiler no habilitado por administración'"
               @click="openRegisterPanel('alquiler')"
             >
               + Alquiler
+            </button>
+            <button
+              type="button"
+              class="btn register-btn register-btn--venta"
+              :disabled="!empleadoCommercial.venta"
+              :title="empleadoCommercial.venta ? 'Registrar venta' : 'Venta no habilitada por administración'"
+              @click="openRegisterPanel('venta')"
+            >
+              + Venta
             </button>
           </template>
         </template>
@@ -876,6 +843,31 @@ async function exportServicesCsv() {
 
 .register-btn {
   min-width: 9.5rem;
+  border-color: transparent;
+  color: #fff;
+  transition: filter 0.15s ease, transform 0.12s ease;
+}
+
+.register-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.register-btn:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.register-btn--alquiler {
+  background: linear-gradient(90deg, #ca8a04, #eab308);
+  box-shadow: 0 4px 14px rgba(234, 179, 8, 0.28);
+}
+
+.register-btn--venta {
+  background: linear-gradient(90deg, #059669, #22c55e);
+  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.28);
+}
+
+.btn.primary.register-btn {
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
 }
 
 .head h1 {
@@ -1292,6 +1284,7 @@ async function exportServicesCsv() {
 .btn.primary {
   background: linear-gradient(90deg, #2563eb, #7c3aed);
   color: #fff;
+  border-color: transparent;
 }
 
 .btn.secondary {
