@@ -17,6 +17,9 @@ const AdminMailNotificationsView = () => import('@/views/admin/AdminMailNotifica
 const AdminSystemOrganizationView = () => import('@/views/admin/AdminSystemOrganizationView.vue')
 const AdminInventoryConfigView = () => import('@/views/admin/AdminInventoryConfigView.vue')
 const AdminServicesDataExchangeView = () => import('@/views/admin/AdminServicesDataExchangeView.vue')
+const AdminBackupView = () => import('@/views/admin/AdminBackupView.vue')
+const AdminNotificationsListView = () => import('@/views/admin/AdminNotificationsListView.vue')
+const EmpleadoNotificationsListView = () => import('@/views/empleado/EmpleadoNotificationsListView.vue')
 const AdminEmpleadoPerfilView = () => import('@/views/admin/AdminEmpleadoPerfilView.vue')
 const EmpleadosListView = () => import('@/views/admin/EmpleadosListView.vue')
 const EmpleadoDashboardView = () => import('@/views/empleado/EmpleadoDashboardView.vue')
@@ -66,11 +69,6 @@ const routes = [
         name: 'admin-mantenimientos',
         component: ServicesListView,
         props: { defaultKind: 'mantenimiento' },
-      },
-      {
-        path: 'catalogo-servicios',
-        name: 'admin-catalogo-servicios',
-        redirect: { name: 'admin-inventario' },
       },
       { path: 'inventario', name: 'admin-inventario', component: InventoryView },
       { path: 'inventario/activo/:lotId(\\d+)', name: 'admin-inventario-activo-detalle', component: InventoryAssetDetailView, props: true },
@@ -152,6 +150,11 @@ const routes = [
             component: AdminServicesDataExchangeView,
           },
           {
+            path: 'respaldo',
+            name: 'admin-config-respaldo',
+            component: AdminBackupView,
+          },
+          {
             path: 'ubicaciones-inventario',
             redirect: { name: 'admin-config-inventario' },
           },
@@ -179,6 +182,7 @@ const routes = [
         props: true,
       },
       { path: 'empleados', redirect: { name: 'admin-emp-rendimiento' } },
+      { path: 'notificaciones', name: 'admin-notificaciones', component: AdminNotificationsListView },
     ],
   },
   {
@@ -201,7 +205,7 @@ const routes = [
         component: EmpleadoConfiguracionView,
       },
       { path: '', name: 'empleado-dashboard', component: EmpleadoDashboardView },
-      { path: 'historial', redirect: { name: 'empleado-dashboard' } },
+      { path: 'historial', name: 'empleado-historial', component: EmployeeHistorialView },
       { path: 'registro-servicio', name: 'emp-registro-servicio', component: ServiceRegisterView },
       { path: 'registro-mantenimiento', name: 'emp-registro-mantenimiento', component: ServiceRegisterView },
       { path: 'registro-venta', name: 'emp-registro-venta', component: ServiceRegisterView },
@@ -223,13 +227,7 @@ const routes = [
         props: true,
       },
       { path: 'servicio/:id(\\d+)/editar', name: 'emp-servicio-editar', component: ServiceEditView, props: true },
-      { path: 'servicios/nuevo', redirect: '/empleado/registro-servicio' },
-      {
-        path: 'servicios/:id(\\d+)',
-        redirect: (to) => ({ path: `/empleado/servicio/${to.params.id}` }),
-      },
-      { path: 'servicios', redirect: '/empleado/listado-servicios' },
-      { path: 'servicios/:pathMatch(.*)*', redirect: '/empleado/listado-servicios' },
+      { path: 'notificaciones', name: 'empleado-notificaciones', component: EmpleadoNotificationsListView },
     ],
   },
   { path: '/', redirect: '/login' },
@@ -264,9 +262,8 @@ router.beforeEach(async (to) => {
   }
 
   if (roles && auth.user && !roles.includes(auth.user.rol)) {
-    return isAdminPanelRole(auth.user.rol)
-      ? { name: 'admin-dashboard' }
-      : { name: 'empleado-dashboard' }
+    await auth.logout()
+    return { name: 'login', query: { redirect: to.fullPath } }
   }
 
   /** Técnicos: si faltan datos obligatorios solo se permite /empleado/perfil y /empleado/configuracion (contraseña y avisos). */

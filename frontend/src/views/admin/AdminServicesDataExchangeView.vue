@@ -4,6 +4,7 @@ import {
   downloadServicesRegistryCsv,
   downloadServicesRegistryTemplate,
   importServicesRegistrySpreadsheet,
+  fetchServicesImportResult,
 } from '@/services/servicesRegistryApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
 
@@ -99,7 +100,24 @@ async function runImport(file, dryRun) {
   if (dryRun) dryRunBusy.value = true
   else importBusy.value = true
   try {
-    const data = await importServicesRegistrySpreadsheet(file, { dryRun })
+    // Paso 1: subir archivo y recibir job_id (202 inmediato)
+    const submit = await importServicesRegistrySpreadsheet(file, { dryRun })
+    const jobId = submit?.job_id
+    if (!jobId) throw new Error('No se recibió el identificador de trabajo.')
+
+    // Paso 2: polling hasta que el job termine (máx. 120 s)
+    let data = null
+    for (let i = 0; i < 120; i++) {
+      await new Promise((r) => setTimeout(r, 1000))
+      const res = await fetchServicesImportResult(jobId)
+      if (res?.status === 'completed' || res?.status === 'failed') {
+        data = res
+        break
+      }
+    }
+    if (!data) throw new Error('La importación tardó demasiado. Intente de nuevo.')
+    if (data.status === 'failed') throw new Error(data.message || 'Error en la importación.')
+
     feedbackOk.value = data?.message || (dryRun ? 'Simulación completada.' : 'Importación completada.')
     await uiDialog.alert({
       title: dryRun ? 'Simulación de importación' : 'Importar servicios',

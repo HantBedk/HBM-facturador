@@ -9,68 +9,6 @@ export function fetchServiceCatalogActive() {
   return api('/service-catalog/active').then((r) => r.data ?? [])
 }
 
-/** @param {Record<string, string|number>} [params] */
-export function fetchAdminServiceCatalog(params = {}) {
-  const qs = new URLSearchParams()
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== '' && v !== null && v !== undefined) qs.set(k, String(v))
-  })
-  const s = qs.toString()
-  return api(`/admin/service-catalog${s ? `?${s}` : ''}`)
-}
-
-/** Detalle de un ítem (admin). */
-export function fetchAdminServiceCatalogItem(id) {
-  return api(`/admin/service-catalog/${id}`).then((r) => r.data)
-}
-
-export function createServiceCatalogItem(payload) {
-  return api('/admin/service-catalog', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  }).then((r) => r.data)
-}
-
-export function updateServiceCatalogItem(id, payload) {
-  return api(`/admin/service-catalog/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  }).then((r) => r.data)
-}
-
-export function patchServiceCatalogEstado(id, status) {
-  return api(`/admin/service-catalog/${id}/estado`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status }),
-  }).then((r) => r.data)
-}
-
-export function deleteServiceCatalogItem(id) {
-  return api(`/admin/service-catalog/${id}`, { method: 'DELETE' }).then((r) => r.data)
-}
-
-/** @param {number[]} ids */
-export function bulkDestroyServiceCatalogItems(ids) {
-  return api('/admin/service-catalog/bulk-destroy', {
-    method: 'POST',
-    body: JSON.stringify({ ids }),
-  }).then((r) => r.data)
-}
-
-/**
- * Importación masiva desde Excel (.xlsx, .xls) o CSV (UTF-8). Siempre catálogo global.
- * @param {File} file
- */
-export function importServiceCatalogFromSpreadsheet(file) {
-  const fd = new FormData()
-  fd.append('file', file)
-  // Respuesta plana { message, imported, issues } — no va envuelta en `data` como los API Resources.
-  return api('/admin/service-catalog/import', {
-    method: 'POST',
-    body: fd,
-  })
-}
-
 /** Márgenes globales servicio / venta inventario / alquiler inventario (solo admin). */
 export function fetchTechnicianCatalogDiscount() {
   return api('/admin/service-catalog/technician-pricing').then((r) => r.data)

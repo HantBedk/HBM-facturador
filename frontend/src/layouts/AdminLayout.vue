@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useUiDialogStore } from '@/stores/uiDialog'
 import { fetchMailOutboundStatus } from '@/services/adminMailNotificationsApi.js'
 import { isAdminPanelRole } from '@/utils/roles.js'
+import { fetchSystemOrganization, fetchSystemOrganizationLogoBlob } from '@/services/adminSystemOrganizationApi.js'
 
 const auth = useAuthStore()
 const uiDialog = useUiDialogStore()
@@ -22,6 +23,20 @@ const firstName = computed(() => {
 const menuOpen = ref(false)
 const menuWrap = ref(null)
 const mobileNavOpen = ref(false)
+
+const orgName = ref('')
+const orgLogoUrl = ref('')
+
+async function loadOrg() {
+  try {
+    const data = await fetchSystemOrganization()
+    orgName.value = data?.trade_name || data?.legal_name || ''
+  } catch { /* silencioso */ }
+  try {
+    const blob = await fetchSystemOrganizationLogoBlob()
+    if (blob) orgLogoUrl.value = URL.createObjectURL(blob)
+  } catch { /* silencioso */ }
+}
 
 const initials = computed(() => {
   const n = (auth.user?.nombre || '').trim()
@@ -118,6 +133,7 @@ onMounted(() => {
   }, 30000)
   document.addEventListener('click', onDocClick)
   void maybePromptOutboundMail()
+  void loadOrg()
 })
 
 watch(menuOpen, (open) => {
@@ -146,6 +162,7 @@ onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
   document.removeEventListener('keydown', onMenuEscape)
   document.body.style.overflow = ''
+  if (orgLogoUrl.value) URL.revokeObjectURL(orgLogoUrl.value)
 })
 
 async function salir() {
@@ -163,12 +180,13 @@ async function salir() {
       
       <!-- Logo Superior -->
       <div class="h-[76px] px-6 flex items-center gap-3 border-b border-slate-700/30">
-        <div class="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-500/20">
-          <svg class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+        <div class="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-500/20 overflow-hidden">
+          <img v-if="orgLogoUrl" :src="orgLogoUrl" alt="Logo" class="h-full w-full object-contain" />
+          <svg v-else class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
           </svg>
         </div>
-        <span class="text-[1.15rem] font-bold text-white tracking-wide">HBM Admin</span>
+        <span class="text-[1.15rem] font-bold text-white tracking-wide truncate">{{ orgName || 'HBM Admin' }}</span>
       </div>
 
       <!-- Menú de Navegación -->
@@ -286,12 +304,13 @@ async function salir() {
       >
         <div class="h-[76px] px-5 flex items-center justify-between gap-3 border-b border-slate-700/30">
           <div class="flex items-center gap-3 min-w-0">
-            <div class="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-500/20">
-              <svg class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div class="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-500/20 overflow-hidden">
+              <img v-if="orgLogoUrl" :src="orgLogoUrl" alt="Logo" class="h-full w-full object-contain" />
+              <svg v-else class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
               </svg>
             </div>
-            <span class="text-[1.05rem] font-bold text-white tracking-wide truncate">HBM Admin</span>
+            <span class="text-[1.05rem] font-bold text-white tracking-wide truncate">{{ orgName || 'HBM Admin' }}</span>
           </div>
           <button
             type="button"

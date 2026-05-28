@@ -29,7 +29,10 @@ const forgotSuccess = ref('')
 
 const redirectTarget = computed(() => {
   const r = router.query.redirect
-  return typeof r === 'string' ? r : null
+  if (typeof r !== 'string') return null
+  // Solo rutas locales: deben empezar con / pero no con // (evita //evil.com)
+  if (!r.startsWith('/') || r.startsWith('//')) return null
+  return r
 })
 
 /** Misma regla mínima que el backend (AuthController): local@dominio, Unicode con /u. */

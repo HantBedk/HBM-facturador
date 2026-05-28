@@ -1,12 +1,14 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   fetchEmpleadoNotifications,
   fetchEmpleadoUnreadCount,
   markAllEmpleadoNotificationsRead,
   markEmpleadoNotificationRead,
+  requestEmpleadoNotifStreamTicket,
 } from '@/services/empleadoNotifApi.js'
+import { apiBaseUrl } from '@/services/api.js'
 
 const router = useRouter()
 const open = ref(false)
@@ -15,14 +17,102 @@ const count = ref(0)
 const items = ref([])
 const error = ref('')
 
+const prevUnreadCount = ref(null)
+const toastOpen = ref(false)
+const toastMessage = ref('')
+const toastLink = ref(null)
+let toastHideTimer = null
 let pollTimer = null
+let sseSource = null
+let sseReconnectTimer = null
+let baseTitle = ''
+
+function startPolling() {
+  if (pollTimer) return
+  pollTimer = setInterval(refreshCount, 60000)
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+}
+
+function dismissToast() {
+  toastOpen.value = false
+  toastLink.value = null
+  if (toastHideTimer) { clearTimeout(toastHideTimer); toastHideTimer = null }
+}
+
+async function triggerToast() {
+  try {
+    const latest = await fetchEmpleadoNotifications({ limit: 1, unread_only: true })
+    const n = latest[0]
+    toastMessage.value = n?.message ? String(n.message).trim().slice(0, 200) : 'Tienes nuevos avisos.'
+    toastLink.value = n?.meta?.link ?? null
+  } catch {
+    toastMessage.value = 'Tienes nuevos avisos.'
+    toastLink.value = null
+  }
+  toastOpen.value = true
+  if (toastHideTimer) clearTimeout(toastHideTimer)
+  toastHideTimer = setTimeout(dismissToast, 9000)
+}
+
+async function startSse() {
+  stopSse()
+  stopPolling()
+  try {
+    const res = await requestEmpleadoNotifStreamTicket()
+    const ticket = res?.ticket
+    if (!ticket) throw new Error('no ticket')
+
+    const url = `${apiBaseUrl()}/api/empleado/notifications/stream?ticket=${encodeURIComponent(ticket)}`
+    sseSource = new EventSource(url)
+
+    sseSource.onmessage = (ev) => {
+      try {
+        const d = JSON.parse(ev.data)
+        if (typeof d.count === 'number') {
+          if (prevUnreadCount.value !== null && d.count > prevUnreadCount.value) {
+            triggerToast()
+          }
+          prevUnreadCount.value = d.count
+          count.value = d.count
+        }
+      } catch { /* ignore */ }
+    }
+
+    sseSource.addEventListener('close', () => {
+      stopSse()
+      if (document.visibilityState === 'visible') {
+        sseReconnectTimer = setTimeout(startSse, 2000)
+      }
+    })
+
+    sseSource.onerror = () => { stopSse(); startPolling() }
+  } catch {
+    startPolling()
+  }
+}
+
+function stopSse() {
+  if (sseSource) { sseSource.close(); sseSource = null }
+  if (sseReconnectTimer) { clearTimeout(sseReconnectTimer); sseReconnectTimer = null }
+}
+
+function handleVisibility() {
+  if (document.visibilityState === 'visible') { refreshCount(); startSse() }
+  else { stopSse(); stopPolling() }
+}
 
 async function refreshCount() {
   try {
-    count.value = await fetchEmpleadoUnreadCount()
-  } catch {
-    /* silencioso */
-  }
+    const newCount = await fetchEmpleadoUnreadCount()
+    if (prevUnreadCount.value !== null && newCount > prevUnreadCount.value) {
+      triggerToast()
+    }
+    prevUnreadCount.value = newCount
+    count.value = newCount
+  } catch { /* silencioso */ }
 }
 
 async function loadList() {
@@ -40,26 +130,16 @@ async function loadList() {
 
 async function toggle() {
   open.value = !open.value
-  if (open.value) {
-    await loadList()
-    await refreshCount()
-  }
+  if (open.value) { await loadList(); await refreshCount() }
 }
 
 async function onRead(n) {
   try {
-    if (!n.read) {
-      await markEmpleadoNotificationRead(n.id)
-      n.read = true
-      await refreshCount()
-    }
+    if (!n.read) { await markEmpleadoNotificationRead(n.id); n.read = true; await refreshCount() }
     const path = n.meta?.link
-    if (path && typeof path === 'string') {
-      open.value = false
-      await router.push(path)
-    }
+    if (path && typeof path === 'string') { open.value = false; await router.push(path) }
   } catch (e) {
-    error.value = e.message || 'Error al marcar como leída.'
+    error.value = e.message || 'Error al marcar como leído.'
   }
 }
 
@@ -74,20 +154,46 @@ async function onReadAll() {
   }
 }
 
+async function onToastActivate() {
+  const path = toastLink.value
+  dismissToast()
+  if (path && typeof path === 'string') { open.value = false; await router.push(path); return }
+  open.value = true
+  await loadList()
+  await refreshCount()
+}
+
 function onDocClick(ev) {
   const root = document.getElementById('emp-notif-bell-root')
   if (root && !root.contains(ev.target)) open.value = false
 }
 
+function onToastKeydown(ev) {
+  if (ev.key === 'Escape') dismissToast()
+}
+
+watch(count, (n) => {
+  if (!baseTitle) return
+  document.title = n > 0 ? `(${n > 99 ? '99+' : n}) ${baseTitle}` : baseTitle
+})
+
 onMounted(() => {
+  baseTitle = document.title.replace(/^\(\d+\+?\)\s*/, '')
   refreshCount()
-  pollTimer = setInterval(refreshCount, 60000)
+  startSse()
+  document.addEventListener('visibilitychange', handleVisibility)
   document.addEventListener('click', onDocClick)
+  document.addEventListener('keydown', onToastKeydown)
 })
 
 onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
+  stopSse()
+  stopPolling()
+  if (baseTitle) document.title = baseTitle
+  dismissToast()
+  document.removeEventListener('visibilitychange', handleVisibility)
   document.removeEventListener('click', onDocClick)
+  document.removeEventListener('keydown', onToastKeydown)
 })
 </script>
 
@@ -152,6 +258,61 @@ onUnmounted(() => {
           <p v-if="!items.length" class="px-3 py-8 text-center text-sm text-slate-500">Sin avisos.</p>
         </template>
       </div>
+      <div class="border-t border-slate-700/50 px-3 py-2 text-right">
+        <router-link
+          :to="{ name: 'empleado-notificaciones' }"
+          class="text-xs text-sky-400 hover:text-sky-300 transition-colors"
+          @click="open = false"
+        >
+          Ver todos →
+        </router-link>
+      </div>
     </div>
   </div>
+
+  <Teleport to="body">
+    <Transition name="emp-notif-toast">
+      <div
+        v-if="toastOpen"
+        class="emp-notif-toast fixed bottom-4 right-4 z-[220] flex max-w-[min(100vw-1.5rem,20rem)] flex-col gap-2 rounded-xl border border-slate-600/80 bg-[#1a222d] p-3 shadow-2xl shadow-black/50"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="flex items-start justify-between gap-2">
+          <p class="m-0 flex-1 min-w-0 text-[0.8rem] leading-snug text-slate-100">{{ toastMessage }}</p>
+          <button
+            type="button"
+            class="shrink-0 rounded-md p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200"
+            aria-label="Cerrar aviso"
+            @click.stop="dismissToast"
+          >
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="flex justify-end">
+          <button
+            type="button"
+            class="rounded-lg border border-slate-600 px-2.5 py-1 text-[0.7rem] font-semibold text-slate-300 hover:bg-slate-800"
+            @click.stop="onToastActivate"
+          >
+            {{ toastLink ? 'Abrir destino' : 'Ver avisos' }}
+          </button>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
+
+<style scoped>
+.emp-notif-toast-enter-active,
+.emp-notif-toast-leave-active {
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+.emp-notif-toast-enter-from,
+.emp-notif-toast-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
+}
+</style>

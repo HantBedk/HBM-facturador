@@ -1,8 +1,9 @@
-FROM php:8.2-fpm-bookworm
+FROM php:8.3-fpm-bookworm
 
 RUN apt-get update && apt-get install -y \
     git unzip libzip-dev libicu-dev \
     libpng-dev libjpeg62-turbo-dev libfreetype6-dev libwebp-dev \
+    default-mysql-client \
     && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install gd pdo_mysql zip intl pcntl bcmath \
     && rm -rf /var/lib/apt/lists/*

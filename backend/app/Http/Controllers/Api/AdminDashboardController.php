@@ -47,30 +47,37 @@ class AdminDashboardController extends Controller
     }
 
     /**
-     * Últimos 5 meses calendario: cobros (`payment_date`) del mes del eje vs. mes inmediatamente anterior.
+     * Ingresos diarios (sum amount de servicios visibles) del mes actual vs. el mes anterior,
+     * alineados por día del mes (día 1 … N). Incluye todos los kinds: servicio, venta, alquiler, mantenimiento.
      *
      * @return array{
      *   categories: list<string>,
+     *   prev_label: string,
      *   series: list<array{name: string, data: list<float>}>
      * }
      */
-    private function monthlyRevenueChart(Carbon $now, int $months = 5): array
+    private function monthlyRevenueChart(Carbon $now): array
     {
-        $end = $now->copy()->startOfMonth();
-        $start = $end->copy()->subMonths($months - 1);
-        $queryFrom = $start->copy()->subMonth()->startOfMonth();
-        $queryTo = $end->copy()->endOfMonth()->endOfDay();
+        $currStart = $now->copy()->startOfMonth()->startOfDay();
+        $currEnd   = $now->copy()->endOfMonth()->endOfDay();
+        $prevStart = $now->copy()->subMonthNoOverflow()->startOfMonth()->startOfDay();
+        $prevEnd   = $now->copy()->subMonthNoOverflow()->endOfMonth()->endOfDay();
 
-        $rows = Payment::query()
-            ->whereBetween('payment_date', [$queryFrom->toDateString(), $queryTo->toDateString()])
-            ->selectRaw('YEAR(payment_date) as y, MONTH(payment_date) as m, SUM(amount) as total')
-            ->groupByRaw('YEAR(payment_date), MONTH(payment_date)')
-            ->get();
+        $dailyTotals = function (string $from, string $to): array {
+            return Service::query()
+                ->visibles()
+                ->whereBetween('service_date', [$from, $to])
+                ->selectRaw('DAY(service_date) as d, SUM(amount) as total')
+                ->groupByRaw('DAY(service_date)')
+                ->pluck('total', 'd')
+                ->map(fn ($v) => (float) $v)
+                ->all();
+        };
 
-        $totals = [];
-        foreach ($rows as $row) {
-            $totals[((int) $row->y).'-'.((int) $row->m)] = (float) $row->total;
-        }
+        $currTotals = $dailyTotals($currStart->toDateString(), $currEnd->toDateString());
+        $prevTotals = $dailyTotals($prevStart->toDateString(), $prevEnd->toDateString());
+
+        $daysInMonth = (int) $now->daysInMonth;
 
         $shortMonths = [
             1 => 'Ene', 2 => 'Feb', 3 => 'Mar', 4 => 'Abr',
@@ -78,25 +85,27 @@ class AdminDashboardController extends Controller
             9 => 'Sep', 10 => 'Oct', 11 => 'Nov', 12 => 'Dic',
         ];
 
-        $categories = [];
-        $current = [];
-        $previous = [];
+        $prevMonthDate = $now->copy()->subMonthNoOverflow();
+        $prevLabel = ($shortMonths[(int) $prevMonthDate->month] ?? '') . ' ' . $prevMonthDate->year;
 
-        for ($i = 0; $i < $months; $i++) {
-            $monthDate = $start->copy()->addMonths($i);
-            $y = (int) $monthDate->year;
-            $m = (int) $monthDate->month;
-            $prev = $monthDate->copy()->subMonth();
-            $categories[] = $shortMonths[$m] ?? (string) $m;
-            $current[] = round($totals["{$y}-{$m}"] ?? 0.0, 2);
-            $previous[] = round($totals[$prev->year.'-'.$prev->month] ?? 0.0, 2);
+        $today      = (int) $now->day;
+        $categories = [];
+        $current    = [];
+        $previous   = [];
+
+        for ($d = 1; $d <= $daysInMonth; $d++) {
+            $categories[] = (string) $d;
+            // Días futuros del mes actual → null para que el gráfico corte la línea ahí
+            $current[]  = $d > $today ? null : round($currTotals[$d] ?? 0.0, 2);
+            $previous[] = round($prevTotals[$d] ?? 0.0, 2);
         }
 
         return [
             'categories' => $categories,
-            'series' => [
+            'prev_label' => $prevLabel,
+            'series'     => [
                 ['name' => 'Este mes', 'data' => $current],
-                ['name' => 'Mes anterior', 'data' => $previous],
+                ['name' => $prevLabel,  'data' => $previous],
             ],
         ];
     }

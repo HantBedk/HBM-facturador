@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Concerns\StreamsCsv;
 use App\Http\Controllers\Controller;
 use App\Models\Invoice;
 use App\Models\Service;
@@ -13,6 +14,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AdminExportController extends Controller
 {
+    use StreamsCsv;
+
     private const EXPORT_ROW_CAP = 10000;
 
     /**
@@ -94,20 +97,17 @@ class AdminExportController extends Controller
         }
 
         $filename = 'servicios-'.now()->format('Y-m-d-His').'.csv';
+        $cursor = $serviceQuery->orderByDesc('service_date')->orderByDesc('id')->cursor();
 
-        return response()->streamDownload(function () use ($serviceQuery) {
-            $out = fopen('php://output', 'w');
-            fwrite($out, "\xEF\xBB\xBF");
-            fputcsv($out, ServiceRegistrySpreadsheetService::EXPORT_HEADERS, ';');
-
-            $n = 0;
-            foreach ($serviceQuery->orderByDesc('service_date')->orderByDesc('id')->cursor() as $svc) {
-                if (++$n > self::EXPORT_ROW_CAP) {
-                    break;
-                }
+        return $this->streamCsv(
+            $filename,
+            ServiceRegistrySpreadsheetService::EXPORT_HEADERS,
+            $cursor,
+            function ($svc) {
                 $lot = $svc->inventoryLot;
                 $kind = (string) ($svc->kind ?? Service::KIND_SERVICIO);
-                fputcsv($out, [
+
+                return [
                     $svc->service_date?->format('Y-m-d'),
                     $svc->company?->nombre ?? $svc->client_name,
                     $svc->company?->nit,
@@ -122,12 +122,10 @@ class AdminExportController extends Controller
                     $svc->client_name,
                     (string) $svc->amount,
                     $svc->status,
-                ], ';');
-            }
-            fclose($out);
-        }, $filename, [
-            'Content-Type' => 'text/csv; charset=UTF-8',
-        ]);
+                ];
+            },
+            self::EXPORT_ROW_CAP
+        );
     }
 
     /**
@@ -168,46 +166,30 @@ class AdminExportController extends Controller
         }
 
         $filename = 'facturas-'.now()->format('Y-m-d-His').'.csv';
+        $cursor = $q->orderByDesc('period_year')->orderByDesc('period_month')->orderByDesc('id')->cursor();
 
-        return response()->streamDownload(function () use ($q) {
-            $out = fopen('php://output', 'w');
-            fwrite($out, "\xEF\xBB\xBF");
-            fputcsv($out, [
-                'Código',
-                'Empresa',
-                'NIT',
-                'Periodo',
-                'Estado',
-                'Total',
-                'Total pagado',
-                'Saldo pendiente',
-                'Fecha creación',
-            ], ';');
-
-            $n = 0;
-            foreach ($q->orderByDesc('period_year')->orderByDesc('period_month')->orderByDesc('id')->cursor() as $inv) {
-                if (++$n > self::EXPORT_ROW_CAP) {
-                    break;
-                }
+        return $this->streamCsv(
+            $filename,
+            ['Código', 'Empresa', 'NIT', 'Periodo', 'Estado', 'Total', 'Total pagado', 'Saldo pendiente', 'Fecha creación'],
+            $cursor,
+            function ($inv) {
                 $paid = (float) ($inv->payments_sum_amount ?? 0);
                 $total = (float) $inv->total;
                 $balance = max(0, $total - $paid);
-                $period = $inv->period_month.'/'.$inv->period_year;
-                fputcsv($out, [
+
+                return [
                     $inv->code,
                     $inv->company?->nombre ?? $inv->bill_to_nombre,
                     $inv->company?->nit ?? $inv->bill_to_nit,
-                    $period,
+                    $inv->period_month.'/'.$inv->period_year,
                     $inv->status,
                     number_format($total, 2, '.', ''),
                     number_format($paid, 2, '.', ''),
                     number_format($balance, 2, '.', ''),
                     $inv->created_at?->timezone(config('app.timezone'))->format('Y-m-d H:i'),
-                ], ';');
-            }
-            fclose($out);
-        }, $filename, [
-            'Content-Type' => 'text/csv; charset=UTF-8',
-        ]);
+                ];
+            },
+            self::EXPORT_ROW_CAP
+        );
     }
 }

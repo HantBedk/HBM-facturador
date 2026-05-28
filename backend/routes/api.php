@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AdminActivityLogController;
+use App\Http\Controllers\Api\AdminBackupController;
 use App\Http\Controllers\Api\AdminBillingAutomationController;
 use App\Http\Controllers\Api\AdminCompanyController;
 use App\Http\Controllers\Api\AdminCompanyRecurringServiceController;
@@ -53,8 +54,14 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/health', HealthController::class);
 
+// SSE streams — auth via ticket de un solo uso (no middleware Sanctum)
+Route::get('/admin/notifications/stream', [AdminPanelNotificationController::class, 'stream'])
+    ->middleware('throttle:30,1');
+Route::get('/empleado/notifications/stream', [EmpleadoPanelNotificationController::class, 'stream'])
+    ->middleware('throttle:30,1');
+
 Route::post('/auth/login', [AuthController::class, 'login'])
-    ->middleware('throttle:15,1');
+    ->middleware('throttle:5,15');
 
 Route::post('/auth/forgot-password', [AuthController::class, 'forgotPasswordRequest'])
     ->middleware('throttle:8,60');
@@ -164,18 +171,39 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         Route::post('/admin/service-catalog-suggestions/{service_catalog_suggestion}/reject', [AdminServiceCatalogSuggestionController::class, 'reject']);
 
         Route::get('/admin/notifications/unread-count', [AdminPanelNotificationController::class, 'unreadCount']);
+        Route::post('/admin/notifications/stream-ticket', [AdminPanelNotificationController::class, 'streamTicket']);
         Route::get('/admin/notifications', [AdminPanelNotificationController::class, 'index']);
         Route::patch('/admin/notifications/{panel_notification}/read', [AdminPanelNotificationController::class, 'markRead']);
         Route::post('/admin/notifications/read-all', [AdminPanelNotificationController::class, 'readAll']);
 
         Route::get('/admin/export/services', [AdminExportController::class, 'services']);
         Route::get('/admin/export/services/template', [AdminServiceRegistrySpreadsheetController::class, 'template']);
-        Route::post('/admin/import/services', [AdminServiceRegistrySpreadsheetController::class, 'import']);
+        Route::post('/admin/import/services', [AdminServiceRegistrySpreadsheetController::class, 'import'])
+            ->middleware('throttle:10,1');
+        Route::get('/admin/import/services/{jobId}/result', [AdminServiceRegistrySpreadsheetController::class, 'importResult'])
+            ->middleware('throttle:120,1');
         Route::get('/admin/export/invoices', [AdminExportController::class, 'invoices']);
         Route::get('/admin/export/recurring-fixed-charges/template', [AdminRecurringFixedChargesSpreadsheetController::class, 'template']);
         Route::get('/admin/export/recurring-fixed-charges', [AdminRecurringFixedChargesSpreadsheetController::class, 'export']);
-        Route::post('/admin/import/recurring-fixed-charges', [AdminRecurringFixedChargesSpreadsheetController::class, 'import']);
+        Route::post('/admin/import/recurring-fixed-charges', [AdminRecurringFixedChargesSpreadsheetController::class, 'import'])
+            ->middleware('throttle:10,1');
         Route::get('/admin/activity-logs', [AdminActivityLogController::class, 'index']);
+
+        Route::post('/admin/system/backup', [AdminBackupController::class, 'trigger'])
+            ->middleware('throttle:30,60');
+        Route::get('/admin/system/backups', [AdminBackupController::class, 'index']);
+        Route::get('/admin/system/backups/{filename}', [AdminBackupController::class, 'download']);
+        Route::delete('/admin/system/backups/{filename}', [AdminBackupController::class, 'destroy']);
+        Route::post('/admin/system/backups/{filename}/restore', [AdminBackupController::class, 'restore']);
+        Route::post('/admin/system/restore-upload', [AdminBackupController::class, 'restoreUpload']);
+        Route::post('/admin/system/restore-zip', [AdminBackupController::class, 'restoreZip']);
+        Route::get('/admin/system/db-status', [AdminBackupController::class, 'dbStatus']);
+        Route::get('/admin/system/download-sql', [AdminBackupController::class, 'downloadSql'])
+            ->middleware('throttle:30,60');
+        Route::post('/admin/system/wipe', [AdminBackupController::class, 'wipe'])
+            ->middleware('throttle:3,60');
+        Route::get('/admin/system/full-export', [AdminBackupController::class, 'fullExport'])
+            ->middleware('throttle:5,60');
 
         Route::post('/admin/services/assign-to-technician', [ServiceController::class, 'assignToTechnician']);
 
@@ -204,12 +232,14 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
 
     Route::get('/admin/dashboard', [AdminDashboardController::class, 'index'])->middleware('role:admin,super_admin');
 
+    Route::get('/empleado/historial', [EmployeeHistorialController::class, 'forSelf'])->middleware('role:empleado');
     Route::get('/empleado/dashboard', [EmpleadoDashboardController::class, 'index'])->middleware('role:empleado');
     Route::get('/empleado/perfil', [EmpleadoPerfilController::class, 'show'])->middleware('role:empleado');
     Route::put('/empleado/perfil', [EmpleadoPerfilController::class, 'update'])->middleware('role:empleado');
     Route::post('/empleado/correo-solicitud', [EmpleadoCorreoSolicitudController::class, 'store'])->middleware('role:empleado');
     Route::delete('/empleado/correo-solicitud', [EmpleadoCorreoSolicitudController::class, 'destroy'])->middleware('role:empleado');
     Route::get('/empleado/notifications/unread-count', [EmpleadoPanelNotificationController::class, 'unreadCount'])->middleware('role:empleado');
+    Route::post('/empleado/notifications/stream-ticket', [EmpleadoPanelNotificationController::class, 'streamTicket'])->middleware('role:empleado');
     Route::get('/empleado/notifications', [EmpleadoPanelNotificationController::class, 'index'])->middleware('role:empleado');
     Route::patch('/empleado/notifications/{panel_notification}/read', [EmpleadoPanelNotificationController::class, 'markRead'])->middleware('role:empleado');
     Route::post('/empleado/notifications/read-all', [EmpleadoPanelNotificationController::class, 'readAll'])->middleware('role:empleado');

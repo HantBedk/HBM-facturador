@@ -54,6 +54,7 @@ export async function downloadServicesRegistryTemplate() {
 }
 
 /**
+ * Envía el archivo al backend y recibe { job_id } de forma inmediata (HTTP 202).
  * @param {File} file
  * @param {{ dryRun?: boolean }} [opts]
  */
@@ -67,4 +68,13 @@ export function importServicesRegistrySpreadsheet(file, opts = {}) {
     method: 'POST',
     body: fd,
   })
+}
+
+/**
+ * Consulta el estado de un job de importación.
+ * @param {string} jobId UUID devuelto por importServicesRegistrySpreadsheet
+ * @returns {Promise<{ status: 'pending'|'completed'|'failed', message?: string, imported?: number, updated?: number, skipped?: number, issues?: Array }>}
+ */
+export function fetchServicesImportResult(jobId) {
+  return api(`/admin/import/services/${encodeURIComponent(jobId)}/result`)
 }

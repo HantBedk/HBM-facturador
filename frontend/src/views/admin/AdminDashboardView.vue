@@ -19,39 +19,44 @@ const chartBaseOptions = {
     background: 'transparent',
     toolbar: { show: false },
     zoom: { enabled: false },
-    fontFamily: 'inherit'
+    fontFamily: 'inherit',
   },
-  colors: ['#22c55e', '#10b981'], // Tonos verde fluorecente del mockup
+  colors: ['#22c55e', '#64748b'],
   fill: {
     type: 'gradient',
-    gradient: { shadeIntensity: 1, opacityFrom: 0.3, opacityTo: 0.05, stops: [0, 90, 100] }
+    gradient: { shadeIntensity: 1, opacityFrom: 0.25, opacityTo: 0.02, stops: [0, 90, 100] },
   },
   dataLabels: { enabled: false },
-  stroke: { curve: 'smooth', width: 2.5 },
+  stroke: { curve: 'smooth', width: [2.5, 1.5], dashArray: [0, 4] },
+  // false → la línea se corta en valores null en lugar de saltar al siguiente punto
+  connectNulls: false,
   xaxis: {
     categories: [],
+    tickAmount: 10,
     axisBorder: { show: true, color: '#334155' },
     axisTicks: { show: false },
-    labels: { style: { colors: '#94a3b8', fontSize: '12px' } }
+    labels: { style: { colors: '#94a3b8', fontSize: '11px' } },
+    title: { text: 'Día del mes', style: { color: '#64748b', fontSize: '11px' } },
   },
   yaxis: {
     labels: {
       style: { colors: '#94a3b8', fontSize: '11px' },
-      formatter: (value) => value >= 1000 ? (value / 1000) + 'k' : value
-    }
+      formatter: (value) => value >= 1000 ? (value / 1000).toFixed(0) + 'k' : value,
+    },
   },
   grid: {
     borderColor: '#334155',
-    strokeDashArray: 0,
-    xaxis: { lines: { show: true } },
-    yaxis: { lines: { show: true } }
+    strokeDashArray: 3,
+    xaxis: { lines: { show: false } },
+    yaxis: { lines: { show: true } },
   },
   legend: { show: false },
   theme: { mode: 'dark' },
   tooltip: {
     theme: 'dark',
-    y: { formatter: (val) => '$ ' + Number(val).toLocaleString('es-CO') }
-  }
+    x: { formatter: (val) => 'Día ' + val },
+    y: { formatter: (val) => '$ ' + Number(val).toLocaleString('es-CO') },
+  },
 }
 
 const chartSeries = computed(() => {
@@ -64,7 +69,8 @@ const chartSeries = computed(() => {
   }
   return raw.map((s) => ({
     name: s.name ?? '',
-    data: (s.data ?? []).map((v) => Number(v) || 0),
+    // null se preserva tal cual → ApexCharts corta la línea en ese punto
+    data: (s.data ?? []).map((v) => (v === null || v === undefined ? null : Number(v))),
   }))
 })
 
@@ -341,23 +347,24 @@ const netAfterTechniciansClass = computed(() => {
       <div class="grid grid-cols-1 xl:grid-cols-[1.8fr_1.2fr] gap-6">
         
         <!-- MITAD IZQUIERDA: GRÁFICO APEXCHARTS ("Ingresos Mensuales - Octubre 2023") -->
-        <section class="bg-[#1e2532] rounded-2xl shadow-lg border border-transparent overflow-hidden flex flex-col h-[500px]">
+        <section class="bg-[#1e2532] rounded-2xl shadow-lg border border-transparent overflow-hidden">
           <div class="px-7 py-6 flex items-center justify-between">
             <h2 class="text-xl font-bold text-white tracking-wide m-0">
-              Ingresos mensuales (cobros) — {{ data?.period?.label || '—' }}
+              Ingresos por servicios — {{ data?.period?.label || '—' }}
             </h2>
             <div class="flex items-center gap-5 text-sm font-semibold">
                <div class="flex items-center gap-2 text-slate-300">
-                 <span class="h-2 w-2 rounded-full bg-[#22c55e]"></span> Este Mes
+                 <span class="h-2 w-2 rounded-full bg-[#22c55e]"></span> Este mes
                </div>
                <div class="flex items-center gap-2 text-slate-500">
-                 <span class="h-2 w-2 rounded-full bg-[#10b981] opacity-50"></span> Mes Anterior
+                 <span class="h-2 w-2 rounded-full bg-slate-500 opacity-60"></span>
+                 {{ data?.monthly_revenue_chart?.prev_label || 'Mes anterior' }}
                </div>
             </div>
           </div>
-          <!-- Gráfico -->
-          <div class="flex-1 px-4 pb-4">
-             <VueApexCharts width="100%" height="100%" type="area" :options="chartOptions" :series="chartSeries" />
+          <!-- Gráfico: altura explícita en px — ApexCharts no puede leer height:100% en flex -->
+          <div class="px-4 pb-6">
+             <VueApexCharts width="100%" height="380" type="area" :options="chartOptions" :series="chartSeries" />
           </div>
         </section>
 

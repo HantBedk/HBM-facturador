@@ -1,12 +1,14 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   fetchAdminNotifications,
   fetchUnreadNotificationCount,
   markAllNotificationsRead,
   markNotificationRead,
+  requestAdminNotifStreamTicket,
 } from '@/services/notificationsApi.js'
+import { apiBaseUrl } from '@/services/api.js'
 
 const router = useRouter()
 const open = ref(false)
@@ -38,6 +40,79 @@ const badgeClass = {
 }
 
 let pollTimer = null
+let sseSource = null
+let sseReconnectTimer = null
+let baseTitle = ''
+
+function startPolling() {
+  if (pollTimer) return
+  pollTimer = setInterval(refreshCount, 45000)
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+async function startSse() {
+  stopSse()
+  stopPolling()
+  try {
+    const res = await requestAdminNotifStreamTicket()
+    const ticket = res?.ticket
+    if (!ticket) throw new Error('no ticket')
+
+    const url = `${apiBaseUrl()}/api/admin/notifications/stream?ticket=${encodeURIComponent(ticket)}`
+    sseSource = new EventSource(url)
+
+    sseSource.onmessage = (ev) => {
+      try {
+        const d = JSON.parse(ev.data)
+        if (typeof d.count === 'number' && d.count !== count.value) {
+          refreshCount()
+        }
+      } catch { /* ignore */ }
+    }
+
+    sseSource.addEventListener('close', () => {
+      stopSse()
+      if (document.visibilityState === 'visible') {
+        sseReconnectTimer = setTimeout(startSse, 2000)
+      }
+    })
+
+    sseSource.onerror = () => {
+      stopSse()
+      startPolling() // fallback si SSE no está disponible
+    }
+  } catch {
+    startPolling()
+  }
+}
+
+function stopSse() {
+  if (sseSource) {
+    sseSource.close()
+    sseSource = null
+  }
+  if (sseReconnectTimer) {
+    clearTimeout(sseReconnectTimer)
+    sseReconnectTimer = null
+  }
+}
+
+function handleVisibility() {
+  if (document.visibilityState === 'visible') {
+    refreshCount()
+    startSse()
+  } else {
+    stopSse()
+    stopPolling()
+  }
+}
+
 /** Evita toast en la primera carga; luego compara con el último conteo conocido. */
 const prevUnreadCount = ref(null)
 const toastOpen = ref(false)
@@ -186,16 +261,26 @@ function onToastKeydown(ev) {
   if (ev.key === 'Escape') dismissToast()
 }
 
+watch(count, (n) => {
+  if (!baseTitle) return
+  document.title = n > 0 ? `(${n > 99 ? '99+' : n}) ${baseTitle}` : baseTitle
+})
+
 onMounted(() => {
+  baseTitle = document.title.replace(/^\(\d+\+?\)\s*/, '')
   refreshCount()
-  pollTimer = setInterval(refreshCount, 45000)
+  startSse()
+  document.addEventListener('visibilitychange', handleVisibility)
   document.addEventListener('click', onDocClick)
   document.addEventListener('keydown', onToastKeydown)
 })
 
 onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
+  stopSse()
+  stopPolling()
+  if (baseTitle) document.title = baseTitle
   dismissToast()
+  document.removeEventListener('visibilitychange', handleVisibility)
   document.removeEventListener('click', onDocClick)
   document.removeEventListener('keydown', onToastKeydown)
 })
@@ -304,6 +389,15 @@ onUnmounted(() => {
           </button>
           <p v-if="!items.length" class="px-3 py-8 text-center text-sm text-slate-500">Sin notificaciones.</p>
         </template>
+      </div>
+      <div class="border-t border-slate-700/50 px-3 py-2 text-right">
+        <router-link
+          :to="{ name: 'admin-notificaciones' }"
+          class="text-xs text-sky-400 hover:text-sky-300 transition-colors"
+          @click="open = false"
+        >
+          Ver todas →
+        </router-link>
       </div>
     </div>
 
