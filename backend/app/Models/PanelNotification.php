@@ -71,6 +71,21 @@ class PanelNotification extends Model
     /** Técnico rechazó una asignación (avisar a administración). */
     public const TYPE_ADMIN_ASIGNACION_RECHAZADA = 'admin_asignacion_rechazada';
 
+    /** Inventario: cambios relevantes de activos/operaciones internas. */
+    public const TYPE_INVENTORY_ACTIVITY = 'inventory_activity';
+
+    /** Configuración de ubicaciones de inventario actualizada. */
+    public const TYPE_INVENTORY_LOCATIONS_UPDATED = 'inventory_locations_updated';
+
+    /** Lista de titulares de inventario interno actualizada. */
+    public const TYPE_INVENTORY_HOLDERS_UPDATED = 'inventory_holders_updated';
+
+    /** Correo de bienvenida a empresa del directorio enviado (proceso en segundo plano). */
+    public const TYPE_MAIL_COMPANY_WELCOME_OK = 'mail_company_welcome_ok';
+
+    /** Fallo al enviar correo de bienvenida a empresa (proceso en segundo plano). */
+    public const TYPE_MAIL_COMPANY_WELCOME_FAILED = 'mail_company_welcome_failed';
+
     protected $table = 'panel_notifications';
 
     /**
@@ -104,6 +119,9 @@ class PanelNotification extends Model
             self::TYPE_EMP_SERVICIO_EXCLUIDO_BORRADOR,
             self::TYPE_EMP_SERVICIO_ASIGNADO_ADMIN,
             self::TYPE_ADMIN_ASIGNACION_RECHAZADA,
+            self::TYPE_INVENTORY_ACTIVITY,
+            self::TYPE_INVENTORY_LOCATIONS_UPDATED,
+            self::TYPE_INVENTORY_HOLDERS_UPDATED,
             self::TYPE_EMP_ABONO_TECNICO_REGISTRADO => 'servicios',
             self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
             self::TYPE_EMAIL_CHANGE_REQUEST,
@@ -168,11 +186,14 @@ class PanelNotification extends Model
             self::TYPE_SERVICE_CREATED => $serviceId !== null
                 ? '/admin/servicios/'.$serviceId
                 : '/admin/servicios',
+            self::TYPE_INVENTORY_ACTIVITY => '/admin/inventario',
+            self::TYPE_INVENTORY_LOCATIONS_UPDATED => '/admin/configuracion/inventario',
+            self::TYPE_INVENTORY_HOLDERS_UPDATED => '/admin/configuracion/inventario',
             self::TYPE_ADMIN_ASIGNACION_RECHAZADA => $serviceId !== null
                 ? '/admin/servicios/'.$serviceId
                 : '/admin/servicios',
             self::TYPE_ALERT_SERVICES_ZERO => '/admin/servicios',
-            self::TYPE_CATALOG_SUGGESTION_PENDING => '/admin/catalogo-servicios',
+            self::TYPE_CATALOG_SUGGESTION_PENDING => '/admin/inventario',
             self::TYPE_EMPLEADO_PERFIL_COMPLETADO,
             self::TYPE_EMAIL_CHANGE_REQUEST => '/admin/empleados/rendimiento',
             self::TYPE_CUTOFF_APPROACHING,
@@ -191,6 +212,9 @@ class PanelNotification extends Model
                 self::TYPE_ALERT_SERVICES_ZERO,
                 self::TYPE_CATALOG_SUGGESTION_PENDING,
                 self::TYPE_ADMIN_ASIGNACION_RECHAZADA,
+                self::TYPE_INVENTORY_ACTIVITY,
+                self::TYPE_INVENTORY_LOCATIONS_UPDATED,
+                self::TYPE_INVENTORY_HOLDERS_UPDATED,
             ],
             'empleados' => [
                 self::TYPE_EMPLEADO_PERFIL_COMPLETADO,

@@ -3,6 +3,8 @@ set -e
 # Vistas compiladas pueden ir a /tmp (VIEW_COMPILED_PATH) para evitar permisos en volumen montado.
 mkdir -p /tmp/laravel-views
 chmod 1777 /tmp/laravel-views 2>/dev/null || chmod 777 /tmp/laravel-views 2>/dev/null || true
+# migrate/artisan en el entrypoint corren como root; php-fpm es www-data y debe poder recompilar vistas (PDF, correos).
+chown -R www-data:www-data /tmp/laravel-views 2>/dev/null || true
 # Laravel necesita escribir en storage (PDF DomPDF, logs, caché, etc.).
 # Con volumen montado desde el host (p. ej. Windows + Docker Desktop) el propietario
 # puede impedir escritura a www-data; se normalizan permisos al arrancar el contenedor.
@@ -26,6 +28,11 @@ fi
 if [ -f /var/www/html/composer.json ] && [ ! -f /var/www/html/vendor/autoload.php ]; then
   echo "[entrypoint] vendor/ ausente; ejecutando composer install..."
   composer install --no-interaction --prefer-dist --optimize-autoloader
+fi
+
+# public/storage -> storage/app/public (fotos de servicio, adjuntos de inventario). --force corrige enlaces rotos (p. ej. bind mount Windows).
+if [ -f /var/www/html/artisan ] && [ -f /var/www/html/vendor/autoload.php ]; then
+  php /var/www/html/artisan storage:link --force || echo "[entrypoint] ADVERTENCIA: storage:link falló; ejecute manualmente php artisan storage:link --force"
 fi
 
 # Sincroniza esquema al iniciar (idempotente, no destructivo) y permite seeder opcional.

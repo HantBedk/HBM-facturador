@@ -2,9 +2,14 @@
 
 namespace App\Providers;
 
+use App\Models\AppSetting;
 use App\Models\CompanyRecurringService;
+use App\Services\SystemOrganizationProfileService;
+use Illuminate\Mail\Events\MessageSending;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Symfony\Component\Mime\Address;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -31,5 +36,21 @@ class AppServiceProvider extends ServiceProvider
         }
 
         Route::model('recurring_service', CompanyRecurringService::class);
+
+        Event::listen(MessageSending::class, function (MessageSending $event): void {
+            $row = AppSetting::query()->where('key', AppSetting::KEY_MAIL_NOTIFICATIONS_FROM)->first();
+            if ($row === null || ! is_array($row->value)) {
+                return;
+            }
+            $addr = trim((string) ($row->value['address'] ?? ''));
+            if ($addr === '' || ! filter_var($addr, FILTER_VALIDATE_EMAIL)) {
+                return;
+            }
+            $name = trim((string) ($row->value['name'] ?? ''));
+            if ($name === '') {
+                $name = app(SystemOrganizationProfileService::class)->displayNameForMail();
+            }
+            $event->message->from(new Address($addr, $name));
+        });
     }
 }

@@ -6,13 +6,90 @@ use Illuminate\Database\Eloquent\Model;
 
 class AppSetting extends Model
 {
+    /** Margen global servicio / catálogo / línea «Otro» (no inventario comercial). */
     public const KEY_TECHNICIAN_CATALOG_DISCOUNT_PERCENT = 'technician_catalog_discount_percent';
+
+    /** Margen venta de inventario (líneas «Venta equipo:»). */
+    public const KEY_TECHNICIAN_INVENTORY_SALE_DISCOUNT_PERCENT = 'technician_inventory_sale_discount_percent';
+
+    /** Margen alquiler de inventario (líneas «Alquiler equipo:»). */
+    public const KEY_TECHNICIAN_INVENTORY_RENTAL_DISCOUNT_PERCENT = 'technician_inventory_rental_discount_percent';
+
+    /** Piso mínimo del margen servicio (no se puede guardar ni facturar por debajo). */
+    public const KEY_TECHNICIAN_CATALOG_DISCOUNT_FLOOR_PERCENT = 'technician_catalog_discount_floor_percent';
+
+    /** Piso mínimo del margen venta inventario. */
+    public const KEY_TECHNICIAN_INVENTORY_SALE_DISCOUNT_FLOOR_PERCENT = 'technician_inventory_sale_discount_floor_percent';
+
+    /** Piso mínimo del margen alquiler inventario. */
+    public const KEY_TECHNICIAN_INVENTORY_RENTAL_DISCOUNT_FLOOR_PERCENT = 'technician_inventory_rental_discount_floor_percent';
 
     public const KEY_AUTOMATION_DRAFT_GENERATION_ENABLED = 'automation_draft_generation_enabled';
 
     public const KEY_AUTOMATION_DRAFT_GENERATION_DAY = 'automation_draft_generation_day';
 
     public const KEY_AUTOMATION_DRAFT_PERIOD = 'automation_draft_period';
+
+    public const KEY_INVENTORY_LOCATIONS = 'inventory_locations';
+
+    /** @var string Tipos de activo permitidos en altas (JSON array de strings). */
+    public const KEY_INVENTORY_ASSET_TYPES = 'inventory_asset_types';
+
+    /** @var string Estados físicos permitidos (JSON array de strings). */
+    public const KEY_INVENTORY_PHYSICAL_CONDITIONS = 'inventory_physical_conditions';
+
+    /** Lista explícita de IDs de usuario titulares de inventario interno (JSON array de enteros). */
+    public const KEY_INVENTORY_HOLDERS = 'inventory_holder_user_ids';
+
+    /** Técnicos pueden registrar venta de inventario como servicio (boolean en JSON). */
+    public const KEY_EMPLEADO_INVENTORY_VENTA_ENABLED = 'empleado_inventory_venta_enabled';
+
+    /** Técnicos pueden registrar alquiler de inventario como servicio (boolean en JSON). */
+    public const KEY_EMPLEADO_INVENTORY_ALQUILER_ENABLED = 'empleado_inventory_alquiler_enabled';
+
+    /**
+     * Remitente para correos transaccionales (OTP inventario, facturas, recuperación clave, etc.).
+     * Valor JSON: { "address": "noreply@dominio.com", "name": "Nombre visible" }.
+     * Si `address` está vacío o no es un email válido, se usa MAIL_FROM_* del .env.
+     */
+    public const KEY_MAIL_NOTIFICATIONS_FROM = 'mail_notifications_from';
+
+    /**
+     * PDF opcional de bienvenida para nuevas empresas (se adjunta al correo si está configurado y es legible).
+     * JSON: { "relative_path": "mail-company-welcome/uuid.pdf", "original_filename": "Contrato.pdf" }.
+     */
+    public const KEY_MAIL_COMPANY_WELCOME_PDF = 'mail_company_welcome_pdf';
+
+    /** PDF opcional adicional al enviar factura por correo (p. ej. condiciones de pago). */
+    public const KEY_MAIL_INVOICE_SUPPLEMENT_PDF = 'mail_invoice_supplement_pdf';
+
+    /** PDF opcional al notificar mantenimiento a la empresa. */
+    public const KEY_MAIL_MAINTENANCE_SUPPLEMENT_PDF = 'mail_maintenance_supplement_pdf';
+
+    /**
+     * Plantillas de asunto y cuerpo (texto plano) para correos del sistema.
+     * JSON: welcome_subject, welcome_body, invoice_to_company_subject, invoice_to_company_body.
+     * Placeholders: {{nombre_empresa}}, {{codigo_factura}} (este solo en factura).
+     */
+    public const KEY_MAIL_NOTIFICATION_TEMPLATES = 'mail_notification_templates';
+
+    /**
+     * SMTP configurable desde panel (Gmail u otro). JSON: host, port, encryption, username, password_encrypted.
+     * Si host vacío, el envío usa MAIL_* del .env.
+     */
+    public const KEY_MAIL_RUNTIME_TRANSPORT = 'mail_runtime_transport';
+
+    /**
+     * Datos de la empresa operadora del sistema (facturador), no confundir con empresas cliente.
+     * JSON: legal_name, trade_name, nit, email, phone, phone_secondary, website, address_line1, address_line2, city, department, country, postal_code.
+     */
+    public const KEY_SYSTEM_ORGANIZATION_PROFILE = 'system_organization_profile';
+
+    /**
+     * Logo de la empresa del sistema (imagen).
+     * JSON: { "relative_path": "system-organization/uuid.ext", "original_filename": "logo.png" }.
+     */
+    public const KEY_SYSTEM_ORGANIZATION_LOGO = 'system_organization_logo';
 
     protected $fillable = [
         'key',

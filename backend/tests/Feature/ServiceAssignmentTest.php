@@ -116,6 +116,47 @@ class ServiceAssignmentTest extends TestCase
         ]);
     }
 
+    public function test_admin_assigns_service_without_catalog(): void
+    {
+        [$company] = $this->seedCompanyAndCatalog();
+
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        $tech = User::factory()->create(['rol' => User::ROL_EMPLEADO, 'estado' => User::ESTADO_ACTIVO]);
+
+        Sanctum::actingAs($admin);
+
+        $r = $this->postJson('/api/admin/services/assign-to-technician', [
+            'technician_user_id' => $tech->id,
+            'company_id' => $company->id,
+        ]);
+
+        $r->assertCreated();
+        $this->assertNull($r->json('data.catalog_id'));
+        $this->assertSame(Service::ASSIGNMENT_AWAITING_COMPLETION, $r->json('data.assignment_status'));
+        $this->assertSame('Servicio asignado', $r->json('data.service_type'));
+    }
+
+    public function test_store_rejects_quick_client_payload(): void
+    {
+        [$company, $cat] = $this->seedCompanyAndCatalog();
+        $tech = User::factory()->create(['rol' => User::ROL_EMPLEADO, 'estado' => User::ESTADO_ACTIVO]);
+        Sanctum::actingAs($tech);
+
+        $this->postJson('/api/services', [
+            'quick_client' => ['nombre' => 'Ana', 'telefono' => '3001234567'],
+            'client_name' => 'Ana',
+            'service_type' => 'Prueba',
+            'description' => 'Descripción larga del trabajo realizado en sitio.',
+            'items' => [
+                [
+                    'catalog_id' => $cat->id,
+                    'amount' => 100,
+                    'line_description' => 'Trabajo realizado en sitio según lo acordado con el cliente.',
+                ],
+            ],
+        ])->assertStatus(422)->assertJsonValidationErrors('company_id');
+    }
+
     public function test_complete_assignment_forbidden_for_admin(): void
     {
         [$company, $cat] = $this->seedCompanyAndCatalog();

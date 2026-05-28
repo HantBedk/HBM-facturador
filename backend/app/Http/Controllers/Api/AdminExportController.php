@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Concerns\StreamsCsv;
 use App\Http\Controllers\Controller;
 use App\Models\Invoice;
 use App\Models\Service;
+use App\Services\ServiceRegistrySpreadsheetService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -12,10 +14,13 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AdminExportController extends Controller
 {
+    use StreamsCsv;
+
     private const EXPORT_ROW_CAP = 10000;
 
     /**
-     * CSV compatible con Excel (UTF-8 BOM, separador `;`). Filtros opcionales: empresa, empleado, periodo (año+mes) o rango de fechas.
+     * CSV compatible con Excel (UTF-8 BOM, separador `;`). Filtros opcionales: empresa, empleado, periodo (año+mes),
+     * rango de fechas, `kind` (servicio|mantenimiento), búsqueda `q` (código, cliente, tipo, descripción).
      */
     public function services(Request $request): StreamedResponse
     {
@@ -26,6 +31,8 @@ class AdminExportController extends Controller
             'period_month' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:12'],
             'service_date_from' => ['sometimes', 'nullable', 'date'],
             'service_date_to' => ['sometimes', 'nullable', 'date'],
+            'kind' => ['sometimes', 'nullable', 'string', 'in:servicio,mantenimiento'],
+            'q' => ['sometimes', 'nullable', 'string', 'max:255'],
         ]);
 
         if (isset($data['service_date_from'], $data['service_date_to']) && $data['service_date_to'] < $data['service_date_from']) {
@@ -42,65 +49,83 @@ class AdminExportController extends Controller
             ]);
         }
 
-        $q = Service::query()
-            ->with(['company:id,nombre,nit', 'user:id,nombre']);
+        $serviceQuery = Service::query()
+            ->with([
+                'company:id,nombre,nit',
+                'user:id,nombre',
+                'inventoryLot:id,name,sku',
+            ]);
 
         if (! empty($data['company_id'])) {
-            $q->where('company_id', $data['company_id']);
+            $serviceQuery->where('company_id', $data['company_id']);
         }
         if (! empty($data['user_id'])) {
-            $q->where('user_id', $data['user_id']);
+            $serviceQuery->where('user_id', $data['user_id']);
+        }
+        if (! empty($data['kind'])) {
+            $serviceQuery->where('kind', $data['kind']);
+        }
+        if (! empty($data['q'])) {
+            $raw = trim((string) $data['q']);
+            if ($raw !== '') {
+                $term = '%'.addcslashes($raw, '%_\\').'%';
+                $serviceQuery->where(function ($w) use ($term) {
+                    $w->where('description', 'like', $term)
+                        ->orWhere('client_name', 'like', $term)
+                        ->orWhere('service_type', 'like', $term)
+                        ->orWhere('code', 'like', $term)
+                        ->orWhereHas('inventoryLot', function ($lotQ) use ($term) {
+                            $lotQ->where('name', 'like', $term)
+                                ->orWhere('serial_number', 'like', $term)
+                                ->orWhere('sku', 'like', $term)
+                                ->orWhere('description', 'like', $term)
+                                ->orWhere('brand', 'like', $term)
+                                ->orWhere('model', 'like', $term)
+                                ->orWhere('site_label', 'like', $term);
+                        });
+                });
+            }
         }
 
         if ($hasRange) {
-            $q->whereBetween('service_date', [$data['service_date_from'], $data['service_date_to']]);
+            $serviceQuery->whereBetween('service_date', [$data['service_date_from'], $data['service_date_to']]);
         } elseif ($hasPeriod) {
             $tz = config('app.timezone');
             $start = Carbon::createFromDate((int) $data['period_year'], (int) $data['period_month'], 1, $tz)->startOfMonth();
             $end = (clone $start)->endOfMonth();
-            $q->whereBetween('service_date', [$start->toDateString(), $end->toDateString()]);
+            $serviceQuery->whereBetween('service_date', [$start->toDateString(), $end->toDateString()]);
         }
 
         $filename = 'servicios-'.now()->format('Y-m-d-His').'.csv';
+        $cursor = $serviceQuery->orderByDesc('service_date')->orderByDesc('id')->cursor();
 
-        return response()->streamDownload(function () use ($q) {
-            $out = fopen('php://output', 'w');
-            fwrite($out, "\xEF\xBB\xBF");
-            fputcsv($out, [
-                'Fecha servicio',
-                'Empresa',
-                'NIT empresa',
-                'Código servicio',
-                'Tipo',
-                'Descripción',
-                'Empleado',
-                'Cliente u obra',
-                'Valor',
-                'Estado',
-            ], ';');
+        return $this->streamCsv(
+            $filename,
+            ServiceRegistrySpreadsheetService::EXPORT_HEADERS,
+            $cursor,
+            function ($svc) {
+                $lot = $svc->inventoryLot;
+                $kind = (string) ($svc->kind ?? Service::KIND_SERVICIO);
 
-            $n = 0;
-            foreach ($q->orderByDesc('service_date')->orderByDesc('id')->cursor() as $svc) {
-                if (++$n > self::EXPORT_ROW_CAP) {
-                    break;
-                }
-                fputcsv($out, [
+                return [
                     $svc->service_date?->format('Y-m-d'),
                     $svc->company?->nombre ?? $svc->client_name,
                     $svc->company?->nit,
                     $svc->code,
+                    $kind,
+                    $svc->inventory_lot_id !== null ? (string) $svc->inventory_lot_id : '',
+                    $lot?->name ?? '',
+                    $lot !== null ? (string) ($lot->internal_code ?? '') : '',
                     $svc->service_type,
                     $svc->description,
                     $svc->user?->nombre,
                     $svc->client_name,
                     (string) $svc->amount,
                     $svc->status,
-                ], ';');
-            }
-            fclose($out);
-        }, $filename, [
-            'Content-Type' => 'text/csv; charset=UTF-8',
-        ]);
+                ];
+            },
+            self::EXPORT_ROW_CAP
+        );
     }
 
     /**
@@ -110,7 +135,6 @@ class AdminExportController extends Controller
     {
         $request->validate([
             'company_id' => ['sometimes', 'nullable', 'integer', 'exists:companies,id'],
-            'company_kind' => ['sometimes', 'nullable', 'string', 'in:registered,quick,counter'],
             'status' => ['sometimes', 'nullable', 'string', 'max:32'],
             'period_year' => ['sometimes', 'nullable', 'integer', 'min:2000', 'max:2100'],
             'period_month' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:12'],
@@ -121,12 +145,7 @@ class AdminExportController extends Controller
             ->with('company:id,nombre,nit')
             ->withSum('payments', 'amount');
 
-        $ck = $request->string('company_kind')->toString();
-        if ($ck === 'quick' || $ck === 'counter') {
-            $q->whereNull('company_id');
-        } elseif ($ck === 'registered') {
-            $q->whereNotNull('company_id');
-        }
+        $q->whereNotNull('company_id');
 
         if ($request->filled('company_id')) {
             $q->where('company_id', $request->integer('company_id'));
@@ -147,46 +166,30 @@ class AdminExportController extends Controller
         }
 
         $filename = 'facturas-'.now()->format('Y-m-d-His').'.csv';
+        $cursor = $q->orderByDesc('period_year')->orderByDesc('period_month')->orderByDesc('id')->cursor();
 
-        return response()->streamDownload(function () use ($q) {
-            $out = fopen('php://output', 'w');
-            fwrite($out, "\xEF\xBB\xBF");
-            fputcsv($out, [
-                'Código',
-                'Empresa',
-                'NIT',
-                'Periodo',
-                'Estado',
-                'Total',
-                'Total pagado',
-                'Saldo pendiente',
-                'Fecha creación',
-            ], ';');
-
-            $n = 0;
-            foreach ($q->orderByDesc('period_year')->orderByDesc('period_month')->orderByDesc('id')->cursor() as $inv) {
-                if (++$n > self::EXPORT_ROW_CAP) {
-                    break;
-                }
+        return $this->streamCsv(
+            $filename,
+            ['Código', 'Empresa', 'NIT', 'Periodo', 'Estado', 'Total', 'Total pagado', 'Saldo pendiente', 'Fecha creación'],
+            $cursor,
+            function ($inv) {
                 $paid = (float) ($inv->payments_sum_amount ?? 0);
                 $total = (float) $inv->total;
                 $balance = max(0, $total - $paid);
-                $period = $inv->period_month.'/'.$inv->period_year;
-                fputcsv($out, [
+
+                return [
                     $inv->code,
                     $inv->company?->nombre ?? $inv->bill_to_nombre,
                     $inv->company?->nit ?? $inv->bill_to_nit,
-                    $period,
+                    $inv->period_month.'/'.$inv->period_year,
                     $inv->status,
                     number_format($total, 2, '.', ''),
                     number_format($paid, 2, '.', ''),
                     number_format($balance, 2, '.', ''),
                     $inv->created_at?->timezone(config('app.timezone'))->format('Y-m-d H:i'),
-                ], ';');
-            }
-            fclose($out);
-        }, $filename, [
-            'Content-Type' => 'text/csv; charset=UTF-8',
-        ]);
+                ];
+            },
+            self::EXPORT_ROW_CAP
+        );
     }
 }

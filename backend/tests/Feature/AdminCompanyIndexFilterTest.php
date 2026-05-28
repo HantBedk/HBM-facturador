@@ -12,7 +12,7 @@ class AdminCompanyIndexFilterTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_index_filters_by_company_kind(): void
+    public function test_index_excludes_walk_in_companies(): void
     {
         $registered = Company::query()->create([
             'nombre' => 'Reg S.A.',
@@ -32,19 +32,9 @@ class AdminCompanyIndexFilterTest extends TestCase
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
         Sanctum::actingAs($admin);
 
-        $registeredRes = $this->getJson('/api/admin/companies?company_kind=registered')->assertOk();
-        $registeredIds = collect($registeredRes->json('data'))->pluck('id')->all();
-        $this->assertContains($registered->id, $registeredIds);
-        $this->assertNotContains($legacy->id, $registeredIds);
-
-        $quickRes = $this->getJson('/api/admin/companies?company_kind=quick')->assertOk();
-        $quickIds = collect($quickRes->json('data'))->pluck('id')->all();
-        $this->assertContains($legacy->id, $quickIds);
-        $this->assertNotContains($registered->id, $quickIds);
-
-        $allRes = $this->getJson('/api/admin/companies')->assertOk();
-        $allIds = collect($allRes->json('data'))->pluck('id')->all();
-        $this->assertContains($registered->id, $allIds);
-        $this->assertContains($legacy->id, $allIds);
+        $res = $this->getJson('/api/admin/companies')->assertOk();
+        $ids = collect($res->json('data'))->pluck('id')->all();
+        $this->assertContains($registered->id, $ids);
+        $this->assertNotContains($legacy->id, $ids);
     }
 }

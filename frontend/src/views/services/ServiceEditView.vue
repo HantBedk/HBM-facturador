@@ -41,6 +41,7 @@ const canEdit = computed(
 const serviceLinesCount = computed(() =>
   Array.isArray(service.value?.items) ? service.value.items.length : 0
 )
+const lockAmount = computed(() => serviceLinesCount.value > 0)
 
 const hideGlobalDescription = computed(() => !isAdmin.value && serviceLinesCount.value > 0)
 
@@ -84,7 +85,9 @@ function validateLocal() {
     errs.description = ['La descripción debe tener al menos 8 caracteres.']
   }
   const amt = Number(f.amount)
-  if (Number.isNaN(amt) || amt < 0.01) errs.amount = ['Indique un valor numérico mayor a cero.']
+  if (!lockAmount.value && (Number.isNaN(amt) || amt < 0.01)) {
+    errs.amount = ['Indique un valor numérico mayor a cero.']
+  }
   return errs
 }
 
@@ -128,7 +131,7 @@ async function onSubmit() {
       client_name: f.client_name.trim(),
       service_type: f.service_type.trim(),
       description: f.description.trim(),
-      amount: Number(f.amount),
+      amount: lockAmount.value ? Number(service.value?.amount ?? f.amount) : Number(f.amount),
     }
     if (f.catalog_id !== '' && f.catalog_id != null) {
       payload.catalog_id = Number(f.catalog_id)
@@ -210,6 +213,7 @@ async function onSubmit() {
           :field-errors="fieldErrors"
           :disabled="saving"
           :hide-description="hideGlobalDescription"
+          :lock-amount="lockAmount"
         />
         <div class="actions">
           <RouterLink class="btn secondary" :to="detailPath">Cancelar</RouterLink>

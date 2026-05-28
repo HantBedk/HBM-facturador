@@ -4,7 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ServiceResource;
+use App\Models\AppSetting;
 use App\Models\Company;
+use App\Models\InventoryAuditEvent;
+use App\Models\InventoryLot;
 use App\Models\PanelNotification;
 use App\Models\Service;
 use App\Models\ServiceCatalog;
@@ -12,11 +15,11 @@ use App\Models\ServiceItem;
 use App\Models\ServicePhoto;
 use App\Models\User;
 use App\Services\ActivityLogger;
-use App\Support\ActivityAmountNarrative;
+use App\Services\MaintenanceCompanyMailDispatcher;
 use App\Services\PanelNotificationDispatcher;
-use App\Support\PhoneNormalizer;
-use App\Services\TechnicianAbonoNotifier;
 use App\Services\ServiceCodeGenerator;
+use App\Services\TechnicianAbonoNotifier;
+use App\Support\ActivityAmountNarrative;
 use App\Support\CatalogPricing;
 use App\Support\DecimalMath;
 use App\Support\Pagination;
@@ -36,7 +39,11 @@ class ServiceController extends Controller
 
         $user = $request->user();
         $q = Service::query()
-            ->with(['company', 'user'])
+            ->with([
+                'company',
+                'user',
+                'inventoryLot:id,name,description,serial_number,sku,tenant_company_id,lifecycle_status',
+            ])
             ->withCount('invoices')
             ->withCount('items')
             ->withSum('items', 'technician_line_amount')
@@ -55,6 +62,12 @@ class ServiceController extends Controller
 
         if ($request->filled('company_id')) {
             $q->where('company_id', $request->integer('company_id'));
+        }
+        if ($request->filled('kind')) {
+            $q->where('kind', (string) $request->input('kind'));
+        }
+        if ($request->filled('inventory_lot_id')) {
+            $q->where('inventory_lot_id', $request->integer('inventory_lot_id'));
         }
 
         if ($user->isAdminEquipo() && $request->filled('user_id')) {
@@ -80,7 +93,16 @@ class ServiceController extends Controller
                 $w->where('description', 'like', $term)
                     ->orWhere('client_name', 'like', $term)
                     ->orWhere('service_type', 'like', $term)
-                    ->orWhere('code', 'like', $term);
+                    ->orWhere('code', 'like', $term)
+                    ->orWhereHas('inventoryLot', function ($lotQ) use ($term) {
+                        $lotQ->where('name', 'like', $term)
+                            ->orWhere('serial_number', 'like', $term)
+                            ->orWhere('sku', 'like', $term)
+                            ->orWhere('description', 'like', $term)
+                            ->orWhere('brand', 'like', $term)
+                            ->orWhere('model', 'like', $term)
+                            ->orWhere('site_label', 'like', $term);
+                    });
             });
         }
 
@@ -154,14 +176,11 @@ class ServiceController extends Controller
     {
         $this->authorize('create', Service::class);
 
-        $this->mergeQuickClientFromMultipart($request);
-
         $user = $request->user();
         $rules = [
-            'company_id' => ['nullable', 'integer', 'exists:companies,id'],
-            'quick_client' => ['nullable', 'array'],
-            'quick_client.nombre' => ['nullable', 'string', 'max:255'],
-            'quick_client.telefono' => ['nullable', 'string', 'max:32'],
+            'company_id' => ['required', 'integer', 'exists:companies,id'],
+            'inventory_lot_id' => ['nullable', 'integer', 'exists:inventory_lots,id'],
+            'kind' => ['nullable', 'string', 'in:servicio,mantenimiento'],
             'client_name' => ['required', 'string', 'max:255'],
             'service_type' => ['required', 'string', 'max:255'],
             'description' => ['required', 'string', 'min:8'],
@@ -172,42 +191,14 @@ class ServiceController extends Controller
         ];
 
         $data = $request->validate($rules);
+        $kind = (string) ($data['kind'] ?? Service::KIND_SERVICIO);
 
-        $qcNombre = isset($data['quick_client']['nombre']) ? trim((string) $data['quick_client']['nombre']) : '';
-        $qcTel = isset($data['quick_client']['telefono']) ? trim((string) $data['quick_client']['telefono']) : '';
-        $useQuickClient = $qcNombre !== '' && $qcTel !== '';
-        $companyIdRaw = $data['company_id'] ?? null;
-
-        if ($useQuickClient && $companyIdRaw !== null && $companyIdRaw !== '') {
+        $companyId = (int) $data['company_id'];
+        $company = Company::query()->findOrFail($companyId);
+        if ($company->es_cliente_puntual) {
             throw ValidationException::withMessages([
-                'company_id' => ['No selecciones empresa si indicas cliente puntual (nombre y teléfono).'],
+                'company_id' => ['Selecciona una empresa registrada en el directorio.'],
             ]);
-        }
-        if (! $useQuickClient && ($companyIdRaw === null || $companyIdRaw === '')) {
-            throw ValidationException::withMessages([
-                'company_id' => ['Selecciona una empresa o completa cliente puntual: nombre y teléfono.'],
-            ]);
-        }
-
-        $clientTelefono = null;
-        $contactPhoneKey = null;
-        if ($useQuickClient) {
-            $contactPhoneKey = PhoneNormalizer::digitsKey($qcTel);
-            if (strlen($contactPhoneKey) < 7) {
-                throw ValidationException::withMessages([
-                    'quick_client.telefono' => ['El teléfono debe tener al menos 7 dígitos.'],
-                ]);
-            }
-            if (strlen($contactPhoneKey) > 15) {
-                throw ValidationException::withMessages([
-                    'quick_client.telefono' => ['El teléfono no es válido.'],
-                ]);
-            }
-            $companyId = null;
-            $data['client_name'] = $qcNombre;
-            $clientTelefono = trim($qcTel) !== '' ? trim($qcTel) : $contactPhoneKey;
-        } else {
-            $companyId = (int) $companyIdRaw;
         }
 
         $itemsPayload = $this->parseItemsFromRequest($request);
@@ -229,7 +220,7 @@ class ServiceController extends Controller
                 // Compatibilidad: registro único sin `items` ni catálogo → una línea «Otro».
                 // El `amount` histórico es el total facturable; normalizeServiceItems interpreta `amount` como técnico.
                 $billed = (float) $data['amount'];
-                $p = CatalogPricing::globalTechnicianDiscountPercent();
+                $p = CatalogPricing::globalServiceDiscountPercent();
                 if ($p <= 0 || $p >= 100) {
                     $techAmount = $billed;
                 } else {
@@ -248,11 +239,35 @@ class ServiceController extends Controller
 
         $normalized = $this->validateAndNormalizeServiceItems($itemsPayload);
 
-        if ($companyId !== null) {
-            $company = Company::query()->findOrFail($companyId);
-            if ($company->estado !== Company::ESTADO_ACTIVO) {
+        if (! $user->isAdminEquipo()) {
+            $this->assertEmpleadoCommercialInventoryAllowed($normalized);
+        }
+
+        if ($company->estado !== Company::ESTADO_ACTIVO) {
+            throw ValidationException::withMessages([
+                'company_id' => ['Solo se pueden registrar servicios para empresas activas.'],
+            ]);
+        }
+
+        $inventoryLotId = isset($data['inventory_lot_id']) && $data['inventory_lot_id'] !== null
+            ? (int) $data['inventory_lot_id']
+            : null;
+        $inventoryLot = null;
+        if ($kind === Service::KIND_MANTENIMIENTO) {
+            if ($inventoryLotId === null) {
                 throw ValidationException::withMessages([
-                    'company_id' => ['Solo se pueden registrar servicios para empresas activas.'],
+                    'inventory_lot_id' => ['Para mantenimiento debe seleccionar un equipo de inventario.'],
+                ]);
+            }
+            $inventoryLot = InventoryLot::query()->findOrFail($inventoryLotId);
+            if ((int) ($inventoryLot->tenant_company_id ?? 0) !== (int) $companyId) {
+                throw ValidationException::withMessages([
+                    'inventory_lot_id' => ['El equipo seleccionado no pertenece a la empresa indicada.'],
+                ]);
+            }
+            if (! $inventoryLot->is_active) {
+                throw ValidationException::withMessages([
+                    'inventory_lot_id' => ['El equipo seleccionado está inactivo para mantenimiento.'],
                 ]);
             }
         }
@@ -269,7 +284,6 @@ class ServiceController extends Controller
         $dupData = array_merge($data, [
             'amount' => $totalAmount,
             'company_id' => $companyId,
-            'contact_phone_key' => $contactPhoneKey,
         ]);
         if ($this->isDuplicate($request->user(), $dupData, $serviceDate)) {
             throw ValidationException::withMessages([
@@ -277,8 +291,9 @@ class ServiceController extends Controller
             ]);
         }
 
+        $codeKind = $this->serviceCodeKindFromNormalized($normalized);
         try {
-            $code = $codes->nextForDate($serviceDate);
+            $code = $codes->nextForDate($serviceDate, $codeKind);
         } catch (\RuntimeException $e) {
             throw ValidationException::withMessages([
                 'service_date' => [$e->getMessage()],
@@ -302,17 +317,19 @@ class ServiceController extends Controller
             $serviceDate,
             $normalized,
             $firstCatalogId,
-            $clientTelefono,
-            $contactPhoneKey,
+            $kind,
+            $inventoryLotId,
         ) {
             $service = Service::create([
                 'code' => $code,
                 'company_id' => $companyId,
+                'inventory_lot_id' => $inventoryLotId,
                 'user_id' => $user->id,
                 'catalog_id' => $firstCatalogId,
+                'kind' => $kind,
                 'client_name' => $data['client_name'],
-                'client_telefono' => $clientTelefono,
-                'contact_phone_key' => $contactPhoneKey,
+                'client_telefono' => null,
+                'contact_phone_key' => null,
                 'service_type' => $data['service_type'],
                 'description' => $data['description'],
                 'amount' => $totalAmount,
@@ -355,6 +372,14 @@ class ServiceController extends Controller
 
         $service->load(['company', 'user', 'photos', 'catalog:id,name', 'items.catalogSuggestion']);
 
+        if ($kind === Service::KIND_MANTENIMIENTO && $inventoryLot !== null) {
+            $this->auditInventoryMaintenanceEvent($request, $inventoryLot, $service);
+        }
+
+        if ($kind === Service::KIND_MANTENIMIENTO) {
+            app(MaintenanceCompanyMailDispatcher::class)->sendIfApplicable($service);
+        }
+
         app(PanelNotificationDispatcher::class)->notifyAdmins(
             PanelNotification::TYPE_SERVICE_CREATED,
             'Nuevo servicio '.$service->code.' registrado ('.($service->company?->nombre ?? $service->client_name ?? 'cliente').').',
@@ -373,6 +398,28 @@ class ServiceController extends Controller
         return (new ServiceResource($service))->response()->setStatusCode(201);
     }
 
+    private function auditInventoryMaintenanceEvent(Request $request, InventoryLot $lot, Service $service): void
+    {
+        InventoryAuditEvent::query()->create([
+            'tenant_company_id' => $lot->tenant_company_id,
+            'entity_type' => 'inventory_lot',
+            'entity_id' => (int) $lot->id,
+            'action' => 'maintenance_service_linked',
+            'actor_user_id' => $request->user()?->id,
+            'request_id' => $request->header('X-Request-Id'),
+            'ip_address' => $request->ip(),
+            'user_agent' => substr((string) $request->userAgent(), 0, 500),
+            'before' => null,
+            'after' => [
+                'service_id' => (int) $service->id,
+                'service_code' => (string) $service->code,
+                'kind' => (string) ($service->kind ?? Service::KIND_SERVICIO),
+                'note' => 'Evento de hoja de vida sin precio (mantenimiento facturable).',
+            ],
+            'occurred_at' => now(),
+        ]);
+    }
+
     public function show(Service $service): ServiceResource
     {
         $this->authorize('view', $service);
@@ -384,6 +431,7 @@ class ServiceController extends Controller
             'photos',
             'catalog:id,name',
             'items.catalogSuggestion',
+            'inventoryLot:id,name,description,serial_number,sku,tenant_company_id,lifecycle_status',
             'invoices' => function ($rel) {
                 $rel->select('invoices.id', 'invoices.code');
             },
@@ -403,11 +451,8 @@ class ServiceController extends Controller
 
         $data = $request->validate([
             'technician_user_id' => ['required', 'integer', 'exists:users,id'],
-            'company_id' => ['nullable', 'integer', 'exists:companies,id'],
-            'quick_client' => ['nullable', 'array'],
-            'quick_client.nombre' => ['nullable', 'string', 'max:255'],
-            'quick_client.telefono' => ['nullable', 'string', 'max:32'],
-            'catalog_id' => ['required', 'integer', 'exists:service_catalog,id'],
+            'company_id' => ['required', 'integer', 'exists:companies,id'],
+            'catalog_id' => ['nullable', 'integer', 'exists:service_catalog,id'],
             'client_name' => ['nullable', 'string', 'max:255'],
         ]);
 
@@ -423,68 +468,55 @@ class ServiceController extends Controller
             ]);
         }
 
-        $qcNombre = isset($data['quick_client']['nombre']) ? trim((string) $data['quick_client']['nombre']) : '';
-        $qcTel = isset($data['quick_client']['telefono']) ? trim((string) $data['quick_client']['telefono']) : '';
-        $useQuickClient = $qcNombre !== '' && $qcTel !== '';
-        $companyIdRaw = $data['company_id'] ?? null;
-
-        if ($useQuickClient && $companyIdRaw !== null && $companyIdRaw !== '') {
+        $companyId = (int) $data['company_id'];
+        $company = Company::query()->findOrFail($companyId);
+        if ($company->es_cliente_puntual) {
             throw ValidationException::withMessages([
-                'company_id' => ['No selecciones empresa si indicas cliente puntual (nombre y teléfono).'],
+                'company_id' => ['Selecciona una empresa registrada en el directorio.'],
             ]);
         }
-        if (! $useQuickClient && ($companyIdRaw === null || $companyIdRaw === '')) {
-            throw ValidationException::withMessages([
-                'company_id' => ['Selecciona una empresa o completa cliente puntual: nombre y teléfono.'],
-            ]);
-        }
-
-        $clientTelefono = null;
-        $contactPhoneKey = null;
-        if ($useQuickClient) {
-            $contactPhoneKey = PhoneNormalizer::digitsKey($qcTel);
-            if (strlen($contactPhoneKey) < 7) {
-                throw ValidationException::withMessages([
-                    'quick_client.telefono' => ['El teléfono debe tener al menos 7 dígitos.'],
-                ]);
-            }
-            if (strlen($contactPhoneKey) > 15) {
-                throw ValidationException::withMessages([
-                    'quick_client.telefono' => ['El teléfono no es válido.'],
-                ]);
-            }
-            $companyId = null;
-            $clientNameFinal = $qcNombre;
-            $clientTelefono = trim($qcTel) !== '' ? trim($qcTel) : $contactPhoneKey;
-            $company = null;
-        } else {
-            $companyId = (int) $companyIdRaw;
-            $company = Company::query()->findOrFail($companyId);
-            $clientNameFinal = trim((string) ($data['client_name'] ?? ''));
-            if ($clientNameFinal === '') {
-                $clientNameFinal = (string) $company->nombre;
-            }
-        }
-
-        if ($company !== null && $company->estado !== Company::ESTADO_ACTIVO) {
+        if ($company->estado !== Company::ESTADO_ACTIVO) {
             throw ValidationException::withMessages([
                 'company_id' => ['Solo se pueden asignar servicios para empresas activas.'],
             ]);
         }
 
-        $catalogId = (int) $data['catalog_id'];
-        $cat = ServiceCatalog::query()->findOrFail($catalogId);
-        if ($cat->status !== ServiceCatalog::STATUS_ACTIVO) {
-            throw ValidationException::withMessages([
-                'catalog_id' => ['El ítem de catálogo no está activo.'],
-            ]);
+        $clientNameFinal = trim((string) ($data['client_name'] ?? ''));
+        if ($clientNameFinal === '') {
+            $clientNameFinal = (string) $company->nombre;
         }
 
-        $itemsPayload = [[
-            'catalog_id' => $catalogId,
-            'amount' => 0.01,
-            'line_description' => 'Asignación desde administración: complete el detalle del trabajo realizado en obra (importes y líneas) antes de facturar.',
-        ]];
+        $assignPlaceholderDesc = 'Asignación desde administración: complete el detalle del trabajo realizado en obra (importes y líneas) antes de facturar.';
+
+        $catalogIdRaw = $data['catalog_id'] ?? null;
+        $hasCatalog = $catalogIdRaw !== null && $catalogIdRaw !== '';
+
+        if ($hasCatalog) {
+            $catalogId = (int) $catalogIdRaw;
+            $cat = ServiceCatalog::query()->findOrFail($catalogId);
+            if ($cat->status !== ServiceCatalog::STATUS_ACTIVO) {
+                throw ValidationException::withMessages([
+                    'catalog_id' => ['El ítem de catálogo no está activo.'],
+                ]);
+            }
+            $itemsPayload = [[
+                'catalog_id' => $catalogId,
+                'amount' => 0.01,
+                'line_description' => $assignPlaceholderDesc,
+            ]];
+            $firstCatalogId = $catalogId;
+            $serviceType = $cat->name;
+        } else {
+            $cat = null;
+            $itemsPayload = [[
+                'custom_name' => 'Por completar',
+                'amount' => 0.01,
+                'line_description' => $assignPlaceholderDesc,
+            ]];
+            $firstCatalogId = null;
+            $serviceType = 'Servicio asignado';
+        }
+
         $normalized = $this->validateAndNormalizeServiceItems($itemsPayload);
 
         $serviceDate = Carbon::now(config('app.timezone'))->startOfDay();
@@ -499,7 +531,6 @@ class ServiceController extends Controller
             'description' => $masterDescription,
             'amount' => $totalAmount,
             'company_id' => $companyId,
-            'contact_phone_key' => $contactPhoneKey,
         ]);
         if ($this->isDuplicate($technician, $dupData, $serviceDate)) {
             throw ValidationException::withMessages([
@@ -515,8 +546,6 @@ class ServiceController extends Controller
             ]);
         }
 
-        $firstCatalogId = $catalogId;
-
         $admin = $request->user();
         $service = DB::transaction(function () use (
             $code,
@@ -529,9 +558,7 @@ class ServiceController extends Controller
             $normalized,
             $firstCatalogId,
             $clientNameFinal,
-            $cat,
-            $clientTelefono,
-            $contactPhoneKey,
+            $serviceType,
         ) {
             $service = Service::create([
                 'code' => $code,
@@ -540,9 +567,9 @@ class ServiceController extends Controller
                 'assigned_by_user_id' => $admin->id,
                 'catalog_id' => $firstCatalogId,
                 'client_name' => $clientNameFinal,
-                'client_telefono' => $clientTelefono,
-                'contact_phone_key' => $contactPhoneKey,
-                'service_type' => $cat->name,
+                'client_telefono' => null,
+                'contact_phone_key' => null,
+                'service_type' => $serviceType,
                 'description' => $masterDescription,
                 'amount' => $totalAmount,
                 'service_date' => $serviceDate->toDateString(),
@@ -611,8 +638,6 @@ class ServiceController extends Controller
             ], 422);
         }
 
-        $this->mergeQuickClientFromMultipart($request);
-
         $data = $request->validate([
             'client_name' => ['required', 'string', 'max:255'],
             'service_type' => ['required', 'string', 'max:255'],
@@ -621,6 +646,12 @@ class ServiceController extends Controller
         ]);
 
         $companyId = $service->company_id;
+        if ($companyId === null) {
+            throw ValidationException::withMessages([
+                'company_id' => ['Este servicio no tiene empresa registrada; contacte a administración.'],
+            ]);
+        }
+
         $itemsPayload = $this->parseItemsFromRequest($request);
         if ($itemsPayload === []) {
             throw ValidationException::withMessages([
@@ -630,13 +661,13 @@ class ServiceController extends Controller
 
         $normalized = $this->validateAndNormalizeServiceItems($itemsPayload);
 
-        if ($companyId !== null) {
-            $company = Company::query()->findOrFail((int) $companyId);
-            if ($company->estado !== Company::ESTADO_ACTIVO) {
-                throw ValidationException::withMessages([
-                    'company_id' => ['La empresa del servicio no está activa.'],
-                ]);
-            }
+        $this->assertEmpleadoCommercialInventoryAllowed($normalized);
+
+        $company = Company::query()->findOrFail((int) $companyId);
+        if ($company->estado !== Company::ESTADO_ACTIVO) {
+            throw ValidationException::withMessages([
+                'company_id' => ['La empresa del servicio no está activa.'],
+            ]);
         }
 
         $builtDescription = $this->descriptionFromNormalizedLines($normalized);
@@ -785,6 +816,13 @@ class ServiceController extends Controller
             'description' => ['required', 'string', 'min:8'],
             'amount' => ['required', 'numeric', 'min:0.01'],
         ]);
+
+        $hasDetailedItems = $service->items()->exists();
+        if ($hasDetailedItems && (float) $data['amount'] !== (float) $service->amount) {
+            throw ValidationException::withMessages([
+                'amount' => ['Este servicio tiene líneas detalladas; el valor se deriva de esas líneas y debe editarse desde el detalle por conceptos.'],
+            ]);
+        }
 
         if (isset($data['catalog_id'])) {
             $this->assertActiveCatalogItem((int) $data['catalog_id']);
@@ -1050,8 +1088,48 @@ class ServiceController extends Controller
                         'items' => ['Línea «Otro» '.($i + 1).': describe el trabajo realizado (mín. 8 caracteres).'],
                     ]);
                 }
-                $pGlobal = CatalogPricing::globalTechnicianDiscountPercent();
-                $billedStr = CatalogPricing::billedAmountFromTechnicianEntry((float) $amtStr, $pGlobal);
+                $cnameTrim = trim($cname);
+                /**
+                 * Inventario comercial: el importe enviado es la referencia interna (precio de lista del lote × cantidad/días),
+                 * igual que el resto de líneas; el facturable aplica el margen global de venta o alquiler.
+                 * El ejecutor no devenga (`technician_line_amount` 0) — el titular del lote está en inventario.
+                 */
+                if (str_starts_with($cnameTrim, 'Venta equipo:')) {
+                    $pInv = CatalogPricing::globalInventorySaleDiscountPercent();
+                    $billedStr = CatalogPricing::billedAmountFromTechnicianEntry((float) $amtStr, $pInv);
+                    $out[] = [
+                        'catalog_id' => null,
+                        'custom_name' => $cname,
+                        'custom_description' => $cdesc,
+                        'amount' => $billedStr,
+                        'technician_line_amount' => '0.00',
+                        'label' => $cname,
+                        'line_description' => $lineDesc,
+                        'is_custom' => true,
+                        'propose_catalog' => false,
+                    ];
+
+                    continue;
+                }
+                if (str_starts_with($cnameTrim, 'Alquiler equipo:')) {
+                    $pInv = CatalogPricing::globalInventoryRentalDiscountPercent();
+                    $billedStr = CatalogPricing::billedAmountFromTechnicianEntry((float) $amtStr, $pInv);
+                    $out[] = [
+                        'catalog_id' => null,
+                        'custom_name' => $cname,
+                        'custom_description' => $cdesc,
+                        'amount' => $billedStr,
+                        'technician_line_amount' => '0.00',
+                        'label' => $cname,
+                        'line_description' => $lineDesc,
+                        'is_custom' => true,
+                        'propose_catalog' => false,
+                    ];
+
+                    continue;
+                }
+                $pLine = CatalogPricing::technicianDiscountPercentForCustomLine($cname);
+                $billedStr = CatalogPricing::billedAmountFromTechnicianEntry((float) $amtStr, $pLine);
                 $out[] = [
                     'catalog_id' => null,
                     'custom_name' => $cname,
@@ -1108,35 +1186,73 @@ class ServiceController extends Controller
             ->where('amount', $data['amount'])
             ->whereRaw('LOWER(TRIM(description)) = ?', [$desc]);
 
-        if (($data['company_id'] ?? null) !== null && $data['company_id'] !== '') {
-            $q->where('company_id', $data['company_id']);
-        } else {
-            $key = $data['contact_phone_key'] ?? null;
-            if ($key === null || $key === '') {
-                return false;
-            }
-            $q->whereNull('company_id')->where('contact_phone_key', $key);
-        }
+        $q->where('company_id', $data['company_id']);
 
         return $q->exists();
     }
 
-    /** FormData envía `quick_client` como JSON string cuando hay fotos. */
-    private function mergeQuickClientFromMultipart(Request $request): void
+    /**
+     * Prefijo de código: VENT- / ALQ- / SERV- según líneas (inventario comercial vs servicio estándar).
+     *
+     * @param  list<array<string, mixed>>  $normalized
+     */
+    private function serviceCodeKindFromNormalized(array $normalized): string
     {
-        $raw = $request->input('quick_client');
-        if (! is_string($raw) || $raw === '') {
-            return;
+        if ($normalized === []) {
+            return ServiceCodeGenerator::KIND_SERVICIO;
         }
-        $decoded = json_decode($raw, true);
-        if (! is_array($decoded)) {
-            return;
+        $allVenta = true;
+        $allAlquiler = true;
+        foreach ($normalized as $row) {
+            if (! ($row['is_custom'] ?? false)) {
+                return ServiceCodeGenerator::KIND_SERVICIO;
+            }
+            $label = trim((string) ($row['label'] ?? ''));
+            if (! str_starts_with($label, 'Venta equipo:')) {
+                $allVenta = false;
+            }
+            if (! str_starts_with($label, 'Alquiler equipo:')) {
+                $allAlquiler = false;
+            }
         }
-        $request->merge([
-            'quick_client' => [
-                'nombre' => isset($decoded['nombre']) ? (string) $decoded['nombre'] : '',
-                'telefono' => isset($decoded['telefono']) ? (string) $decoded['telefono'] : '',
-            ],
-        ]);
+        if ($allVenta) {
+            return ServiceCodeGenerator::KIND_VENTA;
+        }
+        if ($allAlquiler) {
+            return ServiceCodeGenerator::KIND_ALQUILER;
+        }
+
+        return ServiceCodeGenerator::KIND_SERVICIO;
     }
+
+    /**
+     * Líneas generadas desde inventario (venta/alquiler) usan etiquetas fijas en el cliente.
+     * Sin este chequeo, un técnico podría enviarlas aunque administración las tenga deshabilitadas.
+     *
+     * @param  list<array<string, mixed>>  $normalized
+     */
+    private function assertEmpleadoCommercialInventoryAllowed(array $normalized): void
+    {
+        foreach ($normalized as $row) {
+            if (! ($row['is_custom'] ?? false)) {
+                continue;
+            }
+            $label = trim((string) ($row['label'] ?? ''));
+            if (str_starts_with($label, 'Venta equipo:')) {
+                if (! AppSetting::getBool(AppSetting::KEY_EMPLEADO_INVENTORY_VENTA_ENABLED, false)) {
+                    throw ValidationException::withMessages([
+                        'items' => ['No tiene permiso para registrar ventas de inventario. Contacte a administración.'],
+                    ]);
+                }
+            }
+            if (str_starts_with($label, 'Alquiler equipo:')) {
+                if (! AppSetting::getBool(AppSetting::KEY_EMPLEADO_INVENTORY_ALQUILER_ENABLED, false)) {
+                    throw ValidationException::withMessages([
+                        'items' => ['No tiene permiso para registrar alquileres de inventario. Contacte a administración.'],
+                    ]);
+                }
+            }
+        }
+    }
+
 }

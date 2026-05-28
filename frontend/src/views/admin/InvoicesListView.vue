@@ -6,47 +6,20 @@ import InvoiceEditorForm from '@/components/admin/InvoiceEditorForm.vue'
 import { fetchAdminCompanies } from '@/services/companiesApi.js'
 import {
   addInvoicePayment,
-  createWalkInInvoiceFinal,
-  downloadAdminExportCsv,
   fetchAdminInvoice,
   fetchAdminInvoices,
-  fetchAvailableWalkInServicesForInvoice,
-  fetchPendingWalkInGroups,
   patchInvoiceStatus,
 } from '@/services/invoicesApi.js'
 import { tableAriaSort, tableSortIndicator } from '@/utils/tableSort.js'
+import { moneyCOPIntegerOrDash as money } from '@/utils/moneyFormatCo.js'
+import { canPayInvoiceFromList as canPayFromList, invoiceSaldoDisplay } from './invoicesListHelpers.js'
 
 const companies = ref([])
 const rows = ref([])
 const meta = ref(null)
 const links = ref(null)
 const loading = ref(false)
-const exportBusy = ref(false)
 const error = ref('')
-const walkInEmitNotice = ref('')
-
-const pendingWalkInGroups = ref([])
-const pendingWalkInLoading = ref(false)
-
-const walkInReviewOpen = ref(false)
-const walkInReviewGroup = ref(null)
-const walkInReviewServices = ref([])
-const walkInReviewSelectedIds = ref([])
-const walkInReviewLoading = ref(false)
-const walkInReviewError = ref('')
-const walkInReviewSubmitting = ref(false)
-const walkInBillNombre = ref('')
-const walkInBillTelefono = ref('')
-
-const walkInReviewTotalPreview = computed(() => {
-  const sel = new Set(walkInReviewSelectedIds.value)
-  let t = 0
-  for (const r of walkInReviewServices.value) {
-    if (sel.has(r.id)) t += Number(r.amount) || 0
-  }
-  return t
-})
-
 const filters = ref({
   company_id: '',
   status: '',
@@ -56,21 +29,9 @@ const filters = ref({
   page: 1,
 })
 
-/** Por defecto solo facturas ligadas a empresas dadas de alta. */
-const listTab = ref('registered')
+const companiesForFilter = computed(() => companies.value || [])
 
-const companiesForFilter = computed(() => {
-  const list = companies.value || []
-  if (listTab.value === 'registered') return list.filter((c) => !c.es_cliente_puntual)
-  if (listTab.value === 'counter') return []
-  return list
-})
-
-const companyFilterLabel = computed(() => {
-  if (listTab.value === 'registered') return 'Empresa'
-  if (listTab.value === 'counter') return 'Venta sin alta'
-  return 'Empresa / venta sin alta'
-})
+const companyFilterLabel = computed(() => 'Empresa')
 
 const invSortKey = ref('period')
 const invSortDir = ref('desc')
@@ -93,12 +54,6 @@ const STATUS_OPTIONS = [
   { value: 'pagada', label: 'Pagada' },
 ]
 
-const LIST_VIEW_OPTIONS = [
-  { value: 'all', label: 'Todas las facturas' },
-  { value: 'registered', label: 'Solo empresas registradas' },
-  { value: 'counter', label: 'Solo ventas sin alta' },
-]
-
 const yearOptions = computed(() => {
   const y = new Date().getFullYear()
   return Array.from({ length: 6 }, (_, i) => y - 2 + i)
@@ -109,8 +64,6 @@ async function load() {
   loading.value = true
   try {
     const params = { page: filters.value.page, per_page: 15 }
-    if (listTab.value === 'registered') params.company_kind = 'registered'
-    if (listTab.value === 'counter') params.company_kind = 'counter'
     if (filters.value.company_id) params.company_id = filters.value.company_id
     if (filters.value.status) params.status = filters.value.status
     if (filters.value.period_year) params.period_year = filters.value.period_year
@@ -149,141 +102,6 @@ function closeCreateInvoicePanel() {
 async function onInvoiceCreatedFromPanel() {
   closeCreateInvoicePanel()
   await load()
-  await loadPendingWalkInGroups()
-}
-
-function walkInPendingRowKey(g) {
-  return `${g.contact_phone_key}|${g.period_year}|${g.period_month}`
-}
-
-const WALK_IN_MONTH_LABELS = [
-  '',
-  'Ene',
-  'Feb',
-  'Mar',
-  'Abr',
-  'May',
-  'Jun',
-  'Jul',
-  'Ago',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dic',
-]
-
-function walkInPeriodLabel(g) {
-  const m = WALK_IN_MONTH_LABELS[g.period_month] || String(g.period_month)
-  return `${m} ${g.period_year}`
-}
-
-async function loadPendingWalkInGroups() {
-  pendingWalkInLoading.value = true
-  try {
-    pendingWalkInGroups.value = await fetchPendingWalkInGroups()
-  } catch {
-    pendingWalkInGroups.value = []
-  } finally {
-    pendingWalkInLoading.value = false
-  }
-}
-
-async function openWalkInReviewModal(g) {
-  if (walkInReviewSubmitting.value) return
-  walkInReviewError.value = ''
-  walkInReviewGroup.value = g
-  walkInReviewOpen.value = true
-  walkInReviewServices.value = []
-  walkInReviewSelectedIds.value = []
-  walkInReviewLoading.value = true
-  walkInBillNombre.value = g.client_name || ''
-  walkInBillTelefono.value = g.client_telefono_display || ''
-  try {
-    const data = await fetchAvailableWalkInServicesForInvoice({
-      contact_phone_key: g.contact_phone_key,
-      period_year: g.period_year,
-      period_month: g.period_month,
-    })
-    walkInReviewServices.value = Array.isArray(data) ? data : []
-    walkInReviewSelectedIds.value = walkInReviewServices.value.map((r) => r.id)
-    if (walkInReviewServices.value.length === 0) {
-      walkInReviewError.value =
-        'No hay servicios disponibles (puede que ya fueron facturados). Actualice pendientes e intente de nuevo.'
-    }
-  } catch (e) {
-    walkInReviewError.value = e.data?.message || e.message || 'No se pudieron cargar los servicios.'
-    walkInReviewServices.value = []
-  } finally {
-    walkInReviewLoading.value = false
-  }
-}
-
-function closeWalkInReviewModal() {
-  walkInReviewOpen.value = false
-  walkInReviewGroup.value = null
-  walkInReviewServices.value = []
-  walkInReviewSelectedIds.value = []
-  walkInReviewError.value = ''
-  walkInReviewLoading.value = false
-  walkInReviewSubmitting.value = false
-}
-
-function walkInReviewSvcSelected(id) {
-  return walkInReviewSelectedIds.value.includes(id)
-}
-
-function toggleWalkInReviewSvc(id) {
-  const i = walkInReviewSelectedIds.value.indexOf(id)
-  if (i >= 0) {
-    walkInReviewSelectedIds.value = walkInReviewSelectedIds.value.filter((x) => x !== id)
-  } else {
-    walkInReviewSelectedIds.value = [...walkInReviewSelectedIds.value, id]
-  }
-}
-
-function selectAllWalkInReview() {
-  walkInReviewSelectedIds.value = walkInReviewServices.value.map((r) => r.id)
-}
-
-function clearWalkInReviewSelection() {
-  walkInReviewSelectedIds.value = []
-}
-
-async function acceptWalkInReview() {
-  const g = walkInReviewGroup.value
-  if (!g || walkInReviewSubmitting.value) return
-  if (walkInReviewSelectedIds.value.length === 0) {
-    walkInReviewError.value = 'Marque al menos un servicio para incluir en la factura.'
-    return
-  }
-  walkInReviewError.value = ''
-  walkInReviewSubmitting.value = true
-  error.value = ''
-  walkInEmitNotice.value = ''
-  try {
-    const payload = {
-      contact_phone_key: g.contact_phone_key,
-      period_year: g.period_year,
-      period_month: g.period_month,
-      service_ids: walkInReviewSelectedIds.value.map(Number),
-    }
-    const bn = walkInBillNombre.value.trim()
-    const bt = walkInBillTelefono.value.trim()
-    if (bn) payload.bill_to_nombre = bn
-    if (bt) payload.bill_to_telefono = bt
-    const result = await createWalkInInvoiceFinal(payload)
-    const code = result.public_verification_code
-    walkInEmitNotice.value = code
-      ? `Factura ${result.code} emitida y aprobada. Código de verificación (guárdelo): ${code}`
-      : `Factura ${result.code} emitida y aprobada.`
-    closeWalkInReviewModal()
-    await load()
-    await loadPendingWalkInGroups()
-  } catch (e) {
-    walkInReviewError.value = e.data?.message || e.message || 'No se pudo emitir la factura.'
-  } finally {
-    walkInReviewSubmitting.value = false
-  }
 }
 
 function openDetailPanel(inv) {
@@ -309,20 +127,11 @@ function closeDetailPanel() {
 onMounted(async () => {
   document.addEventListener('keydown', onGlobalEscape)
   try {
-    companies.value = await fetchAdminCompanies({ company_kind: 'registered' })
+    companies.value = await fetchAdminCompanies()
   } catch {
     companies.value = []
   }
-  await Promise.all([load(), loadPendingWalkInGroups()])
-})
-
-watch(listTab, () => {
-  filters.value.page = 1
-  const sel = filters.value.company_id
-  if (sel && !companiesForFilter.value.some((c) => String(c.id) === String(sel))) {
-    filters.value.company_id = ''
-  }
-  load()
+  await load()
 })
 
 watch(
@@ -388,10 +197,6 @@ function flushSearchFromInput() {
   load()
 }
 
-function canPayFromList(inv) {
-  return inv.status === 'enviada' || inv.status === 'parcialmente_pagada'
-}
-
 const sendingInvoiceId = ref(null)
 
 const invoiceListStatusBusy = computed(() => sendingInvoiceId.value != null)
@@ -412,18 +217,6 @@ async function onSendFromList(inv) {
   } finally {
     sendingInvoiceId.value = null
   }
-}
-
-/** Saldo pendiente de cobro; en borrador/aprobada no aplica en el listado. */
-function invoiceSaldoDisplay(inv) {
-  if (!['enviada', 'parcialmente_pagada', 'pagada'].includes(inv.status)) {
-    return '—'
-  }
-  const b = inv.financial?.balance
-  if (b === undefined || b === null) {
-    return '—'
-  }
-  return money(b)
 }
 
 const payModalOpen = ref(false)
@@ -529,11 +322,6 @@ function onGlobalEscape(ev) {
     closeCreateInvoicePanel()
     return
   }
-  if (walkInReviewOpen.value) {
-    ev.preventDefault()
-    closeWalkInReviewModal()
-    return
-  }
   if (detailPanelOpen.value) {
     ev.preventDefault()
     closeDetailPanel()
@@ -545,42 +333,12 @@ function onGlobalEscape(ev) {
   }
 }
 
-function money(v) {
-  const n = Number(v)
-  if (Number.isNaN(n)) return '—'
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
-}
-
 const pageSummary = computed(() => {
   const m = meta.value
   if (!m || !m.total) return ''
   return `${m.from ?? 0}–${m.to ?? 0} de ${m.total} factura(s)`
 })
 
-async function exportInvoicesCsv() {
-  error.value = ''
-  exportBusy.value = true
-  try {
-    const params = {}
-    if (listTab.value === 'registered') params.company_kind = 'registered'
-    if (listTab.value === 'counter') params.company_kind = 'counter'
-    if (filters.value.company_id) params.company_id = filters.value.company_id
-    if (filters.value.status) params.status = filters.value.status
-    if (filters.value.period_year) params.period_year = filters.value.period_year
-    if (filters.value.period_month) params.period_month = filters.value.period_month
-    if (filters.value.q.trim()) params.q = filters.value.q.trim()
-    const { blob, filename } = await downloadAdminExportCsv('/admin/export/invoices', params)
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = filename
-    a.click()
-    URL.revokeObjectURL(a.href)
-  } catch (e) {
-    error.value = e.message || 'No se pudo exportar.'
-  } finally {
-    exportBusy.value = false
-  }
-}
 </script>
 
 <template>
@@ -595,62 +353,9 @@ async function exportInvoicesCsv() {
         </p>
       </div>
       <div class="head-btns">
-        <button type="button" class="btn secondary" :disabled="exportBusy" @click="exportInvoicesCsv">
-          {{ exportBusy ? 'Exportando…' : 'Exportar CSV (Excel)' }}
-        </button>
         <button type="button" class="btn primary" @click="openCreateInvoicePanel">+ Nueva factura</button>
       </div>
     </header>
-
-    <div v-if="walkInEmitNotice" class="banner ok">{{ walkInEmitNotice }}</div>
-
-    <div class="card pending-walk-in">
-      <div class="pending-walk-in-head">
-        <div>
-          <h2 class="pending-walk-in-title">Pendientes de facturar (sin empresa)</h2>
-          <p class="pending-walk-in-lede muted">
-            Servicios con teléfono y sin empresa en directorio, aún sin facturar. Pulse <strong>Emitir factura</strong> para revisar
-            líneas, datos del comprador y confirmar; la factura queda <strong>aprobada</strong> al aceptar.
-          </p>
-        </div>
-        <button
-          type="button"
-          class="btn secondary"
-          :disabled="pendingWalkInLoading"
-          @click="loadPendingWalkInGroups"
-        >
-          {{ pendingWalkInLoading ? 'Actualizando…' : 'Actualizar pendientes' }}
-        </button>
-      </div>
-      <p v-if="pendingWalkInLoading && !pendingWalkInGroups.length" class="muted pad">Cargando pendientes…</p>
-      <p v-else-if="!pendingWalkInGroups.length" class="muted pad">No hay grupos pendientes en este momento.</p>
-      <div v-else class="table-wrap pending-walk-in-table">
-        <table class="table">
-          <thead>
-            <tr>
-              <th scope="col">Cliente</th>
-              <th scope="col">Teléfono</th>
-              <th scope="col">Periodo</th>
-              <th class="num" scope="col">Servicios</th>
-              <th class="num" scope="col">Total</th>
-              <th class="actions-col">Acción</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="g in pendingWalkInGroups" :key="walkInPendingRowKey(g)">
-              <td>{{ g.client_name }}</td>
-              <td class="mono">{{ g.client_telefono_display }}</td>
-              <td>{{ walkInPeriodLabel(g) }}</td>
-              <td class="num">{{ g.services_count }}</td>
-              <td class="num">{{ money(g.total) }}</td>
-              <td class="actions-col">
-                <button type="button" class="btn primary" @click="openWalkInReviewModal(g)">Emitir factura</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
 
     <div class="filters card">
       <div class="filters-top">
@@ -664,12 +369,6 @@ async function exportInvoicesCsv() {
             autocomplete="off"
             @keydown.enter.prevent="flushSearchFromInput"
           />
-        </label>
-        <label class="filters-top-view">
-          <span>Vista del listado</span>
-          <select v-model="listTab" class="input">
-            <option v-for="o in LIST_VIEW_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-          </select>
         </label>
       </div>
       <label>
@@ -902,102 +601,6 @@ async function exportInvoicesCsv() {
 
     <Teleport to="body">
       <div
-        v-if="walkInReviewOpen"
-        class="modal-backdrop"
-        role="presentation"
-        @click.self="closeWalkInReviewModal"
-      >
-        <div
-          class="modal card walk-in-review-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="walk-in-review-title"
-          @click.stop
-        >
-          <h2 id="walk-in-review-title" class="modal-title">Revisar emisión (venta sin alta)</h2>
-          <p v-if="walkInReviewGroup" class="walk-in-review-meta muted">
-            <strong>{{ walkInReviewGroup.client_name }}</strong>
-            <span class="mono"> · {{ walkInReviewGroup.client_telefono_display }}</span>
-            <span> · {{ walkInPeriodLabel(walkInReviewGroup) }}</span>
-          </p>
-          <p v-if="walkInReviewLoading" class="muted">Cargando servicios…</p>
-          <template v-else>
-            <p v-if="walkInReviewError" class="banner err">{{ walkInReviewError }}</p>
-            <div v-if="walkInReviewServices.length" class="walk-in-review-fields">
-              <label class="walk-in-review-label">
-                <span>Nombre en factura</span>
-                <input v-model="walkInBillNombre" type="text" class="input" autocomplete="name" :disabled="walkInReviewSubmitting" />
-              </label>
-              <label class="walk-in-review-label">
-                <span>Teléfono en factura</span>
-                <input v-model="walkInBillTelefono" type="text" class="input" autocomplete="tel" :disabled="walkInReviewSubmitting" />
-              </label>
-              <p class="walk-in-review-field-hint muted">
-                Vacío = se toma del primer servicio seleccionado (orden por código interno).
-              </p>
-            </div>
-            <div v-if="walkInReviewServices.length" class="walk-in-review-bulk muted">
-              <button type="button" class="link-btn" :disabled="walkInReviewSubmitting" @click="selectAllWalkInReview">
-                Seleccionar todos
-              </button>
-              <span aria-hidden="true"> · </span>
-              <button type="button" class="link-btn" :disabled="walkInReviewSubmitting" @click="clearWalkInReviewSelection">
-                Quitar selección
-              </button>
-            </div>
-            <div v-if="walkInReviewServices.length" class="table-wrap walk-in-review-table-wrap">
-              <table class="table walk-in-review-table">
-                <thead>
-                  <tr>
-                    <th class="chk" scope="col">Incluir</th>
-                    <th scope="col">Código</th>
-                    <th scope="col">Fecha</th>
-                    <th scope="col">Descripción</th>
-                    <th class="num" scope="col">Valor</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in walkInReviewServices" :key="row.id">
-                    <td class="chk">
-                      <input
-                        type="checkbox"
-                        :checked="walkInReviewSvcSelected(row.id)"
-                        :disabled="walkInReviewSubmitting"
-                        @change="toggleWalkInReviewSvc(row.id)"
-                      />
-                    </td>
-                    <td class="mono">{{ row.code }}</td>
-                    <td>{{ row.service_date }}</td>
-                    <td class="desc">{{ row.description }}</td>
-                    <td class="num">{{ money(row.amount) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p v-if="walkInReviewServices.length" class="walk-in-review-total">
-              <span>Total incluido</span>
-              <strong>{{ money(walkInReviewTotalPreview) }}</strong>
-            </p>
-          </template>
-          <div class="modal-actions">
-            <button type="button" class="btn secondary" :disabled="walkInReviewSubmitting" @click="closeWalkInReviewModal">
-              Rechazar
-            </button>
-            <button
-              type="button"
-              class="btn primary"
-              :disabled="walkInReviewSubmitting || walkInReviewLoading || !walkInReviewServices.length"
-              @click="acceptWalkInReview"
-            >
-              {{ walkInReviewSubmitting ? 'Emitiendo…' : 'Aceptar y emitir' }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <Teleport to="body">
-      <div
         v-if="createInvoicePanelOpen"
         class="fixed inset-0 z-[95] flex"
         role="presentation"
@@ -1163,41 +766,6 @@ h1 {
   border: 1px solid rgba(34, 197, 94, 0.45);
   color: #bbf7d0;
   margin-bottom: 1rem;
-}
-
-.pending-walk-in {
-  margin-bottom: 1rem;
-}
-
-.pending-walk-in-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
-}
-
-.pending-walk-in-title {
-  margin: 0 0 0.35rem;
-  font-size: 1.05rem;
-  color: #f8fafc;
-}
-
-.pending-walk-in-lede {
-  margin: 0;
-  font-size: 0.85rem;
-  line-height: 1.45;
-  max-width: 52rem;
-}
-
-.pending-walk-in-table {
-  margin-top: 0.25rem;
-}
-
-.pending-walk-in .pad {
-  margin: 0;
-  padding: 0.5rem 0;
 }
 
 .table-wrap {
@@ -1478,66 +1046,4 @@ h1 {
   border-top: 1px solid rgba(148, 163, 184, 0.2);
 }
 
-.walk-in-review-modal.modal {
-  width: 100%;
-  max-width: 720px;
-  max-height: 90vh;
-  overflow-y: auto;
-  margin: 0;
-}
-
-.walk-in-review-meta {
-  margin: 0 0 1rem;
-  font-size: 0.88rem;
-  line-height: 1.45;
-}
-
-.walk-in-review-fields {
-  display: grid;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
-}
-
-.walk-in-review-label span {
-  display: block;
-  font-size: 0.78rem;
-  color: #94a3b8;
-  margin-bottom: 0.25rem;
-}
-
-.walk-in-review-field-hint {
-  margin: -0.15rem 0 0.65rem;
-  font-size: 0.78rem;
-}
-
-.walk-in-review-bulk {
-  margin-bottom: 0.5rem;
-  font-size: 0.82rem;
-}
-
-.walk-in-review-table-wrap {
-  margin-bottom: 0.5rem;
-}
-
-.walk-in-review-table .desc {
-  max-width: 16rem;
-  word-break: break-word;
-}
-
-.walk-in-review-total {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin: 0 0 0.25rem;
-  padding: 0.55rem 0;
-  border-top: 1px solid rgba(148, 163, 184, 0.15);
-  font-size: 0.95rem;
-  color: #e2e8f0;
-}
-
-.walk-in-review-table .chk {
-  width: 2.75rem;
-  text-align: center;
-  vertical-align: middle;
-}
 </style>

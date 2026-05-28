@@ -1,0 +1,22 @@
+---
+description: Antes de implementar o refactorizar, revisar skills y reglas del proyecto HBM.
+alwaysApply: true
+---
+
+# Skills primero (HBM)
+
+## Obligatorio en cada tarea
+
+1. Listar skills aplicables en `.cursor/skills/` cuyo nombre o descripción coincida con el módulo (inventario, facturas, OTP, BD segura, seeder local, **refactor seguro / optimización** → `hbm-safe-refactor-optimize`).
+2. Leer el `SKILL.md` relevante y seguir sus pasos/checklists cuando existan.
+3. Si la regla es nueva y se repetirá (multi-tenant, portal público, stock/lifecycle), crear o actualizar una skill con `create-skill` y documentar convenciones ahí, no solo en código suelto.
+4. Respetar `.cursor/rules/hbm-database-safety.mdc` y skill `hbm-safe-db-ops` para migraciones y datos.
+
+## Cuándo crear skill nueva
+
+- Reglas de negocio que cruzan varios controladores (titular vs ejecutor, hoja de vida sin precios, OTP público).
+- Patrones repetibles de seguridad o auditoría.
+
+## Cuándo no crear skill
+
+- Cambio puntual en un solo archivo sin patrón reusable.

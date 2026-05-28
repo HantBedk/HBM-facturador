@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Models\Invoice;
+use App\Services\SystemOrganizationProfileService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -11,7 +12,9 @@ class AdminInvoiceResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $issuer = config('billing.issuer', []);
+        $org = app(SystemOrganizationProfileService::class);
+        $issuer = $org->issuerBlockForInvoice();
+        $emitter = $org->invoiceEmitterStatus();
 
         return [
             'id' => $this->id,
@@ -38,6 +41,8 @@ class AdminInvoiceResource extends JsonResource
             'status_label' => $this->statusLabel($this->status),
             'subtotal' => (string) $this->subtotal,
             'total' => (string) $this->total,
+            /** IVA u otros cargos incluidos en `total` respecto de `subtotal` (p. ej. IVA por categoría de catálogo). */
+            'iva_amount' => number_format(max(0, round((float) $this->total - (float) $this->subtotal, 2)), 2, '.', ''),
             'sent_at' => $this->sent_at?->toIso8601String(),
             /** Indica si ya existe código de verificación para consulta pública (el valor nunca se expone por API). */
             'public_access_configured' => $this->public_access_token !== null && $this->public_access_token !== '',
@@ -51,6 +56,7 @@ class AdminInvoiceResource extends JsonResource
                     'catalog' => $s->relationLoaded('catalog') && $s->catalog ? [
                         'id' => $s->catalog->id,
                         'name' => $s->catalog->name,
+                        'iva_percent' => (string) ($s->catalog->iva_percent ?? '0.00'),
                     ] : null,
                     'service_date' => $s->service_date?->format('Y-m-d'),
                     'description' => $s->description,
@@ -86,7 +92,11 @@ class AdminInvoiceResource extends JsonResource
                 'direccion' => (string) ($issuer['direccion'] ?? ''),
                 'telefono' => (string) ($issuer['telefono'] ?? ''),
                 'correo' => (string) ($issuer['correo'] ?? ''),
+                'regimen' => (string) ($issuer['regimen'] ?? ''),
             ],
+            'emitter_ready' => (bool) ($emitter['ready'] ?? false),
+            'emitter_missing' => $emitter['missing'] ?? [],
+            'emitter_logo_configured' => (bool) ($emitter['logo_configured'] ?? false),
         ];
     }
 

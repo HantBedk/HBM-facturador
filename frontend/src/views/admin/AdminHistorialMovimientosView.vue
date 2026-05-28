@@ -3,12 +3,213 @@ import { computed, ref, watch } from 'vue'
 import { fetchAdminActivityLogs } from '@/services/adminActivityLogsApi.js'
 
 const scope = ref('all')
-const limit = ref(150)
 const loading = ref(true)
 const error = ref('')
 const groups = ref([])
+/** YYYY-MM-DD; el servidor interpreta el día en APP_TIMEZONE y devuelve la fecha canónica en `date`. */
+const selectedDate = ref('')
+/** Borrador del input «Ir a fecha» (sincronizado con `selectedDate` al cargar o elegir en calendario). */
+const dateJumpDraft = ref('')
+const dateJumpError = ref('')
+const timezoneLabel = ref('')
+
+/** Mes mostrado en el calendario (puede diferir del mes de `selectedDate` si el usuario navega con ‹ ›). */
+const viewMonth = ref({ year: new Date().getFullYear(), month: new Date().getMonth() + 1 })
+
+/** Metadatos del calendario devueltos por el servidor (hoy en TZ app, días con al menos un movimiento). */
+const calendarMeta = ref({
+  month: '',
+  today: '',
+  dates_with_activity: [],
+})
 
 const scopeLabel = computed(() => (scope.value === 'facturas' ? 'facturas y pagos' : 'toda la actividad registrada'))
+
+const todayYmd = computed(() => calendarMeta.value.today || '')
+
+const selectedDateLabel = computed(() => formatDateEs(selectedDate.value))
+
+const activityDatesSet = computed(() => new Set(calendarMeta.value.dates_with_activity || []))
+
+const weekdayLabels = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+
+function formatYmdParts(year, month, day) {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function calendarMonthParam() {
+  const { year, month } = viewMonth.value
+  return `${year}-${String(month).padStart(2, '0')}`
+}
+
+function syncViewMonthFromYmd(ymd) {
+  const parts = String(ymd || '')
+    .split('-')
+    .map(Number)
+  if (parts.length >= 2 && !parts.some(Number.isNaN)) {
+    viewMonth.value = { year: parts[0], month: parts[1] }
+  }
+}
+
+function viewMonthMatchesYmd(ymd) {
+  const parts = String(ymd || '')
+    .split('-')
+    .map(Number)
+  if (parts.length < 2 || parts.some(Number.isNaN)) return true
+  return viewMonth.value.year === parts[0] && viewMonth.value.month === parts[1]
+}
+
+function formatDateEs(ymd) {
+  if (!ymd) return ''
+  const parts = String(ymd).split('-').map(Number)
+  if (parts.length < 3 || parts.some(Number.isNaN)) return ymd
+  try {
+    return new Date(parts[0], parts[1] - 1, parts[2]).toLocaleDateString('es-CO', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    })
+  } catch {
+    return ymd
+  }
+}
+
+async function applyDateJump() {
+  dateJumpError.value = ''
+  const ymd = String(dateJumpDraft.value || '').trim()
+  if (!ymd) {
+    dateJumpError.value = 'Elija una fecha.'
+    return
+  }
+  const today = todayYmd.value
+  if (today && ymd > today) {
+    dateJumpError.value = 'No puede consultar fechas futuras.'
+    dateJumpDraft.value = selectedDate.value || today
+    return
+  }
+  const monthChanged = !viewMonthMatchesYmd(ymd)
+  syncViewMonthFromYmd(ymd)
+  if (ymd === selectedDate.value) {
+    if (monthChanged) await load()
+    return
+  }
+  selectedDate.value = ymd
+}
+
+async function goToToday() {
+  const today = todayYmd.value
+  if (!today) return
+  dateJumpError.value = ''
+  dateJumpDraft.value = today
+  const monthChanged = !viewMonthMatchesYmd(today)
+  syncViewMonthFromYmd(today)
+  if (selectedDate.value !== today) {
+    selectedDate.value = today
+    return
+  }
+  if (monthChanged) await load()
+}
+
+function monthTitleEs() {
+  const { year, month } = viewMonth.value
+  try {
+    return new Date(year, month - 1, 1).toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })
+  } catch {
+    return `${month}/${year}`
+  }
+}
+
+const calendarCells = computed(() => {
+  const { year: y, month: m } = viewMonth.value
+  const todayStr = calendarMeta.value.today || ''
+  const act = activityDatesSet.value
+
+  const first = new Date(y, m - 1, 1)
+  const lastDay = new Date(y, m, 0).getDate()
+  const jsDow = first.getDay()
+  const mondayFirst = (jsDow + 6) % 7
+
+  const cells = []
+  const prevMonthLast = new Date(y, m - 1, 0).getDate()
+  const py = m === 1 ? y - 1 : y
+  const pm = m === 1 ? 12 : m - 1
+  for (let i = 0; i < mondayFirst; i++) {
+    const dayNum = prevMonthLast - mondayFirst + i + 1
+    cells.push({
+      kind: 'outside',
+      day: dayNum,
+      ymd: formatYmdParts(py, pm, dayNum),
+      disabled: true,
+    })
+  }
+
+  for (let d = 1; d <= lastDay; d++) {
+    const ymd = formatYmdParts(y, m, d)
+    const isFuture = todayStr && ymd > todayStr
+    const isToday = todayStr && ymd === todayStr
+    const hasActivity = act.has(ymd)
+    cells.push({
+      kind: 'in-month',
+      day: d,
+      ymd,
+      disabled: !!isFuture,
+      isToday: !!isToday,
+      hasActivity,
+      isSelected: selectedDate.value === ymd,
+    })
+  }
+
+  let ny = m === 12 ? y + 1 : y
+  let nm = m === 12 ? 1 : m + 1
+  let nextDay = 1
+  while (cells.length % 7 !== 0) {
+    const ymd = formatYmdParts(ny, nm, nextDay)
+    cells.push({
+      kind: 'outside',
+      day: nextDay,
+      ymd,
+      disabled: true,
+    })
+    nextDay += 1
+  }
+
+  return cells
+})
+
+async function shiftViewMonth(delta) {
+  if (loading.value) return
+  let { year, month } = viewMonth.value
+  month += delta
+  if (month < 1) {
+    month = 12
+    year -= 1
+  }
+  if (month > 12) {
+    month = 1
+    year += 1
+  }
+  viewMonth.value = { year, month }
+  await load()
+}
+
+function cellClass(cell) {
+  if (cell.kind === 'outside' || cell.disabled) {
+    return 'cal-cell cal-cell--muted'
+  }
+  if (cell.isToday) {
+    return 'cal-cell cal-cell--today'
+  }
+  if (cell.hasActivity) {
+    return 'cal-cell cal-cell--has'
+  }
+  return 'cal-cell cal-cell--empty'
+}
+
+function selectCalendarDay(cell) {
+  if (!cell || cell.disabled || cell.kind !== 'in-month') return
+  selectedDate.value = cell.ymd
+}
 
 function rolEtiqueta(rol) {
   if (rol === 'super_admin') return 'Super administrador'
@@ -30,7 +231,7 @@ function fechaHora(iso) {
 }
 
 function accionEtiqueta(code) {
-  const m = {
+  const map = {
     factura_creada: 'Factura creada',
     factura_editada: 'Factura editada',
     factura_aprobada: 'Factura aprobada',
@@ -38,7 +239,7 @@ function accionEtiqueta(code) {
     factura_eliminada: 'Factura eliminada',
     factura_token_publico_regenerado: 'Código consulta pública',
     factura_auto_borrador: 'Borradores automáticos (sistema)',
-    automation_facturacion_actualizada: 'Facturación automática (borradores)',
+    automation_facturacion_actualizada: 'Facturación y Margen (programación de borradores)',
     pago_registrado: 'Pago registrado',
     pago_eliminado: 'Pago eliminado',
     servicio_creado: 'Servicio creado',
@@ -49,15 +250,44 @@ function accionEtiqueta(code) {
     servicio_asignacion_completada: 'Asignación completada (técnico)',
     servicio_asignacion_rechazada: 'Asignación rechazada (técnico)',
   }
-  return m[code] || code
+  return map[code] || code
 }
+
+/** Evita un segundo GET al rellenar el calendario con el día canónico del servidor (primera carga sin `date`). */
+let ignoreNextDateWatch = false
 
 async function load() {
   error.value = ''
   loading.value = true
   try {
-    const r = await fetchAdminActivityLogs({ scope: scope.value, limit: limit.value })
+    const params = {
+      scope: scope.value,
+      calendar_month: calendarMonthParam(),
+    }
+    const dateStr = String(selectedDate.value || '').trim()
+    if (dateStr) {
+      params.date = dateStr
+    }
+    const r = await fetchAdminActivityLogs(params)
+    timezoneLabel.value = r.timezone || ''
     groups.value = r.groups || []
+    if (r.calendar) {
+      calendarMeta.value = {
+        month: r.calendar.month || '',
+        today: r.calendar.today || '',
+        dates_with_activity: Array.isArray(r.calendar.dates_with_activity)
+          ? r.calendar.dates_with_activity
+          : [],
+      }
+    }
+    if (!dateStr && r.date) {
+      ignoreNextDateWatch = true
+      selectedDate.value = r.date
+      syncViewMonthFromYmd(r.date)
+    } else if (r.date && r.date !== dateStr) {
+      selectedDate.value = r.date
+      syncViewMonthFromYmd(r.date)
+    }
   } catch (e) {
     error.value = e.data?.message || e.message || 'No se pudo cargar el historial.'
     groups.value = []
@@ -66,7 +296,17 @@ async function load() {
   }
 }
 
-watch([scope, limit], load, { immediate: true })
+watch(selectedDate, (d) => {
+  dateJumpDraft.value = d || ''
+})
+
+watch([scope, selectedDate], async () => {
+  if (ignoreNextDateWatch) {
+    ignoreNextDateWatch = false
+    return
+  }
+  await load()
+}, { immediate: true })
 </script>
 
 <template>
@@ -74,30 +314,112 @@ watch([scope, limit], load, { immediate: true })
     <header class="head">
       <h1>Historial de movimientos</h1>
       <p class="lede">
-        Registro de acciones registradas en el sistema (administradores, super administradores y técnicos). Las relativas a
-        <strong>facturas y pagos</strong> puedes filtrarlas abajo. Cada bloque agrupa lo hecho por la misma persona, con fecha
-        y hora.
+        Elija un día en el calendario para ver los movimientos de ese día (agrupación por persona, fecha y hora). El día se
+        interpreta según la zona horaria del servidor
+        <template v-if="timezoneLabel"> (<span class="tz-hint">{{ timezoneLabel }}</span>) </template>.
+        Puede acotar a <strong>facturas y pagos</strong> con el filtro de tipo.
       </p>
     </header>
 
     <div class="toolbar">
-      <label class="field">
-        <span class="lbl">Tipo de registro</span>
-        <select v-model="scope" class="sel">
-          <option value="all">Todo (servicios y facturas)</option>
-          <option value="facturas">Solo facturas y pagos</option>
-        </select>
-      </label>
-      <label class="field">
-        <span class="lbl">Cantidad máx.</span>
-        <select v-model.number="limit" class="sel">
-          <option :value="50">50</option>
-          <option :value="100">100</option>
-          <option :value="150">150</option>
-          <option :value="200">200</option>
-          <option :value="300">300</option>
-        </select>
-      </label>
+      <div class="cal-wrap">
+        <div class="cal-head">
+          <button
+            type="button"
+            class="cal-nav"
+            :disabled="loading"
+            title="Mes anterior"
+            aria-label="Mes anterior"
+            @click="shiftViewMonth(-1)"
+          >
+            ‹
+          </button>
+          <h2 class="cal-title">{{ monthTitleEs() }}</h2>
+          <button
+            type="button"
+            class="cal-nav"
+            :disabled="loading"
+            title="Mes siguiente"
+            aria-label="Mes siguiente"
+            @click="shiftViewMonth(1)"
+          >
+            ›
+          </button>
+        </div>
+        <div class="cal-legend" role="list">
+          <span class="leg leg--has" role="listitem">Con movimiento</span>
+          <span class="leg leg--empty" role="listitem">Sin movimiento</span>
+          <span class="leg leg--today" role="listitem">Hoy</span>
+          <span class="leg leg--muted" role="listitem">No seleccionable</span>
+        </div>
+        <div class="cal-grid" role="grid" :aria-busy="loading">
+          <div v-for="(w, wi) in weekdayLabels" :key="'w' + wi" class="cal-dow" role="columnheader">
+            {{ w }}
+          </div>
+          <button
+            v-for="(cell, ci) in calendarCells"
+            :key="ci"
+            type="button"
+            role="gridcell"
+            :disabled="cell.disabled || cell.kind !== 'in-month'"
+            :aria-selected="cell.kind === 'in-month' ? cell.isSelected : undefined"
+            :aria-current="cell.isToday ? 'date' : undefined"
+            :class="[cellClass(cell), cell.isSelected ? 'cal-cell--sel' : '']"
+            @click="selectCalendarDay(cell)"
+          >
+            {{ cell.day }}
+          </button>
+        </div>
+      </div>
+
+      <div class="toolbar-side">
+        <div class="field field-date-jump">
+          <span class="lbl" id="historial-date-jump-label">Ir a fecha</span>
+          <div class="date-jump-row">
+            <input
+              id="historial-date-jump"
+              v-model="dateJumpDraft"
+              type="date"
+              class="date-inp"
+              aria-labelledby="historial-date-jump-label"
+              :max="todayYmd || undefined"
+              :disabled="loading"
+              @change="applyDateJump"
+              @keydown.enter.prevent="applyDateJump"
+            />
+            <button
+              type="button"
+              class="btn-jump"
+              :disabled="loading || !dateJumpDraft"
+              title="Ir a la fecha indicada"
+              @click="applyDateJump"
+            >
+              Ir
+            </button>
+            <button
+              type="button"
+              class="btn-jump btn-jump--ghost"
+              :disabled="loading || !todayYmd"
+              title="Ir al día de hoy"
+              @click="goToToday"
+            >
+              Hoy
+            </button>
+          </div>
+          <p v-if="dateJumpError" class="date-jump-msg date-jump-msg--err">{{ dateJumpError }}</p>
+          <p v-else-if="selectedDateLabel" class="date-jump-msg">
+            Consultando: <strong>{{ selectedDateLabel }}</strong>
+          </p>
+        </div>
+
+        <label class="field">
+          <span class="lbl">Tipo de registro</span>
+          <select v-model="scope" class="sel">
+            <option value="all">Todo (servicios y facturas)</option>
+            <option value="facturas">Solo facturas y pagos</option>
+          </select>
+        </label>
+      </div>
     </div>
 
     <p v-if="error" class="banner err">{{ error }}</p>
@@ -125,8 +447,7 @@ watch([scope, limit], load, { immediate: true })
     </template>
 
     <p class="foot-note">
-      Mostrando hasta {{ limit }} movimientos recientes ({{ scopeLabel }}). Solo aparecen acciones que el sistema ya
-      registra automáticamente.
+      Movimientos del día seleccionado ({{ scopeLabel }}). Solo aparecen acciones que el sistema registra automáticamente.
     </p>
   </section>
 </template>
@@ -155,17 +476,284 @@ h1 {
   line-height: 1.45;
 }
 
+.tz-hint {
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 1.25rem;
   margin-bottom: 1rem;
+  align-items: flex-start;
+}
+
+.cal-wrap {
+  flex: 1 1 18rem;
+  min-width: min(100%, 20rem);
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.45);
+  padding: 0.85rem 1rem 1rem;
+}
+
+.cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.cal-title {
+  margin: 0;
+  flex: 1;
+  text-align: center;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  text-transform: capitalize;
+}
+
+.cal-nav {
+  flex: 0 0 auto;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(30, 41, 59, 0.65);
+  color: #e2e8f0;
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.cal-nav:hover:not(:disabled) {
+  background: rgba(51, 65, 85, 0.85);
+}
+
+.cal-nav:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.85rem;
+  margin-bottom: 0.65rem;
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+.leg {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.leg::before {
+  content: '';
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 3px;
+}
+.leg--has::before {
+  background: rgba(52, 211, 153, 0.85);
+}
+.leg--empty::before {
+  background: rgba(248, 113, 113, 0.85);
+}
+.leg--today::before {
+  background: rgba(59, 130, 246, 0.95);
+}
+.leg--muted::before {
+  background: rgba(71, 85, 105, 0.65);
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.cal-dow {
+  text-align: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  padding: 0.2rem 0;
+}
+
+.cal-cell {
+  aspect-ratio: 1;
+  min-height: 2.35rem;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.12s ease;
+}
+
+.cal-cell:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.cal-cell:focus-visible:not(:disabled) {
+  outline: 2px solid rgba(56, 189, 248, 0.85);
+  outline-offset: 1px;
+}
+
+.cal-cell:disabled {
+  cursor: not-allowed;
+}
+
+.cal-cell--muted {
+  background: rgba(30, 41, 59, 0.35);
+  color: #475569;
+  border-color: rgba(51, 65, 85, 0.35);
+  opacity: 0.72;
+}
+
+.cal-cell--has {
+  background: rgba(16, 185, 129, 0.22);
+  color: #a7f3d0;
+  border-color: rgba(52, 211, 153, 0.45);
+}
+
+.cal-cell--has:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.32);
+}
+
+.cal-cell--empty {
+  background: rgba(248, 113, 113, 0.14);
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.cal-cell--empty:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.22);
+}
+
+.cal-cell--today {
+  background: rgba(37, 99, 235, 0.35);
+  color: #dbeafe;
+  border-color: rgba(96, 165, 250, 0.75);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.35);
+}
+
+.cal-cell--today:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.48);
+}
+
+.cal-cell--sel {
+  box-shadow:
+    0 0 0 2px rgba(251, 191, 36, 0.95),
+    inset 0 0 0 1px rgba(251, 191, 36, 0.35);
+  z-index: 1;
+}
+
+.toolbar-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex: 0 1 16rem;
+  min-width: min(100%, 15rem);
 }
 
 .field {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  flex: 0 1 14rem;
+}
+
+.field-date-jump {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.date-jump-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.date-inp {
+  flex: 1 1 9.5rem;
+  min-width: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.75);
+  color: #e2e8f0;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.date-inp:disabled {
+  opacity: 0.55;
+}
+
+.date-inp:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.75);
+  outline-offset: 1px;
+}
+
+.btn-jump {
+  flex: 0 0 auto;
+  padding: 0.45rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(37, 99, 235, 0.55);
+  color: #f8fafc;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn-jump:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.75);
+}
+
+.btn-jump--ghost {
+  background: transparent;
+  color: #cbd5e1;
+}
+
+.btn-jump--ghost:hover:not(:disabled) {
+  background: rgba(51, 65, 85, 0.65);
+}
+
+.btn-jump:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.date-jump-msg {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #64748b;
+}
+
+.date-jump-msg strong {
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+.date-jump-msg--err {
+  color: #fca5a5;
 }
 
 .lbl {

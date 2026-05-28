@@ -2,7 +2,6 @@ import { api, apiBaseUrl, getToken } from './api'
 
 /**
  * @param {Record<string, string|number>} [params]
- * @param {string} [params.company_kind] `registered` | `quick` | `counter` — facturas con empresa / venta sin alta (snapshot)
  */
 export function fetchAdminInvoices(params = {}) {
   const qs = new URLSearchParams()
@@ -20,51 +19,26 @@ export function fetchAdminInvoice(id) {
 /**
  * @param {{
  *   company_id: number|string,
- *   period_year: number,
- *   period_month: number,
- *   invoice_id?: number|string
+ *   invoice_id?: number|string,
+ *   include_recurring?: boolean,
  * }} q
  */
 export function fetchAvailableServicesForInvoice(q) {
   const qs = new URLSearchParams({
     company_id: String(q.company_id),
-    period_year: String(q.period_year),
-    period_month: String(q.period_month),
   })
   if (q.invoice_id != null && q.invoice_id !== '') qs.set('invoice_id', String(q.invoice_id))
+  if (q.include_recurring === false) qs.set('include_recurring', '0')
+  else if (q.include_recurring === true) qs.set('include_recurring', '1')
   return api(`/admin/invoices/available-services?${qs}`).then((r) => r.data)
 }
 
 /**
  * @param {{
- *   contact_phone_key: string,
- *   period_year: number,
- *   period_month: number,
- *   invoice_id?: number|string
- * }} q
- */
-export function fetchAvailableWalkInServicesForInvoice(q) {
-  const qs = new URLSearchParams({
-    contact_phone_key: String(q.contact_phone_key),
-    period_year: String(q.period_year),
-    period_month: String(q.period_month),
-  })
-  if (q.invoice_id != null && q.invoice_id !== '') qs.set('invoice_id', String(q.invoice_id))
-  return api(`/admin/invoices/available-walk-in-services?${qs}`).then((r) => r.data)
-}
-
-/** @returns {Promise<Array<Record<string, unknown>>>} grupos teléfono+mes con servicios sin facturar */
-export function fetchPendingWalkInGroups() {
-  return api('/admin/invoices/pending-walk-in-groups').then((body) => body.data || [])
-}
-
-/**
- * @param {{
- *   company_id?: number|string,
- *   contact_phone_key?: string,
- *   period_year: number,
- *   period_month: number,
- *   service_ids: number[]
+ *   company_id: number|string,
+ *   service_ids: number[],
+ *   period_year?: number,
+ *   period_month?: number,
  * }} payload
  */
 export function createInvoice(payload) {
@@ -75,35 +49,12 @@ export function createInvoice(payload) {
 }
 
 /**
- * Venta sin alta: factura aprobada de una vez. Sin `service_ids`, todos los del teléfono en el periodo.
- * @param {{
- *   contact_phone_key: string,
- *   period_year: number,
- *   period_month: number,
- *   service_ids?: number[],
- *   bill_to_nombre?: string,
- *   bill_to_telefono?: string,
- * }} payload
- */
-export function createWalkInInvoiceFinal(payload) {
-  return api('/admin/invoices/counter-final', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  }).then((r) => ({
-    ...r.data,
-    public_verification_code: r.public_verification_code,
-    public_verification_notice: r.public_verification_notice,
-  }))
-}
-
-/**
  * @param {number|string} id
  * @param {{
- *   company_id?: number|string,
- *   contact_phone_key?: string,
- *   period_year: number,
- *   period_month: number,
- *   service_ids: number[]
+ *   company_id: number|string,
+ *   service_ids: number[],
+ *   period_year?: number,
+ *   period_month?: number,
  * }} payload
  */
 export function updateInvoice(id, payload) {
@@ -163,6 +114,14 @@ export function deleteInvoicePayment(invoiceId, paymentId) {
  * @param {{ preview?: boolean }} [opts] preview=true → borrador (marca de agua); oficial sin query.
  * @returns {Promise<Blob>}
  */
+/** Envía el PDF oficial al correo de la empresa (ficha en directorio). Solo factura no borrador. */
+export function sendInvoiceEmailToCompany(id) {
+  return api(`/admin/invoices/${id}/send-email`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+}
+
 export async function downloadInvoicePdfBlob(id, opts = {}) {
   const preview = Boolean(opts.preview)
   const q = preview ? '?preview=1' : ''

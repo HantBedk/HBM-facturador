@@ -7,7 +7,6 @@ import {
   createInvoice,
   fetchAdminInvoice,
   fetchAvailableServicesForInvoice,
-  fetchAvailableWalkInServicesForInvoice,
   updateInvoice,
 } from '@/services/invoicesApi.js'
 
@@ -31,8 +30,6 @@ const resolvedId = computed(() => {
 const isEdit = computed(() => !!resolvedId.value)
 
 const companies = ref([])
-/** `registered` = empresa en directorio; `counter` = venta sin fila en empresas (solo teléfono en servicios). */
-const companyPickerTab = ref('registered')
 const loading = ref(true)
 const loadingServices = ref(false)
 const saving = ref(false)
@@ -40,10 +37,8 @@ const loadError = ref('')
 const saveError = ref('')
 
 const companyId = ref('')
-/** Teléfono tal como lo escribe el usuario (se normaliza a dígitos para la API). */
-const walkInPhoneInput = ref('')
-const periodYear = ref(new Date().getFullYear())
-const periodMonth = ref(new Date().getMonth() + 1)
+/** Incluir cargos fijos mensuales en el listado y marcarlos al cargar (predeterminado: sí). */
+const includeRecurringFixed = ref(true)
 
 const available = ref([])
 const selectedIds = ref([])
@@ -67,13 +62,7 @@ const {
 
 const invoice = ref(null)
 
-const companiesInPickerTab = computed(() => (companies.value || []).filter((c) => !c.es_cliente_puntual))
-
-function digitsOnly(s) {
-  return String(s || '').replace(/\D/g, '')
-}
-
-const walkInPhoneDigits = computed(() => digitsOnly(walkInPhoneInput.value))
+const companiesInPickerTab = computed(() => companies.value || [])
 
 function companyOptionLabel(c) {
   if (!c) return ''
@@ -82,26 +71,12 @@ function companyOptionLabel(c) {
 
 const skipWatch = ref(true)
 
-const MONTHS = [
-  [1, 'Enero'],
-  [2, 'Febrero'],
-  [3, 'Marzo'],
-  [4, 'Abril'],
-  [5, 'Mayo'],
-  [6, 'Junio'],
-  [7, 'Julio'],
-  [8, 'Agosto'],
-  [9, 'Septiembre'],
-  [10, 'Octubre'],
-  [11, 'Noviembre'],
-  [12, 'Diciembre'],
-]
-
 function isSelected(id) {
   return selectedIds.value.includes(id)
 }
 
-function toggleId(id) {
+function toggleId(row) {
+  const id = row.id
   const i = selectedIds.value.indexOf(id)
   if (i >= 0) {
     selectedIds.value = selectedIds.value.filter((x) => x !== id)
@@ -139,6 +114,23 @@ function toggleSelectAllCheckbox() {
   }
 }
 
+function syncSelectionAfterLoad(data) {
+  const valid = new Set(data.map((r) => r.id))
+  let kept = selectedIds.value.filter((id) => valid.has(id))
+  if (!includeRecurringFixed.value) {
+    selectedIds.value = kept.filter((id) => {
+      const row = data.find((r) => r.id === id)
+      return row && !row.is_recurring
+    })
+    return
+  }
+  if (!isEdit.value) {
+    const recurringIds = data.filter((r) => r.is_recurring).map((r) => r.id)
+    kept = [...new Set([...kept, ...recurringIds])]
+  }
+  selectedIds.value = kept
+}
+
 watch([allAvailableSelected, someAvailableSelected, sortedAvailable], () => {
   nextTick(() => {
     const el = selectAllCheckboxRef.value
@@ -157,10 +149,7 @@ const totalPreview = computed(() => {
   return t
 })
 
-const canSubmitInvoice = computed(() => {
-  if (companyPickerTab.value === 'registered') return !!companyId.value
-  return walkInPhoneDigits.value.length >= 7
-})
+const canSubmitInvoice = computed(() => !!companyId.value)
 
 function money(v) {
   const n = Number(v)
@@ -170,35 +159,19 @@ function money(v) {
 
 async function loadAvailable() {
   loadError.value = ''
-  if (companyPickerTab.value === 'registered' && !companyId.value) {
-    available.value = []
-    return
-  }
-  if (companyPickerTab.value === 'counter' && walkInPhoneDigits.value.length < 7) {
+  if (!companyId.value) {
     available.value = []
     return
   }
   loadingServices.value = true
   try {
-    let data = []
-    if (companyPickerTab.value === 'registered') {
-      data = await fetchAvailableServicesForInvoice({
-        company_id: companyId.value,
-        period_year: Number(periodYear.value),
-        period_month: Number(periodMonth.value),
-        invoice_id: isEdit.value ? resolvedId.value : undefined,
-      })
-    } else {
-      data = await fetchAvailableWalkInServicesForInvoice({
-        contact_phone_key: walkInPhoneDigits.value,
-        period_year: Number(periodYear.value),
-        period_month: Number(periodMonth.value),
-        invoice_id: isEdit.value ? resolvedId.value : undefined,
-      })
-    }
+    const data = await fetchAvailableServicesForInvoice({
+      company_id: companyId.value,
+      invoice_id: isEdit.value ? resolvedId.value : undefined,
+      include_recurring: includeRecurringFixed.value,
+    })
     available.value = data
-    const valid = new Set(data.map((r) => r.id))
-    selectedIds.value = selectedIds.value.filter((id) => valid.has(id))
+    syncSelectionAfterLoad(data)
   } catch (e) {
     loadError.value = e.data?.message || e.message || 'No se pudieron cargar los servicios.'
     available.value = []
@@ -207,8 +180,13 @@ async function loadAvailable() {
   }
 }
 
-watch([companyId, periodYear, periodMonth, walkInPhoneInput, companyPickerTab], () => {
+watch(companyId, () => {
   if (skipWatch.value) return
+  loadAvailable()
+})
+
+watch(includeRecurringFixed, () => {
+  if (skipWatch.value || !companyId.value) return
   loadAvailable()
 })
 
@@ -217,7 +195,7 @@ async function bootstrap() {
   loading.value = true
   skipWatch.value = true
   try {
-    companies.value = await fetchAdminCompanies({ company_kind: 'registered' })
+    companies.value = await fetchAdminCompanies()
   } catch {
     companies.value = []
   }
@@ -233,26 +211,24 @@ async function bootstrap() {
       }
       if (invoice.value.company_id != null && invoice.value.company_id !== '') {
         companyId.value = String(invoice.value.company_id)
-        companyPickerTab.value = 'registered'
       } else {
-        companyPickerTab.value = 'counter'
-        const s0 = (invoice.value.services || [])[0]
-        walkInPhoneInput.value =
-          s0?.contact_phone_key || s0?.client_telefono || invoice.value.bill_to?.telefono || ''
+        loadError.value =
+          'Esta factura no está asociada a una empresa registrada; ya no se puede editar desde aquí. Elimínela y cree una factura nueva.'
+        loading.value = false
+        skipWatch.value = false
+        return
       }
-      periodYear.value = invoice.value.period_year
-      periodMonth.value = invoice.value.period_month
       selectedIds.value = (invoice.value.services || []).map((s) => s.id)
       await loadAvailable()
+      includeRecurringFixed.value = available.value.some(
+        (r) => r.is_recurring && selectedIds.value.includes(r.id)
+      )
     } catch (e) {
       loadError.value = e.data?.message || e.message || 'No se pudo cargar la factura.'
     }
   } else {
-    companyPickerTab.value = 'registered'
     companyId.value = ''
-    walkInPhoneInput.value = ''
-    periodYear.value = new Date().getFullYear()
-    periodMonth.value = new Date().getMonth() + 1
+    includeRecurringFixed.value = true
     invoice.value = null
     available.value = []
     selectedIds.value = []
@@ -272,32 +248,23 @@ watch(
 
 async function onSubmit() {
   saveError.value = ''
-  if (companyPickerTab.value === 'registered' && !companyId.value) {
+  if (!companyId.value) {
     saveError.value = 'Seleccione una empresa.'
-    return
-  }
-  if (companyPickerTab.value === 'counter' && walkInPhoneDigits.value.length < 7) {
-    saveError.value = 'Indique un teléfono con al menos 7 dígitos (venta sin alta).'
     return
   }
 
   const service_ids = [...selectedIds.value]
   if (service_ids.length === 0) {
-    saveError.value = 'Seleccione al menos un servicio del periodo.'
+    saveError.value = 'Seleccione al menos un servicio para la factura.'
     return
   }
 
   saving.value = true
   try {
-    const base = {
-      period_year: Number(periodYear.value),
-      period_month: Number(periodMonth.value),
+    const payload = {
+      company_id: Number(companyId.value),
       service_ids,
     }
-    const payload =
-      companyPickerTab.value === 'registered'
-        ? { ...base, company_id: Number(companyId.value) }
-        : { ...base, contact_phone_key: walkInPhoneDigits.value }
     let result
     if (isEdit.value) {
       result = await updateInvoice(resolvedId.value, payload)
@@ -331,16 +298,13 @@ async function onSubmit() {
           {{ isEdit ? (invoice?.code ? `Editar factura (${invoice.code})` : 'Editar factura') : 'Nueva factura' }}
         </h1>
         <p class="lede">
-          <strong>Nueva factura</strong>: empresa del directorio, borrador y luego aprobación; código <strong>FAC-YYMMDD-SIGLA</strong>.
-          La emisión directa de <strong>venta sin alta</strong> (aprobada al instante) está en el listado de facturas, pendientes o vista
-          «Solo ventas sin alta».
+          <strong>Nueva factura</strong>: solo empresas dadas de alta en el directorio. Se crea en <strong>borrador</strong>; código
+          <strong>FAC-YYMMDD-SIGLA</strong>. Tras aprobarla, sigue el flujo de envío y cobro.
         </p>
       </div>
     </header>
 
-    <p v-else class="lede lede--embedded">
-      Empresa (borrador). Venta sin alta aprobada de una vez: desde el listado de facturas.
-    </p>
+    <p v-else class="lede lede--embedded">Empresa registrada (borrador).</p>
 
     <p v-if="loadError && !loading" class="banner err">{{ loadError }}</p>
     <p v-if="saveError" class="banner err">{{ saveError }}</p>
@@ -348,49 +312,26 @@ async function onSubmit() {
     <p v-if="loading" class="muted">Cargando…</p>
 
     <form v-else class="card form" @submit.prevent="onSubmit">
-      <p v-if="companyPickerTab === 'counter'" class="tab-hint">
-        Borrador <strong>venta sin alta</strong>: mismo teléfono que al registrar el servicio sin empresa. Marque las líneas a incluir;
-        al aprobar desde el listado se cerrará el flujo. Para emitir aprobada de una vez use pendientes en facturas.
-      </p>
-
-      <div class="grid">
-        <label v-if="companyPickerTab === 'registered'" class="field field--wide">
-          <span>Empresa <abbr title="obligatorio">*</abbr></span>
-          <select v-model="companyId" class="input" required :disabled="saving">
-            <option value="" disabled>Seleccione…</option>
-            <option v-for="c in companiesInPickerTab" :key="c.id" :value="String(c.id)">
-              {{ companyOptionLabel(c) }}
-            </option>
-          </select>
-        </label>
-        <label v-else class="field field--wide">
-          <span>Teléfono del cliente <abbr title="obligatorio">*</abbr></span>
-          <input
-            v-model="walkInPhoneInput"
-            type="tel"
-            class="input"
-            autocomplete="tel"
-            placeholder="Ej. 300 123 4567"
-            :disabled="saving"
-          />
-        </label>
-        <label class="field">
-          <span>Año del periodo <abbr title="obligatorio">*</abbr></span>
-          <input v-model.number="periodYear" type="number" min="2000" max="2100" class="input" required :disabled="saving" />
-        </label>
-        <label class="field">
-          <span>Mes del periodo <abbr title="obligatorio">*</abbr></span>
-          <select v-model.number="periodMonth" class="input" required :disabled="saving">
-            <option v-for="[val, label] in MONTHS" :key="val" :value="val">{{ label }}</option>
-          </select>
-        </label>
-      </div>
+      <label class="field field--wide">
+        <span>Empresa <abbr title="obligatorio">*</abbr></span>
+        <select v-model="companyId" class="input" required :disabled="saving">
+          <option value="" disabled>Seleccione…</option>
+          <option v-for="c in companiesInPickerTab" :key="c.id" :value="String(c.id)">
+            {{ companyOptionLabel(c) }}
+          </option>
+        </select>
+      </label>
 
       <div v-if="canSubmitInvoice" class="services-block">
         <div class="services-head">
-          <h2>Servicios del periodo</h2>
+          <h2>Servicios de la empresa</h2>
+          <label class="recurring-check">
+            <input v-model="includeRecurringFixed" type="checkbox" :disabled="saving || loadingServices" />
+            <span>Incluir cargos fijos mensuales</span>
+          </label>
           <p class="hint">
-            Solo servicios visibles del periodo que aún no están en otra factura. Al editar un borrador, puede marcar líneas.
+            Se listan todos los servicios disponibles de la empresa (sin filtrar por mes). Solo líneas aún no ligadas a otra
+            factura.
           </p>
           <p v-if="loadingServices" class="muted">Cargando servicios…</p>
           <div
@@ -452,9 +393,12 @@ async function onSubmit() {
             <tbody>
               <tr v-for="row in sortedAvailable" :key="row.id">
                 <td class="chk">
-                  <input type="checkbox" :checked="isSelected(row.id)" @change="toggleId(row.id)" />
+                  <input type="checkbox" :checked="isSelected(row.id)" @change="toggleId(row)" />
                 </td>
-                <td class="mono">{{ row.code }}</td>
+                <td class="mono">
+                  {{ row.code }}
+                  <span v-if="row.is_recurring" class="tag-recurring">Fijo</span>
+                </td>
                 <td>{{ row.service_date }}</td>
                 <td class="desc">{{ row.description }}</td>
                 <td class="num">{{ money(row.amount) }}</td>
@@ -472,14 +416,8 @@ async function onSubmit() {
       <div class="actions">
         <button v-if="embedded" type="button" class="btn secondary" @click="emit('cancel')">Cancelar</button>
         <RouterLink v-else class="btn secondary" to="/admin/facturas">Cancelar</RouterLink>
-        <button
-          type="submit"
-          class="btn primary"
-          :disabled="saving || !canSubmitInvoice"
-        >
-          {{
-            saving ? 'Procesando…' : isEdit ? 'Guardar cambios' : 'Crear borrador'
-          }}
+        <button type="submit" class="btn primary" :disabled="saving || !canSubmitInvoice">
+          {{ saving ? 'Procesando…' : isEdit ? 'Guardar cambios' : 'Crear borrador' }}
         </button>
       </div>
     </form>
@@ -545,22 +483,21 @@ h1 {
   background: rgba(15, 23, 42, 0.55);
 }
 
-.tab-hint {
-  margin: 0 0 0.75rem;
-  font-size: 0.8rem;
-  color: #94a3b8;
-  line-height: 1.4;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
+.field--wide {
+  display: block;
   margin-bottom: 1.25rem;
 }
 
-.field--wide {
-  grid-column: 1 / -1;
+.tag-recurring {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  vertical-align: middle;
+  background: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
 }
 
 .field span {
@@ -585,9 +522,25 @@ h1 {
 }
 
 .services-head h2 {
-  margin: 0 0 0.35rem;
+  margin: 0 0 0.5rem;
   font-size: 1rem;
   color: #e2e8f0;
+}
+
+.recurring-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.88rem;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.recurring-check input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: #38bdf8;
 }
 
 .hint {
@@ -620,11 +573,6 @@ h1 {
 
 .bulk-link:hover {
   color: #7dd3fc;
-}
-
-.bulk-link:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 .bulk-sep {

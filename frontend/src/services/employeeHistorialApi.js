@@ -26,3 +26,12 @@ export function fetchEmpleadoHistorialAdmin(userId, period) {
   // `api()` devuelve el JSON raíz; el backend no envuelve en `{ data: ... }`.
   return api(`/admin/empleados/${userId}/historial?${s}`)
 }
+
+/**
+ * Historial del técnico autenticado (ruta del panel empleado).
+ * @param {{ year: number, month: number }} period
+ */
+export function fetchEmpleadoHistorialPropio(period) {
+  const s = historialQueryString(period)
+  return api(`/empleado/historial?${s}`)
+}

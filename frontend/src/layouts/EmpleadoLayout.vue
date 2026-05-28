@@ -61,7 +61,9 @@ function onDocClick(e) {
   }
 }
 
-onMounted(() => document.addEventListener('click', onDocClick))
+onMounted(async () => {
+  document.addEventListener('click', onDocClick)
+})
 onUnmounted(() => document.removeEventListener('click', onDocClick))
 
 async function salir() {
@@ -120,11 +122,25 @@ async function salir() {
             Historial
           </RouterLink>
           <RouterLink
+            to="/empleado/inventario"
+            class="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-800/80 hover:text-sky-300"
+            :class="{ 'bg-slate-800/60 text-sky-300': route.path.startsWith('/empleado/inventario') }"
+          >
+            Mi inventario
+          </RouterLink>
+          <RouterLink
             to="/empleado/registro-servicio"
             class="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-800/80 hover:text-sky-300"
-            :class="{ 'bg-slate-800/60 text-sky-300': route.path.startsWith('/empleado/registro-servicio') }"
+            :class="{ 'bg-slate-800/60 text-sky-300': route.path === '/empleado/registro-servicio' }"
           >
-            Registrar
+            Servicio
+          </RouterLink>
+          <RouterLink
+            to="/empleado/mantenimientos"
+            class="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-800/80 hover:text-sky-300"
+            :class="{ 'bg-slate-800/60 text-sky-300': route.path.startsWith('/empleado/mantenimientos') || route.path === '/empleado/registro-mantenimiento' }"
+          >
+            Mantenimiento
           </RouterLink>
         </nav>
         <RouterLink

@@ -9,6 +9,10 @@ use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\Service;
 use App\Models\ServiceCatalogSuggestion;
+use App\Models\User;
+use App\Jobs\SendCompanyWelcomeMailJob;
+use App\Services\ActivityLogger;
+use App\Services\MailTemplatePdfService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,7 +24,7 @@ class AdminCompanyController extends Controller
 {
     public function index(Request $request): AnonymousResourceCollection
     {
-        $q = Company::query()->orderByRaw('es_cliente_puntual asc')->orderBy('nombre');
+        $q = Company::query()->where('es_cliente_puntual', false)->orderBy('nombre');
 
         if ($request->filled('q')) {
             $raw = $request->string('q')->toString();
@@ -39,14 +43,25 @@ class AdminCompanyController extends Controller
             $q->where('estado', $request->string('estado')->toString());
         }
 
-        $kind = $request->query('company_kind');
-        if ($kind === 'quick') {
-            $q->where('es_cliente_puntual', true);
-        } elseif ($kind === 'registered') {
-            $q->where('es_cliente_puntual', false);
+        return CompanyResource::collection($q->get());
+    }
+
+    /**
+     * Indica si el PDF de bienvenida está listo para adjuntar (configuración + archivo legible).
+     * Sirve al panel para advertir al admin antes de crear una empresa con correo.
+     */
+    public function welcomeMailAttachmentReady(): JsonResponse
+    {
+        $pdf = app(MailTemplatePdfService::class);
+        if (! $pdf->configured(MailTemplatePdfService::KIND_WELCOME)) {
+            return response()->json(['welcome_pdf_ready' => false]);
         }
 
-        return CompanyResource::collection($q->get());
+        $path = $pdf->absolutePath(MailTemplatePdfService::KIND_WELCOME);
+        $meta = $pdf->meta(MailTemplatePdfService::KIND_WELCOME);
+        $ready = $path !== null && $meta !== null && is_readable($path);
+
+        return response()->json(['welcome_pdf_ready' => $ready]);
     }
 
     public function store(Request $request): JsonResponse
@@ -57,10 +72,17 @@ class AdminCompanyController extends Controller
             'nit' => ['nullable', 'string', 'max:100', Rule::unique('companies', 'nit')],
             'telefono' => ['nullable', 'string', 'max:64'],
             'correo' => ['nullable', 'string', 'email', 'max:255'],
+            'direccion' => ['required', 'string', 'max:512'],
             'estado' => ['sometimes', Rule::in([Company::ESTADO_ACTIVO, Company::ESTADO_INACTIVO])],
         ]);
 
         $nombre = trim($data['nombre']);
+        $direccion = trim($data['direccion']);
+        if ($direccion === '') {
+            throw ValidationException::withMessages([
+                'direccion' => ['La dirección no puede quedar vacía.'],
+            ]);
+        }
         $this->assertNombreUnique($nombre);
 
         $company = Company::query()->create([
@@ -69,10 +91,16 @@ class AdminCompanyController extends Controller
             'nit' => isset($data['nit']) && $data['nit'] !== '' ? trim($data['nit']) : null,
             'telefono' => isset($data['telefono']) && $data['telefono'] !== '' ? trim($data['telefono']) : null,
             'correo' => isset($data['correo']) && $data['correo'] !== '' ? trim($data['correo']) : null,
+            'direccion' => $direccion,
             'estado' => $data['estado'] ?? Company::ESTADO_ACTIVO,
         ]);
 
-        return (new CompanyResource($company))->response()->setStatusCode(201);
+        $welcomeMail = $this->scheduleCompanyWelcomeMail($company, $request->user());
+
+        return (new CompanyResource($company))
+            ->additional(['welcome_mail' => $welcomeMail])
+            ->response()
+            ->setStatusCode(201);
     }
 
     public function update(Request $request, Company $company): CompanyResource
@@ -94,10 +122,19 @@ class AdminCompanyController extends Controller
             ],
             'telefono' => ['nullable', 'string', 'max:64'],
             'correo' => ['nullable', 'string', 'email', 'max:255'],
+            'direccion' => ['required', 'string', 'max:512'],
             'estado' => ['required', Rule::in([Company::ESTADO_ACTIVO, Company::ESTADO_INACTIVO])],
         ]);
 
+        $hadCorreo = $company->correo !== null && trim((string) $company->correo) !== '';
+
         $nombre = trim($data['nombre']);
+        $direccion = trim($data['direccion']);
+        if ($direccion === '') {
+            throw ValidationException::withMessages([
+                'direccion' => ['La dirección no puede quedar vacía.'],
+            ]);
+        }
         $this->assertNombreUnique($nombre, $company->id);
 
         $company->nombre = $nombre;
@@ -105,10 +142,22 @@ class AdminCompanyController extends Controller
         $company->nit = isset($data['nit']) && $data['nit'] !== '' ? trim($data['nit']) : null;
         $company->telefono = isset($data['telefono']) && $data['telefono'] !== '' ? trim($data['telefono']) : null;
         $company->correo = isset($data['correo']) && $data['correo'] !== '' ? trim($data['correo']) : null;
+        $company->direccion = $direccion;
         $company->estado = $data['estado'];
         $company->save();
 
-        return new CompanyResource($company);
+        $hasCorreo = $company->correo !== null && trim((string) $company->correo) !== '';
+        $welcomeMail = null;
+        if (! $hadCorreo && $hasCorreo) {
+            $welcomeMail = $this->scheduleCompanyWelcomeMail($company->fresh(), $request->user());
+        }
+
+        $resource = new CompanyResource($company->fresh());
+        if ($welcomeMail !== null) {
+            $resource->additional(['welcome_mail' => $welcomeMail]);
+        }
+
+        return $resource;
     }
 
     public function updateEstado(Request $request, Company $company): CompanyResource
@@ -253,6 +302,44 @@ class AdminCompanyController extends Controller
         $n = is_numeric($value) ? (float) $value : 0.0;
 
         return number_format($n, 2, '.', '');
+    }
+
+    /**
+     * Encola el envío del correo de bienvenida tras responder al cliente (afterResponse).
+     *
+     * @return array{queued: bool, sent: bool, skipped_reason: string|null, to: string|null, detail: string|null}
+     */
+    private function scheduleCompanyWelcomeMail(Company $company, ?User $actor): array
+    {
+        $correo = $company->correo;
+        if ($correo === null || trim($correo) === '') {
+            return [
+                'queued' => false,
+                'sent' => false,
+                'skipped_reason' => 'no_correo',
+                'to' => null,
+                'detail' => null,
+            ];
+        }
+
+        $to = strtolower(trim($correo));
+        $companyLabel = $company->nombre.' (ID '.$company->id.')';
+
+        ActivityLogger::log(
+            $actor,
+            'correo_bienvenida_programado',
+            'Programó el envío del correo de bienvenida a '.$to.' para la empresa '.$companyLabel.'.'
+        );
+
+        SendCompanyWelcomeMailJob::dispatch($company->id, $actor?->id)->afterResponse();
+
+        return [
+            'queued' => true,
+            'sent' => false,
+            'skipped_reason' => null,
+            'to' => $to,
+            'detail' => null,
+        ];
     }
 
     private function assertNombreUnique(string $nombre, ?int $ignoreId = null): void

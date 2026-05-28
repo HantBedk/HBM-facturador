@@ -3,8 +3,8 @@
 namespace App\Support;
 
 use App\Models\Invoice;
+use App\Services\SystemOrganizationProfileService;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\File;
 
 /**
  * Estructura de datos para PDF y respuestas JSON de factura (consulta pública y panel admin).
@@ -86,6 +86,11 @@ class InvoicePdfPayload
         $issuedTimeLabel = $issuedTz ? $issuedTz->format('g:i A') : '';
         $periodLabel = self::invoicePeriodLabel((int) $invoice->period_month, (int) $invoice->period_year);
 
+        $companyDireccion = '';
+        if ($invoice->company !== null) {
+            $companyDireccion = trim((string) ($invoice->company->direccion ?? ''));
+        }
+
         return [
             'issuer' => self::issuerBlock(),
             'invoice' => [
@@ -113,7 +118,7 @@ class InvoicePdfPayload
                 'correo' => $invoice->company?->correo,
                 /** Reservado; el PDF ya no muestra nombres agregados aquí (técnico por línea en `services`). */
                 'contact' => null,
-                'direccion' => data_get($invoice->company, 'direccion'),
+                'direccion' => $companyDireccion !== '' ? $companyDireccion : null,
             ],
             'services' => $services,
             'products' => [],
@@ -139,58 +144,7 @@ class InvoicePdfPayload
      */
     private static function issuerBlock(): array
     {
-        $cfg = config('billing.issuer', []);
-
-        return [
-            'nombre' => (string) ($cfg['nombre'] ?? ''),
-            'nit' => (string) ($cfg['nit'] ?? ''),
-            'direccion' => (string) ($cfg['direccion'] ?? ''),
-            'telefono' => (string) ($cfg['telefono'] ?? ''),
-            'correo' => (string) ($cfg['correo'] ?? ''),
-            'regimen' => (string) ($cfg['regimen'] ?? ''),
-            'logo_data_uri' => self::logoDataUri(),
-        ];
-    }
-
-    private static function logoDataUri(): ?string
-    {
-        $path = (string) config('billing.logo_path', '');
-        if ($path === '') {
-            return null;
-        }
-
-        $full = self::isAbsolutePath($path)
-            ? $path
-            : public_path(ltrim(str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $path), DIRECTORY_SEPARATOR));
-
-        if (! is_readable($full)) {
-            return null;
-        }
-
-        $ext = strtolower(pathinfo($full, PATHINFO_EXTENSION));
-        $mime = match ($ext) {
-            'png' => 'image/png',
-            'jpg', 'jpeg' => 'image/jpeg',
-            'gif' => 'image/gif',
-            'webp' => 'image/webp',
-            default => 'image/png',
-        };
-
-        $binary = @File::get($full);
-        if ($binary === false || $binary === '') {
-            return null;
-        }
-
-        return 'data:'.$mime.';base64,'.base64_encode($binary);
-    }
-
-    private static function isAbsolutePath(string $path): bool
-    {
-        if (str_starts_with($path, '/') || str_starts_with($path, '\\')) {
-            return true;
-        }
-
-        return (bool) preg_match('/^[A-Za-z]:[\\\\\\/]/', $path);
+        return app(SystemOrganizationProfileService::class)->issuerBlockForInvoice();
     }
 
     public static function invoiceStatusLabel(string $status): string

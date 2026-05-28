@@ -28,6 +28,20 @@ class EmployeeHistorialController extends Controller
     }
 
     /**
+     * Historial del técnico autenticado (para la vista del empleado).
+     */
+    public function forSelf(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        [$year, $month] = $this->validatedYearMonth($request);
+        $filters = $this->validatedHistorialFilters($request);
+
+        return response()->json($this->buildPayload($user, $year, $month, $filters));
+    }
+
+    /**
      * @return array{0: int, 1: int}
      */
     private function validatedYearMonth(Request $request): array

@@ -13,6 +13,8 @@ import { fetchTechnicianPendingServices, postTechnicianBatchPay } from '@/servic
 import { useAuthStore } from '@/stores/auth'
 import { useUiDialogStore } from '@/stores/uiDialog'
 import { tableAriaSort, tableSortIndicator } from '@/utils/tableSort.js'
+import { formatDate } from './companiesListHelpers.js'
+import { formatMoneyRef, formatPayServiceDate, todayYmd } from './empleadosListHelpers.js'
 import AdminEmpleadoFichaPanel from '@/components/admin/AdminEmpleadoFichaPanel.vue'
 import AdminAssignServicePanel from '@/components/admin/AdminAssignServicePanel.vue'
 
@@ -215,13 +217,6 @@ async function onServiceAssigned(created) {
 
 const modalTitle = computed(() => (modalMode.value === 'create' ? 'Nuevo Empleado' : 'Editar usuario'))
 
-function formatDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
 async function onSubmitModal() {
   modalError.value = ''
   fieldErrors.value = {}
@@ -348,17 +343,6 @@ const pageRefPendingTotal = computed(() => {
   return sum
 })
 
-function formatMoneyRef(v) {
-  if (v === undefined || v === null || v === '') return '—'
-  const n = Number(v)
-  if (Number.isNaN(n)) return '—'
-  return new Intl.NumberFormat('es-CO', {
-    style: 'currency',
-    currency: 'COP',
-    maximumFractionDigits: 0,
-  }).format(n)
-}
-
 const payModalOpen = ref(false)
 const payTarget = ref(null)
 const payServices = ref([])
@@ -367,11 +351,6 @@ const paySaving = ref(false)
 const payError = ref('')
 const payDate = ref('')
 const selectedServiceIds = ref([])
-
-function todayYmd() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 
 const paySelectedTotal = computed(() => {
   const set = new Set(selectedServiceIds.value)
@@ -449,13 +428,6 @@ async function submitPayModal() {
   } finally {
     paySaving.value = false
   }
-}
-
-function formatPayServiceDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso + 'T12:00:00')
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 const fichaOpen = ref(false)

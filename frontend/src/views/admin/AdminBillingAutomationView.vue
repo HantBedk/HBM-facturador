@@ -2,10 +2,19 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import {
+  downloadBillingExportCsv,
   fetchBillingAutomationSettings,
+  importRecurringFixedChargesFromSpreadsheet,
   updateBillingAutomationSettings,
 } from '@/services/adminBillingAutomationApi.js'
+import { useUiDialogStore } from '@/stores/uiDialog'
+import {
+  fetchTechnicianCatalogDiscount,
+  updateTechnicianCatalogDiscount,
+} from '@/services/servicesApi.js'
+import { useAuthStore } from '@/stores/auth.js'
 
+const auth = useAuthStore()
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
@@ -17,6 +26,29 @@ const draftGenerationDay = ref(18)
 const draftGenerationPeriod = ref('current')
 /** @type {import('vue').Ref<Record<string, boolean>>} */
 const storedInDatabase = ref({})
+const MARGIN_PERCENT_MAX = 95
+
+const technicianServiceDiscountPercent = ref(10)
+const technicianInventorySaleDiscountPercent = ref(10)
+const technicianInventoryRentalDiscountPercent = ref(10)
+
+const marginFloorService = ref(5)
+const marginFloorSale = ref(10)
+const marginFloorRental = ref(8)
+const canEditMarginFloors = ref(false)
+
+const techDiscountSaving = ref(false)
+const techDiscountError = ref('')
+const techDiscountOk = ref('')
+
+const uiDialog = useUiDialogStore()
+
+const invoicesExportBusy = ref(false)
+const recurringExportBusy = ref(false)
+const recurringImportBusy = ref(false)
+const recurringImportFileRef = ref(null)
+const excelError = ref('')
+const excelOk = ref('')
 
 const passwordModalOpen = ref(false)
 const modalPassword = ref('')
@@ -29,6 +61,8 @@ const dayOptions = computed(() =>
     label: String(i + 1),
   })),
 )
+
+const marginFloorsEditable = computed(() => canEditMarginFloors.value)
 
 async function load() {
   error.value = ''
@@ -47,6 +81,116 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function clampPct(n, min, max = MARGIN_PERCENT_MAX) {
+  const x = Number(n)
+  if (!Number.isFinite(x)) return min
+  return Math.min(max, Math.max(min, Math.round(x * 100) / 100))
+}
+
+async function loadTechnicianDiscount() {
+  techDiscountError.value = ''
+  try {
+    const d = await fetchTechnicianCatalogDiscount()
+    const fSvc = Number(d?.technician_service_margin_floor_percent ?? 5)
+    const fSale = Number(d?.technician_inventory_sale_margin_floor_percent ?? 10)
+    const fRent = Number(d?.technician_inventory_rental_margin_floor_percent ?? 8)
+    marginFloorService.value = clampPct(fSvc, 0, MARGIN_PERCENT_MAX)
+    marginFloorSale.value = clampPct(fSale, 0, MARGIN_PERCENT_MAX)
+    marginFloorRental.value = clampPct(fRent, 0, MARGIN_PERCENT_MAX)
+    canEditMarginFloors.value = d?.can_edit_margin_floors === true || auth.user?.rol === 'super_admin'
+
+    const svc = Number(d?.technician_service_discount_percent ?? d?.technician_catalog_discount_percent ?? 10)
+    const sale = Number(d?.technician_inventory_sale_discount_percent ?? 10)
+    const rental = Number(d?.technician_inventory_rental_discount_percent ?? 10)
+    technicianServiceDiscountPercent.value = clampPct(svc, marginFloorService.value)
+    technicianInventorySaleDiscountPercent.value = clampPct(sale, marginFloorSale.value)
+    technicianInventoryRentalDiscountPercent.value = clampPct(rental, marginFloorRental.value)
+  } catch (e) {
+    techDiscountError.value = e.data?.message || e.message || 'No se pudo cargar la configuración de márgenes.'
+  }
+}
+
+function clampMarginFieldsToFloors() {
+  technicianServiceDiscountPercent.value = clampPct(
+    technicianServiceDiscountPercent.value,
+    marginFloorService.value,
+  )
+  technicianInventorySaleDiscountPercent.value = clampPct(
+    technicianInventorySaleDiscountPercent.value,
+    marginFloorSale.value,
+  )
+  technicianInventoryRentalDiscountPercent.value = clampPct(
+    technicianInventoryRentalDiscountPercent.value,
+    marginFloorRental.value,
+  )
+}
+
+async function saveTechnicianDiscount() {
+  techDiscountOk.value = ''
+  techDiscountError.value = ''
+  clampMarginFieldsToFloors()
+  techDiscountSaving.value = true
+  try {
+    const payload = {
+      technician_service_discount_percent: clampPct(
+        technicianServiceDiscountPercent.value,
+        marginFloorService.value,
+      ),
+      technician_inventory_sale_discount_percent: clampPct(
+        technicianInventorySaleDiscountPercent.value,
+        marginFloorSale.value,
+      ),
+      technician_inventory_rental_discount_percent: clampPct(
+        technicianInventoryRentalDiscountPercent.value,
+        marginFloorRental.value,
+      ),
+    }
+    if (marginFloorsEditable.value) {
+      payload.technician_service_margin_floor_percent = clampPct(marginFloorService.value, 0, MARGIN_PERCENT_MAX)
+      payload.technician_inventory_sale_margin_floor_percent = clampPct(marginFloorSale.value, 0, MARGIN_PERCENT_MAX)
+      payload.technician_inventory_rental_margin_floor_percent = clampPct(marginFloorRental.value, 0, MARGIN_PERCENT_MAX)
+    }
+    await updateTechnicianCatalogDiscount(payload)
+    await loadTechnicianDiscount()
+    techDiscountOk.value = marginFloorsEditable.value
+      ? 'Pisos y márgenes guardados. Quedan aplicados al facturar.'
+      : 'Márgenes aplicados guardados. Quedan aplicados al facturar.'
+  } catch (e) {
+    techDiscountError.value = e.data?.message || e.message || 'No se pudo guardar.'
+    if (e.data?.errors) {
+      const first = Object.values(e.data.errors).flat()[0]
+      if (first) techDiscountError.value = first
+    }
+  } finally {
+    techDiscountSaving.value = false
+  }
+}
+
+watch(marginFloorService, (f) => {
+  const fl = clampPct(f, 0, MARGIN_PERCENT_MAX)
+  if (Number(technicianServiceDiscountPercent.value) < fl) technicianServiceDiscountPercent.value = fl
+})
+watch(marginFloorSale, (f) => {
+  const fl = clampPct(f, 0, MARGIN_PERCENT_MAX)
+  if (Number(technicianInventorySaleDiscountPercent.value) < fl) technicianInventorySaleDiscountPercent.value = fl
+})
+watch(marginFloorRental, (f) => {
+  const fl = clampPct(f, 0, MARGIN_PERCENT_MAX)
+  if (Number(technicianInventoryRentalDiscountPercent.value) < fl) technicianInventoryRentalDiscountPercent.value = fl
+})
+
+function onFloorBlur() {
+  if (!marginFloorsEditable.value) return
+  marginFloorService.value = clampPct(marginFloorService.value, 0, MARGIN_PERCENT_MAX)
+  marginFloorSale.value = clampPct(marginFloorSale.value, 0, MARGIN_PERCENT_MAX)
+  marginFloorRental.value = clampPct(marginFloorRental.value, 0, MARGIN_PERCENT_MAX)
+  clampMarginFieldsToFloors()
+}
+
+function onMarginBlur() {
+  clampMarginFieldsToFloors()
 }
 
 function openSavePasswordModal() {
@@ -106,6 +250,104 @@ function usingDb(key) {
   return !!storedInDatabase.value[key]
 }
 
+function triggerCsvDownload(blob, filename) {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
+async function exportInvoicesCsv() {
+  excelError.value = ''
+  excelOk.value = ''
+  invoicesExportBusy.value = true
+  try {
+    const { blob, filename } = await downloadBillingExportCsv('/admin/export/invoices')
+    triggerCsvDownload(blob, filename)
+  } catch (e) {
+    excelError.value = e.message || 'No se pudo exportar facturas.'
+  } finally {
+    invoicesExportBusy.value = false
+  }
+}
+
+async function downloadRecurringTemplate() {
+  excelError.value = ''
+  recurringExportBusy.value = true
+  try {
+    const { blob, filename } = await downloadBillingExportCsv('/admin/export/recurring-fixed-charges/template')
+    triggerCsvDownload(blob, filename)
+  } catch (e) {
+    excelError.value = e.message || 'No se pudo descargar la plantilla.'
+  } finally {
+    recurringExportBusy.value = false
+  }
+}
+
+async function downloadRecurringExport() {
+  excelError.value = ''
+  recurringExportBusy.value = true
+  try {
+    const { blob, filename } = await downloadBillingExportCsv('/admin/export/recurring-fixed-charges')
+    triggerCsvDownload(blob, filename)
+  } catch (e) {
+    excelError.value = e.message || 'No se pudo exportar cargos fijos.'
+  } finally {
+    recurringExportBusy.value = false
+  }
+}
+
+function formatRecurringImportSummary(data) {
+  const lines = [data?.message || 'Importación finalizada.']
+  const issues = data?.issues
+  if (issues?.length) {
+    lines.push('')
+    lines.push('Detalle por fila (máx. 20):')
+    issues.slice(0, 20).forEach((i) => {
+      lines.push(`· Fila ${i.line}: ${i.message}`)
+    })
+    if (issues.length > 20) {
+      lines.push(`… y ${issues.length - 20} más.`)
+    }
+  }
+  return lines.join('\n')
+}
+
+async function onRecurringImportFile(ev) {
+  const input = ev.target
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (file.size < 1) {
+    excelError.value = 'El archivo está vacío. Elija otro CSV o Excel.'
+    return
+  }
+  recurringImportBusy.value = true
+  excelError.value = ''
+  excelOk.value = ''
+  try {
+    const data = await importRecurringFixedChargesFromSpreadsheet(file)
+    excelOk.value = data?.message || 'Importación completada.'
+    await uiDialog.alert({
+      title: 'Cargos fijos mensuales',
+      message: formatRecurringImportSummary(data),
+    })
+  } catch (e) {
+    excelError.value = e.data?.message || e.message || 'No se pudo importar.'
+    const fe = e.data?.errors?.file
+    if (Array.isArray(fe) && fe[0]) {
+      excelError.value = fe[0]
+    }
+  } finally {
+    recurringImportBusy.value = false
+  }
+}
+
+function triggerRecurringImportPick() {
+  recurringImportFileRef.value?.click()
+}
+
 function onDocumentEscape(ev) {
   if (ev.key !== 'Escape' || !passwordModalOpen.value || saving.value) return
   ev.preventDefault()
@@ -117,23 +359,25 @@ watch(passwordModalOpen, (open) => {
   else document.removeEventListener('keydown', onDocumentEscape)
 })
 
-onMounted(load)
+onMounted(async () => {
+  await Promise.all([load(), loadTechnicianDiscount()])
+})
 onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
 </script>
 
 <template>
-  <section class="page">
+  <section class="billing-page">
     <header class="head">
       <div>
         <p class="crumb">
           <RouterLink :to="{ name: 'admin-facturas' }">Facturas</RouterLink>
         </p>
-        <h1>Facturación automática (borradores)</h1>
+        <h1>Facturación y Margen</h1>
         <p class="lede">
-          Aquí solo se programa la <strong>creación automática de borradores</strong> (agrupa servicios sin facturar). El
-          envío automático de facturas ya aprobadas sigue en el servidor (<code class="inline">AUTOMATION_CUTOFF_*</code>).
-          Al pulsar <strong>Guardar en el sistema</strong> se pedirá su contraseña; el cambio queda en
-          <strong>Configuración → Historial</strong>.
+          Configure la <strong>programación de borradores</strong> (agrupa servicios sin facturar) y los
+          <strong>márgenes globales</strong> referencia → factura. El envío automático de facturas ya aprobadas sigue en el
+          servidor (<code class="inline">AUTOMATION_CUTOFF_*</code>). Al pulsar <strong>Guardar en el sistema</strong> (solo
+          borradores) se pedirá su contraseña; el cambio queda en <strong>Configuración → Historial</strong>.
         </p>
       </div>
     </header>
@@ -144,49 +388,275 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
 
     <div v-if="loading" class="muted pad">Cargando…</div>
 
-    <div v-else class="card">
-      <label class="toggle-row">
-        <input v-model="draftGenerationEnabled" type="checkbox" class="chk" />
-        <span class="toggle-txt">
-          <strong>Generar borradores automáticamente</strong>
-          <span class="sub">Si está desactivado, no se crearán borradores por el programador diario.</span>
-        </span>
-      </label>
+    <div v-else class="billing-stack">
+      <div class="billing-main-col">
+      <section class="card margin-board" aria-labelledby="margins-heading">
+        <header class="margin-board-head">
+          <h2 id="margins-heading" class="margin-title">Márgenes globales</h2>
+          <p class="margin-board-lede field-hint">
+            El <strong>piso mínimo</strong> es el porcentaje que no se puede rebajar al guardar (cada tipo es
+            independiente). El <strong>margen aplicado</strong> debe estar entre ese piso y
+            {{ MARGIN_PERCENT_MAX }}&nbsp;%. Al facturar: facturable = referencia ÷ ((100 − <em>p</em>) / 100).
+            <template v-if="!marginFloorsEditable">
+              Solo un <strong>super administrador</strong> puede cambiar los pisos; usted puede ajustar los márgenes aplicados.
+            </template>
+          </p>
+        </header>
 
-      <div class="field">
-        <label class="lab" for="draft-day">Día del mes para crear borradores</label>
-        <div class="row-day">
-          <select id="draft-day" v-model.number="draftGenerationDay" class="select">
-            <option v-for="opt in dayOptions" :key="opt.value" :value="opt.value">
-              Día {{ opt.label }}
-            </option>
-          </select>
-          <span v-if="!usingDb('draft_generation_day')" class="badge badge-muted">valor por defecto (.env) hasta guardar</span>
-          <span v-else class="badge badge-ok">guardado en panel</span>
+        <div class="margin-table-panel">
+          <div class="margin-table-wrap">
+            <div class="margin-table" role="table" aria-label="Márgenes por tipo; porcentaje máximo 95">
+            <div class="margin-row margin-row-head" role="row">
+              <div class="margin-cell margin-cell-type" role="columnheader">Tipo</div>
+              <div class="margin-cell margin-cell-num" role="columnheader">Piso mínimo (%)</div>
+              <div class="margin-cell margin-cell-num" role="columnheader">Margen aplicado (%)</div>
+            </div>
+
+            <div class="margin-row margin-data" role="row">
+              <div class="margin-cell margin-cell-type" role="cell">
+                <span class="mg-name">Servicio</span>
+                <span class="mg-desc">Catálogo sin override, «Otro», trabajos estándar.</span>
+              </div>
+              <div class="margin-cell margin-cell-num" role="cell">
+                <label class="mg-label" for="floor-svc">
+                  <span class="mg-label-text">Piso</span>
+                  <input
+                    id="floor-svc"
+                    v-model.number="marginFloorService"
+                    type="number"
+                    min="0"
+                    :max="MARGIN_PERCENT_MAX"
+                    step="0.5"
+                    class="select mg-input"
+                    :disabled="!marginFloorsEditable"
+                    :title="marginFloorsEditable ? '' : 'Solo super administrador'"
+                    @blur="onFloorBlur"
+                  />
+                </label>
+              </div>
+              <div class="margin-cell margin-cell-num" role="cell">
+                <label class="mg-label" for="pct-svc">
+                  <span class="mg-label-text">Margen</span>
+                  <input
+                    id="pct-svc"
+                    v-model.number="technicianServiceDiscountPercent"
+                    type="number"
+                    :min="marginFloorService"
+                    :max="MARGIN_PERCENT_MAX"
+                    step="0.5"
+                    class="select mg-input"
+                    @blur="onMarginBlur"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div class="margin-row margin-data" role="row">
+              <div class="margin-cell margin-cell-type" role="cell">
+                <span class="mg-name">Venta inventario</span>
+                <span class="mg-desc">Registros y líneas de venta de equipo.</span>
+              </div>
+              <div class="margin-cell margin-cell-num" role="cell">
+                <label class="mg-label" for="floor-sale">
+                  <span class="mg-label-text">Piso</span>
+                  <input
+                    id="floor-sale"
+                    v-model.number="marginFloorSale"
+                    type="number"
+                    min="0"
+                    :max="MARGIN_PERCENT_MAX"
+                    step="0.5"
+                    class="select mg-input"
+                    :disabled="!marginFloorsEditable"
+                    :title="marginFloorsEditable ? '' : 'Solo super administrador'"
+                    @blur="onFloorBlur"
+                  />
+                </label>
+              </div>
+              <div class="margin-cell margin-cell-num" role="cell">
+                <label class="mg-label" for="pct-sale">
+                  <span class="mg-label-text">Margen</span>
+                  <input
+                    id="pct-sale"
+                    v-model.number="technicianInventorySaleDiscountPercent"
+                    type="number"
+                    :min="marginFloorSale"
+                    :max="MARGIN_PERCENT_MAX"
+                    step="0.5"
+                    class="select mg-input"
+                    @blur="onMarginBlur"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div class="margin-row margin-data" role="row">
+              <div class="margin-cell margin-cell-type" role="cell">
+                <span class="mg-name">Alquiler inventario</span>
+                <span class="mg-desc">Registros y líneas de alquiler de equipo.</span>
+              </div>
+              <div class="margin-cell margin-cell-num" role="cell">
+                <label class="mg-label" for="floor-rent">
+                  <span class="mg-label-text">Piso</span>
+                  <input
+                    id="floor-rent"
+                    v-model.number="marginFloorRental"
+                    type="number"
+                    min="0"
+                    :max="MARGIN_PERCENT_MAX"
+                    step="0.5"
+                    class="select mg-input"
+                    :disabled="!marginFloorsEditable"
+                    :title="marginFloorsEditable ? '' : 'Solo super administrador'"
+                    @blur="onFloorBlur"
+                  />
+                </label>
+              </div>
+              <div class="margin-cell margin-cell-num" role="cell">
+                <label class="mg-label" for="pct-rent">
+                  <span class="mg-label-text">Margen</span>
+                  <input
+                    id="pct-rent"
+                    v-model.number="technicianInventoryRentalDiscountPercent"
+                    type="number"
+                    :min="marginFloorRental"
+                    :max="MARGIN_PERCENT_MAX"
+                    step="0.5"
+                    class="select mg-input"
+                    @blur="onMarginBlur"
+                  />
+                </label>
+              </div>
+            </div>
+            </div>
+          </div>
         </div>
-        <p class="field-hint">Ejemplo: día 18 → cada mes, en la fecha 18 (o el último día del mes si fuera menor), a las ~05:00.</p>
-      </div>
 
-      <div class="field">
-        <label class="lab" for="draft-period">¿Qué servicios entran en el borrador automático?</label>
-        <select id="draft-period" v-model="draftGenerationPeriod" class="select wide">
-          <option value="current">
-            Recomendado: fecha de servicio en el mes calendario en curso (mismo mes que «hoy»)
-          </option>
-          <option value="previous">Fecha de servicio en el mes calendario anterior (cierre del mes pasado)</option>
-        </select>
-        <p class="field-hint">
-          El sistema usa la <strong>fecha del servicio</strong> (no la fecha de hoy al crear el borrador) para decidir si
-          entra en ese mes de facturación. Lo habitual es dejar
-          <strong>mes en curso</strong> para facturar lo trabajado en el mes que corre.
+        <div class="margin-footer-actions">
+          <button type="button" class="btn primary" :disabled="techDiscountSaving" @click="saveTechnicianDiscount">
+            {{
+              techDiscountSaving
+                ? 'Guardando…'
+                : marginFloorsEditable
+                  ? 'Guardar pisos y márgenes'
+                  : 'Guardar márgenes aplicados'
+            }}
+          </button>
+        </div>
+        <p v-if="techDiscountError" class="banner err banner-tight">{{ techDiscountError }}</p>
+        <p v-else-if="techDiscountOk" class="banner ok banner-tight">{{ techDiscountOk }}</p>
+      </section>
+
+      <section class="card excel-card" aria-labelledby="excel-heading">
+        <h2 id="excel-heading" class="card-section-title">Excel / CSV (facturación)</h2>
+        <p class="field-hint excel-lede">
+          Use el mismo formato para <strong>descargar y volver a subir</strong> cargos fijos mensuales por empresa (columnas:
+          NIT, descripción, importe, tipo, activo, orden). Las facturas se exportan solo para consulta en hoja de cálculo.
         </p>
+        <p v-if="excelError" class="banner err banner-tight">{{ excelError }}</p>
+        <p v-else-if="excelOk" class="banner ok banner-tight">{{ excelOk }}</p>
+
+        <div class="excel-block">
+          <h3 class="excel-subtitle">Facturas</h3>
+          <button
+            type="button"
+            class="btn secondary"
+            :disabled="invoicesExportBusy"
+            @click="exportInvoicesCsv"
+          >
+            {{ invoicesExportBusy ? 'Exportando…' : 'Exportar listado de facturas (CSV)' }}
+          </button>
+        </div>
+
+        <div class="excel-block">
+          <h3 class="excel-subtitle">Cargos fijos mensuales</h3>
+          <p class="field-hint">
+            Edite en Excel la plantilla o el export actual y súbalo de nuevo. Si el NIT y la descripción coinciden con un cargo
+            existente de esa empresa, se actualiza; si no, se crea.
+          </p>
+          <div class="excel-actions">
+            <button
+              type="button"
+              class="btn secondary"
+              :disabled="recurringExportBusy"
+              @click="downloadRecurringTemplate"
+            >
+              Descargar plantilla
+            </button>
+            <button
+              type="button"
+              class="btn secondary"
+              :disabled="recurringExportBusy"
+              @click="downloadRecurringExport"
+            >
+              {{ recurringExportBusy ? 'Descargando…' : 'Exportar cargos actuales' }}
+            </button>
+            <input
+              ref="recurringImportFileRef"
+              type="file"
+              class="excel-file-input"
+              accept=".csv,.txt,.xlsx,.xls,.xlsm"
+              :disabled="recurringImportBusy"
+              @change="onRecurringImportFile"
+            />
+            <button
+              type="button"
+              class="btn secondary"
+              :disabled="recurringImportBusy"
+              @click="triggerRecurringImportPick"
+            >
+              {{ recurringImportBusy ? 'Importando…' : 'Subir Excel o CSV…' }}
+            </button>
+          </div>
+        </div>
+      </section>
       </div>
 
-      <div class="actions">
-        <button type="button" class="btn primary" :disabled="saving" @click="openSavePasswordModal">
-          Guardar en el sistema
-        </button>
-      </div>
+      <aside class="card billing-primary billing-side-card" aria-labelledby="drafts-heading">
+        <h2 id="drafts-heading" class="card-section-title">Programación de borradores</h2>
+        <label class="toggle-row">
+          <input v-model="draftGenerationEnabled" type="checkbox" class="chk" />
+          <span class="toggle-txt">
+            <strong>Generar borradores automáticamente</strong>
+            <span class="sub">Si está desactivado, no se crearán borradores por el programador diario.</span>
+          </span>
+        </label>
+
+        <div class="field">
+          <label class="lab" for="draft-day">Día del mes para crear borradores</label>
+          <div class="row-day">
+            <select id="draft-day" v-model.number="draftGenerationDay" class="select">
+              <option v-for="opt in dayOptions" :key="opt.value" :value="opt.value">
+                Día {{ opt.label }}
+              </option>
+            </select>
+            <span v-if="!usingDb('draft_generation_day')" class="badge badge-muted">valor por defecto (.env) hasta guardar</span>
+            <span v-else class="badge badge-ok">guardado en panel</span>
+          </div>
+          <p class="field-hint">Ejemplo: día 18 → cada mes, en la fecha 18 (o el último día del mes si fuera menor), a las ~05:00.</p>
+        </div>
+
+        <div class="field field-last">
+          <label class="lab" for="draft-period">¿Qué servicios entran en el borrador automático?</label>
+          <select id="draft-period" v-model="draftGenerationPeriod" class="select wide">
+            <option value="current">
+              Recomendado: fecha de servicio en el mes calendario en curso (mismo mes que «hoy»)
+            </option>
+            <option value="previous">Fecha de servicio en el mes calendario anterior (cierre del mes pasado)</option>
+          </select>
+          <p class="field-hint">
+            El sistema usa la <strong>fecha del servicio</strong> (no la fecha de hoy al crear el borrador) para decidir si
+            entra en ese mes de facturación. Lo habitual es dejar
+            <strong>mes en curso</strong> para facturar lo trabajado en el mes que corre.
+          </p>
+        </div>
+
+        <div class="actions">
+          <button type="button" class="btn primary" :disabled="saving" @click="openSavePasswordModal">
+            Guardar en el sistema
+          </button>
+        </div>
+      </aside>
     </div>
 
     <Teleport to="body">
@@ -199,7 +669,7 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
         <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="billing-save-pw-title">
           <h2 id="billing-save-pw-title" class="modal-title">Confirmar guardado</h2>
           <p class="modal-lede">
-            Introduzca la contraseña de su usuario administrador para aplicar los cambios en la facturación automática.
+            Introduzca la contraseña de su usuario administrador para guardar la programación de borradores automáticos.
           </p>
           <label class="lab" for="billing-modal-pw">Contraseña</label>
           <input
@@ -228,13 +698,15 @@ onUnmounted(() => document.removeEventListener('keydown', onDocumentEscape))
 </template>
 
 <style scoped>
-.page {
-  max-width: 720px;
+.billing-page {
+  width: 100%;
+  max-width: 96rem;
   margin: 0 auto;
+  padding: 0 0 2rem;
 }
 
 .head {
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .crumb {
@@ -259,8 +731,10 @@ h1 {
 
 .lede {
   margin: 0;
-  max-width: 42rem;
+  width: 100%;
+  max-width: none;
   font-size: 0.88rem;
+  line-height: 1.55;
   color: #94a3b8;
 }
 
@@ -274,9 +748,11 @@ h1 {
 
 .hint {
   font-size: 0.82rem;
+  line-height: 1.55;
   color: #94a3b8;
-  margin: 0 0 1rem;
-  max-width: 42rem;
+  margin: 0 0 0.65rem;
+  width: 100%;
+  max-width: none;
 }
 
 .banner.err {
@@ -297,20 +773,133 @@ h1 {
   margin-bottom: 1rem;
 }
 
+.banner.warn {
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: #fde68a;
+  margin-bottom: 0.85rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.banner-tight {
+  margin-bottom: 0;
+  margin-top: 0.75rem;
+}
+
 .card {
-  padding: 1rem 1.15rem;
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.55);
+  padding: 1rem 1.1rem 1.1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(160deg, rgba(24, 32, 48, 0.92) 0%, rgba(15, 23, 42, 0.72) 100%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 4px 20px rgba(0, 0, 0, 0.18);
+}
+
+.card.margin-board {
+  padding: 0.95rem 1rem 1rem;
+}
+
+.billing-stack {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.65rem;
+  align-items: start;
+}
+
+.billing-main-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+@media (min-width: 1100px) {
+  .billing-stack {
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 26rem);
+    gap: 0.75rem 1rem;
+    align-items: start;
+  }
+}
+
+.card-section-title {
+  margin: 0 0 0.75rem;
+  padding-bottom: 0.6rem;
+  font-size: 1.02rem;
+  font-weight: 600;
+  color: #ccfbf1;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.field-last {
+  margin-bottom: 0;
+}
+
+.excel-card {
+  margin-top: 0;
+}
+
+.excel-lede {
+  margin: 0 0 0.75rem;
+}
+
+.excel-block {
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.excel-block:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.excel-subtitle {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.excel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.excel-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.billing-side-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.billing-side-card .actions {
+  margin-top: auto;
 }
 
 .toggle-row {
   display: flex;
   align-items: flex-start;
   gap: 0.65rem;
-  padding-bottom: 1rem;
-  margin-bottom: 1rem;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.85rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
   cursor: pointer;
 }
 
@@ -334,7 +923,7 @@ h1 {
 }
 
 .field {
-  margin-bottom: 1.15rem;
+  margin-bottom: 0.9rem;
 }
 
 .lab {
@@ -367,11 +956,20 @@ h1 {
   max-width: 22rem;
 }
 
+.billing-primary .select.wide {
+  max-width: none;
+}
+
 .field-hint {
   margin: 0.45rem 0 0;
   font-size: 0.78rem;
   color: #64748b;
-  max-width: 36rem;
+  max-width: none;
+  line-height: 1.5;
+}
+
+.billing-primary .field-hint {
+  max-width: 100%;
 }
 
 .input-pw {
@@ -408,9 +1006,191 @@ h1 {
 }
 
 .actions {
-  margin-top: 1.25rem;
-  padding-top: 1rem;
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
   border-top: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.margin-board {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+}
+
+.margin-board-head {
+  margin-bottom: 0.75rem;
+  padding: 0 0.05rem;
+}
+
+.margin-title {
+  margin: 0 0 0.4rem;
+  padding-bottom: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #ccfbf1;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.margin-board-lede {
+  margin: 0;
+  max-width: none;
+  line-height: 1.5;
+  font-size: 0.78rem;
+}
+
+.margin-table-panel {
+  border-radius: 12px;
+  border: 1px solid rgba(100, 116, 139, 0.2);
+  background: rgba(2, 6, 23, 0.45);
+  padding: 0.65rem 0.85rem 0.85rem;
+  flex: 0 0 auto;
+}
+
+.margin-table-wrap {
+  overflow-x: auto;
+  margin: 0;
+  padding: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.margin-table {
+  display: table;
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.margin-row {
+  display: table-row;
+}
+
+.margin-row-head .margin-cell {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+  padding: 0.4rem 0.45rem 0.55rem 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.65);
+}
+
+.margin-row-head .margin-cell:first-child {
+  border-radius: 8px 0 0 0;
+  padding-left: 0.65rem;
+}
+
+.margin-row-head .margin-cell:last-child {
+  border-radius: 0 8px 0 0;
+  padding-right: 0.35rem;
+}
+
+.margin-row.margin-data .margin-cell {
+  padding: 0.75rem 0.45rem 0.75rem 0;
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  transition: background 0.15s ease;
+}
+
+.margin-row.margin-data .margin-cell:first-child {
+  padding-left: 0.65rem;
+}
+
+.margin-row.margin-data:last-child .margin-cell {
+  border-bottom: none;
+}
+
+.margin-table .margin-data:nth-child(2) .margin-cell,
+.margin-table .margin-data:nth-child(4) .margin-cell {
+  background: rgba(30, 41, 59, 0.32);
+}
+
+.margin-table .margin-data:nth-child(3) .margin-cell {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.margin-row.margin-data:hover .margin-cell {
+  background: rgba(51, 65, 85, 0.35);
+}
+
+.margin-cell {
+  display: table-cell;
+}
+
+.margin-cell-type {
+  width: 46%;
+  min-width: 0;
+  padding-right: 0.85rem;
+}
+
+.margin-cell-num {
+  width: 27%;
+  min-width: 0;
+  padding-right: 0.35rem;
+  text-align: right;
+}
+
+.margin-row-head .margin-cell-num {
+  text-align: right;
+}
+
+.mg-name {
+  display: block;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 0.2rem;
+}
+
+.mg-desc {
+  display: block;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: #64748b;
+  max-width: none;
+}
+
+.mg-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  align-items: flex-end;
+  margin: 0 0 0 auto;
+  width: 100%;
+  max-width: 5.75rem;
+}
+
+.mg-label-text {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #94a3b8;
+  width: 100%;
+  text-align: right;
+}
+
+.mg-input {
+  width: 100%;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-height: 2.1rem;
+}
+
+.mg-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.margin-footer-actions {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  padding-left: 0.05rem;
+  padding-right: 0.05rem;
 }
 
 .btn {

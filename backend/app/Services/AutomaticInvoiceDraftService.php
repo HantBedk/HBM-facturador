@@ -7,6 +7,7 @@ use App\Models\Invoice;
 use App\Models\PanelNotification;
 use App\Models\Service;
 use App\Support\ActivityAmountNarrative;
+use App\Support\InvoiceTotalsFromServices;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -87,21 +88,21 @@ class AutomaticInvoiceDraftService
             try {
                 DB::transaction(function () use ($company, $year, $month, $serviceIds, $tz, &$created, &$codesOut, &$sumDraftTotals) {
                     $code = $this->codes->nextForCompanyOnDate($company, Carbon::now($tz));
-                    $total = (string) Service::query()->whereIn('id', $serviceIds)->sum('amount');
+                    $totals = InvoiceTotalsFromServices::fromServiceIds($serviceIds);
                     $inv = Invoice::query()->create([
                         'code' => $code,
                         'company_id' => $company->id,
                         'period_month' => $month,
                         'period_year' => $year,
                         'status' => Invoice::STATUS_BORRADOR,
-                        'subtotal' => $total,
-                        'total' => $total,
+                        'subtotal' => $totals['subtotal'],
+                        'total' => $totals['total'],
                         'sent_at' => null,
                     ]);
                     $inv->services()->sync($serviceIds);
                     $created++;
                     $codesOut[] = $code;
-                    $sumDraftTotals += (float) $total;
+                    $sumDraftTotals += (float) $totals['total'];
                 });
             } catch (\Throwable $e) {
                 report($e);

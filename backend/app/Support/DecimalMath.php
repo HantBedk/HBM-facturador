@@ -18,6 +18,26 @@ final class DecimalMath
         return self::fromScaledInt($sum, $scale);
     }
 
+    /**
+     * Multiplica dos decimales con escala fija (p. ej. precio × cantidad).
+     * Sin BCMath: para cantidad entera usa aritmética en enteros escalados; en otro caso, fallback seguro a float.
+     */
+    public static function mul(string $left, string $right, int $scale = 2): string
+    {
+        if (\function_exists('bcmul')) {
+            return \bcmul($left, $right, $scale);
+        }
+
+        $rTrim = trim($right);
+        if (preg_match('/^-?\d+$/', $rTrim)) {
+            $scaled = self::toScaledInt($left, $scale);
+
+            return self::fromScaledInt($scaled * (int) $rTrim, $scale);
+        }
+
+        return number_format((float) $left * (float) $right, $scale, '.', '');
+    }
+
     private static function toScaledInt(string $decimal, int $scale): int
     {
         $s = trim($decimal);

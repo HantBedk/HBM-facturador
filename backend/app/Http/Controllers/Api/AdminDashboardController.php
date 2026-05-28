@@ -9,6 +9,7 @@ use App\Models\Service;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -39,10 +40,189 @@ class AdminDashboardController extends Controller
                 'label' => $this->periodLabel($month, $year),
             ],
             'metrics' => $metrics,
+            'monthly_revenue_chart' => $this->monthlyRevenueChart($now),
             'invoice_status_counts' => $invoiceStatusCounts,
             'recent' => $recent,
             'generated_at' => $now->toIso8601String(),
         ]);
+    }
+
+    /** Endpoint ligero solo para el gráfico — permite cambiar de período sin recargar el dashboard. */
+    public function chart(Request $request): JsonResponse
+    {
+        $now    = Carbon::now()->timezone(config('app.timezone'));
+        $period = $request->query('period', 'mes');
+
+        $data = match ($period) {
+            'semana' => $this->weeklyChart($now),
+            'año'    => $this->yearlyChart($now),
+            default  => $this->monthlyRevenueChart($now),
+        };
+
+        return response()->json($data);
+    }
+
+    /**
+     * Ingresos diarios (sum amount de servicios visibles) del mes actual vs. el mes anterior,
+     * alineados por día del mes (día 1 … N). Incluye todos los kinds: servicio, venta, alquiler, mantenimiento.
+     *
+     * @return array{
+     *   categories: list<string>,
+     *   prev_label: string,
+     *   series: list<array{name: string, data: list<float>}>
+     * }
+     */
+    private function monthlyRevenueChart(Carbon $now): array
+    {
+        $currStart = $now->copy()->startOfMonth()->startOfDay();
+        $currEnd   = $now->copy()->endOfMonth()->endOfDay();
+        $prevStart = $now->copy()->subMonthNoOverflow()->startOfMonth()->startOfDay();
+        $prevEnd   = $now->copy()->subMonthNoOverflow()->endOfMonth()->endOfDay();
+
+        $dailyTotals = function (string $from, string $to): array {
+            return Service::query()
+                ->visibles()
+                ->whereBetween('service_date', [$from, $to])
+                ->selectRaw('DAY(service_date) as d, SUM(amount) as total')
+                ->groupByRaw('DAY(service_date)')
+                ->pluck('total', 'd')
+                ->map(fn ($v) => (float) $v)
+                ->all();
+        };
+
+        $currTotals = $dailyTotals($currStart->toDateString(), $currEnd->toDateString());
+        $prevTotals = $dailyTotals($prevStart->toDateString(), $prevEnd->toDateString());
+
+        $daysInMonth = (int) $now->daysInMonth;
+
+        $shortMonths = [
+            1 => 'Ene', 2 => 'Feb', 3 => 'Mar', 4 => 'Abr',
+            5 => 'May', 6 => 'Jun', 7 => 'Jul', 8 => 'Ago',
+            9 => 'Sep', 10 => 'Oct', 11 => 'Nov', 12 => 'Dic',
+        ];
+
+        $prevMonthDate = $now->copy()->subMonthNoOverflow();
+        $prevLabel = ($shortMonths[(int) $prevMonthDate->month] ?? '') . ' ' . $prevMonthDate->year;
+
+        $today      = (int) $now->day;
+        $categories = [];
+        $current    = [];
+        $previous   = [];
+
+        for ($d = 1; $d <= $daysInMonth; $d++) {
+            $categories[] = (string) $d;
+            // Días futuros del mes actual → null para que el gráfico corte la línea ahí
+            $current[]  = $d > $today ? null : round($currTotals[$d] ?? 0.0, 2);
+            $previous[] = round($prevTotals[$d] ?? 0.0, 2);
+        }
+
+        return [
+            'categories' => $categories,
+            'prev_label' => $prevLabel,
+            'series'     => [
+                ['name' => 'Este mes', 'data' => $current],
+                ['name' => $prevLabel,  'data' => $previous],
+            ],
+        ];
+    }
+
+    /**
+     * Ingresos diarios de la semana actual (Lun–hoy) vs. semana anterior (completa).
+     */
+    private function weeklyChart(Carbon $now): array
+    {
+        $weekStart     = $now->copy()->startOfWeek(Carbon::MONDAY)->startOfDay();
+        $prevWeekStart = $weekStart->copy()->subWeek();
+
+        $dailyByIndex = function (Carbon $start): array {
+            $end  = $start->copy()->endOfWeek(Carbon::SUNDAY)->endOfDay();
+            $rows = Service::query()
+                ->visibles()
+                ->whereBetween('service_date', [$start->toDateString(), $end->toDateString()])
+                ->selectRaw('DATE(service_date) as d, SUM(amount) as total')
+                ->groupByRaw('DATE(service_date)')
+                ->get();
+
+            $result = [];
+            foreach ($rows as $row) {
+                // Carbon dayOfWeek: 0=Dom → índice 6; 1=Lun → índice 0
+                $idx          = (Carbon::parse($row->d)->dayOfWeek + 6) % 7;
+                $result[$idx] = (float) $row->total;
+            }
+            return $result;
+        };
+
+        $currTotals = $dailyByIndex($weekStart);
+        $prevTotals = $dailyByIndex($prevWeekStart);
+
+        // Índice del día actual en la semana (Lun=0 … Dom=6)
+        $todayIdx = ($now->dayOfWeek + 6) % 7;
+
+        $shortMonths = [1=>'Ene',2=>'Feb',3=>'Mar',4=>'Abr',5=>'May',6=>'Jun',7=>'Jul',8=>'Ago',9=>'Sep',10=>'Oct',11=>'Nov',12=>'Dic'];
+        $prevLabel   = 'Sem. ' . $prevWeekStart->format('d') . ' ' . ($shortMonths[(int) $prevWeekStart->month] ?? '');
+        $dayLabels   = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+
+        $current  = [];
+        $previous = [];
+
+        for ($i = 0; $i < 7; $i++) {
+            $current[]  = $i > $todayIdx ? null : round($currTotals[$i] ?? 0.0, 2);
+            $previous[] = round($prevTotals[$i] ?? 0.0, 2);
+        }
+
+        return [
+            'categories' => $dayLabels,
+            'prev_label' => $prevLabel,
+            'series'     => [
+                ['name' => 'Esta semana', 'data' => $current],
+                ['name' => $prevLabel,     'data' => $previous],
+            ],
+        ];
+    }
+
+    /**
+     * Ingresos mensuales del año actual (Ene–mes actual) vs. año anterior (completo).
+     */
+    private function yearlyChart(Carbon $now): array
+    {
+        $year     = (int) $now->year;
+        $prevYear = $year - 1;
+
+        $monthlyTotals = function (int $y): array {
+            return Service::query()
+                ->visibles()
+                ->whereYear('service_date', $y)
+                ->selectRaw('MONTH(service_date) as m, SUM(amount) as total')
+                ->groupByRaw('MONTH(service_date)')
+                ->pluck('total', 'm')
+                ->map(fn ($v) => (float) $v)
+                ->all();
+        };
+
+        $currTotals = $monthlyTotals($year);
+        $prevTotals = $monthlyTotals($prevYear);
+
+        $shortMonths  = [1=>'Ene',2=>'Feb',3=>'Mar',4=>'Abr',5=>'May',6=>'Jun',7=>'Jul',8=>'Ago',9=>'Sep',10=>'Oct',11=>'Nov',12=>'Dic'];
+        $currentMonth = (int) $now->month;
+
+        $categories = [];
+        $current    = [];
+        $previous   = [];
+
+        for ($m = 1; $m <= 12; $m++) {
+            $categories[] = $shortMonths[$m];
+            $current[]    = $m > $currentMonth ? null : round($currTotals[$m] ?? 0.0, 2);
+            $previous[]   = round($prevTotals[$m] ?? 0.0, 2);
+        }
+
+        return [
+            'categories' => $categories,
+            'prev_label' => (string) $prevYear,
+            'series'     => [
+                ['name' => (string) $year, 'data' => $current],
+                ['name' => (string) $prevYear, 'data' => $previous],
+            ],
+        ];
     }
 
     /**

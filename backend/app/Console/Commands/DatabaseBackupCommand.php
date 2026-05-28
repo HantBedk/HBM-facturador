@@ -89,7 +89,7 @@ class DatabaseBackupCommand extends Command
         ];
 
         $result = Process::timeout(600)
-            ->env(array_merge($_ENV, ['MYSQL_PWD' => $password]))
+            ->env(['MYSQL_PWD' => $password])
             ->run($args);
 
         if (! $result->successful()) {
@@ -108,7 +108,7 @@ class DatabaseBackupCommand extends Command
 
     private function pruneOldFiles(string $dir): void
     {
-        $days = (int) config('database.backup.retain_days', 14);
+        $days = (int) config('database.backup.retain_days', 0);
         if ($days < 1) {
             return;
         }

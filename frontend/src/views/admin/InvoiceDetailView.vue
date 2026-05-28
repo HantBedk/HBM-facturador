@@ -8,10 +8,12 @@ import {
   downloadInvoicePdfBlob,
   fetchAdminInvoice,
   patchInvoiceStatus,
+  sendInvoiceEmailToCompany,
 } from '@/services/invoicesApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import { openPdfBlobInNewTab, triggerPdfDownload } from '@/utils/pdfBlob.js'
+import { confirmInvoiceEmailSend } from '@/utils/invoiceEmitterSendGate.js'
 
 const uiDialog = useUiDialogStore()
 
@@ -100,9 +102,35 @@ watch(id, () => {
   load()
 })
 
-const canEdit = computed(() => invoice.value?.status === 'borrador')
-const canApprove = computed(() => invoice.value?.status === 'borrador')
+const hasRegisteredCompany = computed(() => {
+  const cid = invoice.value?.company_id
+  return cid !== null && cid !== undefined && cid !== ''
+})
+
+const canEdit = computed(() => invoice.value?.status === 'borrador' && hasRegisteredCompany.value)
+const canApprove = computed(() => invoice.value?.status === 'borrador' && hasRegisteredCompany.value)
 const canSend = computed(() => invoice.value?.status === 'aprobada')
+
+const sendEmailBusy = ref(false)
+const approveSubmitting = ref(false)
+
+const companyEmailValid = computed(() => {
+  const raw = invoice.value?.company?.correo
+  const s = raw != null ? String(raw).trim() : ''
+  if (!s) return false
+  return /^[^\s@]+@[^\s@]+$/u.test(s)
+})
+
+const canEmailPdfToCompany = computed(() => {
+  const inv = invoice.value
+  if (!inv || inv.status === 'borrador') return false
+  return companyEmailValid.value
+})
+
+const showHeadEnviarFactura = computed(() => {
+  if (!invoice.value || invoice.value.status === 'borrador') return false
+  return hasRegisteredCompany.value
+})
 
 /** Pagos solo tras ENVIADA (ETAPA 5); abonos hasta cubrir total. */
 const balanceNum = computed(() => {
@@ -144,12 +172,57 @@ const clientContactPreview = computed(() => {
   return names.length ? names.join(', ') : '—'
 })
 
-async function onAprobar() {
+async function onAprobarYEnviar() {
   actionError.value = ''
+  if (!invoice.value || invoice.value.status !== 'borrador' || !hasRegisteredCompany.value) return
+  if (!companyEmailValid.value) {
+    await uiDialog.alert({
+      title: 'Correo requerido',
+      message: 'Para aprobar y enviar, la empresa debe tener un correo electrónico válido en el directorio.',
+    })
+    return
+  }
+  const ok = await uiDialog.confirm({
+    title: 'Aprobar y enviar factura',
+    message:
+      'Una vez aprobada y enviada al cliente, esta factura ya no podrá modificarse como borrador ni alterarse su contenido facturado desde el panel. Se enviará el PDF al correo registrado en la empresa. ¿Desea continuar?',
+    confirmLabel: 'Aceptar',
+    cancelLabel: 'Rechazar',
+    danger: true,
+  })
+  if (!ok) return
+
+  const canSend = await confirmInvoiceEmailSend({ invoice: invoice.value, uiDialog, router })
+  if (!canSend) return
+
+  const invId = id.value
+  approveSubmitting.value = true
   try {
-    invoice.value = await patchInvoiceStatus(id.value, 'aprobada')
+    invoice.value = await patchInvoiceStatus(invId, 'aprobada')
+    try {
+      const r = await sendInvoiceEmailToCompany(invId)
+      await uiDialog.alert({
+        title: 'Factura enviada',
+        message: r?.message || 'Correo con PDF enviado al cliente.',
+      })
+    } catch (emailErr) {
+      const msg =
+        emailErr.data?.errors?.company?.[0] ||
+        emailErr.data?.errors?.emitter?.[0] ||
+        emailErr.data?.message ||
+        emailErr.message ||
+        'Error desconocido.'
+      actionError.value =
+        'La factura quedó aprobada, pero el envío por correo falló: ' +
+        msg +
+        ' Revise Configuración → Correo del sistema y use «Enviar factura» arriba.'
+      return
+    }
+    invoice.value = await patchInvoiceStatus(invId, 'enviada')
   } catch (e) {
-    actionError.value = e.data?.message || e.message || 'No se pudo aprobar.'
+    actionError.value = e.data?.message || e.message || 'No se pudo completar la acción.'
+  } finally {
+    approveSubmitting.value = false
   }
 }
 
@@ -243,6 +316,53 @@ async function onPdfOfficialDownload() {
   }
 }
 
+async function onHeadEnviarFacturaClick() {
+  if (!companyEmailValid.value) {
+    await uiDialog.alert({
+      title: 'No se puede enviar',
+      message:
+        'La empresa no tiene un correo válido en el directorio. Edítela, guarde un correo y vuelva a cargar esta página.',
+    })
+    return
+  }
+  await onSendInvoiceEmail()
+}
+
+async function onSendInvoiceEmail() {
+  if (!canEmailPdfToCompany.value) return
+  if (String(invoice.value?.id) !== String(id.value)) {
+    actionError.value = 'Datos de factura inconsistentes. Recargue la página.'
+    return
+  }
+  const emitterOk = await confirmInvoiceEmailSend({ invoice: invoice.value, uiDialog, router })
+  if (!emitterOk) return
+  const ok = await uiDialog.confirm({
+    title: 'Enviar factura por correo',
+    message: `Se enviará el PDF oficial de la factura ${invoice.value.code} (esta página) a ${invoice.value.company.correo}. ¿Continuar?`,
+    confirmLabel: 'Enviar',
+  })
+  if (!ok) return
+  actionError.value = ''
+  sendEmailBusy.value = true
+  try {
+    const r = await sendInvoiceEmailToCompany(id.value)
+    await uiDialog.alert({
+      title: 'Correo enviado',
+      message: r.message || 'Factura enviada.',
+    })
+  } catch (e) {
+    const msg =
+      e.data?.errors?.company?.[0] ||
+      e.data?.errors?.emitter?.[0] ||
+      e.data?.message ||
+      e.message ||
+      'No se pudo enviar el correo.'
+    actionError.value = msg
+  } finally {
+    sendEmailBusy.value = false
+  }
+}
+
 async function onDeleteInvoice() {
   const ok = await uiDialog.confirm({
     title: 'Eliminar factura',
@@ -269,9 +389,22 @@ async function onDeleteInvoice() {
         <RouterLink class="back" to="/admin/facturas">← Volver al listado</RouterLink>
         <h1 v-if="invoice">Factura {{ invoice.code }}</h1>
         <h1 v-else-if="!loading">Factura</h1>
-        <p v-if="invoice" class="lede">{{ invoice.period_label }} · {{ invoice.company?.nombre }}</p>
+        <p v-if="invoice" class="lede">
+          {{ invoice.period_label }} · {{ invoice.company?.nombre || invoice.bill_to?.nombre || '—' }}
+        </p>
       </div>
       <div v-if="invoice" class="head-actions">
+        <RouterLink
+          v-if="invoice.company?.id"
+          class="btn secondary"
+          :to="{
+            name: 'admin-empresa-inventario',
+            params: { companyId: String(invoice.company.id) },
+            state: { empresaNombre: invoice.company?.nombre || '' },
+          }"
+        >
+          Ver inventario empresa
+        </RouterLink>
         <template v-if="invoice.status === 'borrador'">
           <button type="button" class="btn secondary" @click="onPdfPreviewView">Ver PDF</button>
           <button type="button" class="btn secondary" @click="onPdfPreviewDownload">Descargar PDF</button>
@@ -279,6 +412,16 @@ async function onDeleteInvoice() {
         <template v-else>
           <button type="button" class="btn secondary" @click="onPdfOfficialView">Ver PDF</button>
           <button type="button" class="btn secondary" @click="onPdfOfficialDownload">Descargar PDF</button>
+          <button
+            v-if="showHeadEnviarFactura"
+            type="button"
+            class="btn secondary"
+            :disabled="sendEmailBusy || !companyEmailValid"
+            :title="!companyEmailValid ? 'Agregue un correo válido en la ficha de la empresa' : ''"
+            @click="onHeadEnviarFacturaClick"
+          >
+            {{ sendEmailBusy ? 'Enviando…' : 'Enviar factura' }}
+          </button>
         </template>
         <RouterLink v-if="canEdit" class="btn primary" :to="`/admin/facturas/${invoice.id}/editar`">Editar borrador</RouterLink>
         <button v-if="canDeleteInvoice" type="button" class="btn danger" @click="onDeleteInvoice">Eliminar factura</button>
@@ -293,6 +436,16 @@ async function onDeleteInvoice() {
       <div class="card status-row" :data-phase="invoice.status">
         <span class="pill" :data-st="invoice.status">{{ invoice.status_label }}</span>
         <span v-if="invoice.sent_at" class="muted">Enviada: {{ new Date(invoice.sent_at).toLocaleString('es-CO') }}</span>
+      </div>
+
+      <div
+        v-if="invoice.status === 'borrador' && !hasRegisteredCompany"
+        class="card banner err"
+      >
+        <p class="muted small" style="margin: 0">
+          Este borrador no está vinculado a una empresa del directorio. Ya no se puede editar ni aprobar; elimínelo y cree una factura
+          nueva contra una empresa registrada.
+        </p>
       </div>
 
       <p v-if="canDeleteInvoice" class="delete-hint muted small">
@@ -389,8 +542,23 @@ async function onDeleteInvoice() {
       </div>
 
       <div class="card actions-bar" v-if="canApprove || canSend">
-        <button v-if="canApprove" type="button" class="btn primary" @click="onAprobar">Aprobar factura</button>
-        <button v-if="canSend" type="button" class="btn primary" @click="onEnviar">Marcar como enviada</button>
+        <button
+          v-if="canApprove"
+          type="button"
+          class="btn primary"
+          :disabled="approveSubmitting || !companyEmailValid"
+          :title="!companyEmailValid ? 'La empresa necesita un correo válido para aprobar y enviar' : ''"
+          @click="onAprobarYEnviar"
+        >
+          {{ approveSubmitting ? 'Procesando…' : 'Aprobar y enviar' }}
+        </button>
+        <template v-if="canSend">
+          <p class="muted small send-hint-page">
+            «Marcar como enviada» solo marca el estado para cobros; no envía correo. Use <strong>Enviar factura</strong> arriba si el
+            cliente no recibió el PDF.
+          </p>
+          <button type="button" class="btn primary" @click="onEnviar">Marcar como enviada</button>
+        </template>
       </div>
 
       <div class="grid-2">
@@ -402,6 +570,7 @@ async function onDeleteInvoice() {
         <div class="card">
           <h2>Totales</h2>
           <p>Subtotal: {{ money(invoice.subtotal) }}</p>
+          <p v-if="Number(invoice.iva_amount) > 0">IVA: {{ money(invoice.iva_amount) }}</p>
           <p class="strong">Total: {{ money(invoice.total) }}</p>
           <template v-if="invoice.financial">
             <p>Pagado: {{ money(invoice.financial.total_paid) }}</p>
@@ -626,6 +795,12 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.actions-bar .send-hint-page {
+  flex: 1 1 100%;
+  margin: 0 0 0.15rem;
+  line-height: 1.45;
 }
 
 .grid-2 {

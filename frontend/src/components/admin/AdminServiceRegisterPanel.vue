@@ -6,6 +6,8 @@ import { useServiceRegisterFlow } from '@/composables/useServiceRegisterFlow.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
+  registerKind: { type: String, default: 'servicio' },
+  isEmpleado: { type: Boolean, default: false },
   /** z-index sobre otros overlays */
   overlayZIndex: { type: Number, default: 95 },
 })
@@ -14,11 +16,53 @@ const emit = defineEmits(['close', 'created'])
 
 const router = useRouter()
 const panelOpenRef = toRef(props, 'open')
-const isEmpleadoRegistro = computed(() => false)
+const isEmpleadoRegistro = computed(() => props.isEmpleado)
+const registerKind = computed(() => String(props.registerKind || 'servicio'))
+const panelTitle = computed(() =>
+  registerKind.value === 'venta'
+    ? 'Registrar venta'
+    : registerKind.value === 'alquiler'
+      ? 'Registrar alquiler'
+      : registerKind.value === 'mantenimiento'
+        ? 'Registrar mantenimiento'
+      : 'Registrar servicio'
+)
+const panelKicker = computed(() =>
+  registerKind.value === 'venta'
+    ? 'Nueva venta'
+    : registerKind.value === 'alquiler'
+      ? 'Nuevo alquiler'
+      : registerKind.value === 'mantenimiento'
+        ? 'Nuevo mantenimiento'
+      : 'Nuevo servicio'
+)
+const fullPageTo = computed(() =>
+  props.isEmpleado
+    ? registerKind.value === 'venta'
+      ? '/empleado/registro-venta'
+      : registerKind.value === 'alquiler'
+        ? '/empleado/registro-alquiler'
+        : registerKind.value === 'mantenimiento'
+          ? '/empleado/registro-mantenimiento'
+        : '/empleado/registro-servicio'
+    : registerKind.value === 'venta'
+      ? '/admin/servicios/nuevo-venta'
+      : registerKind.value === 'alquiler'
+        ? '/admin/servicios/nuevo-alquiler'
+        : registerKind.value === 'mantenimiento'
+          ? '/admin/servicios/nuevo-mantenimiento'
+        : '/admin/servicios/nuevo'
+)
+const effectiveAllowInventoryCommercialOps = computed(() =>
+  registerKind.value === 'venta' || registerKind.value === 'alquiler'
+    ? allowInventoryCommercialOps.value
+    : false
+)
 
 const {
   companies,
   catalogItems,
+  inventoryLots,
   clientSuggestions,
   loading,
   fieldErrors,
@@ -27,13 +71,28 @@ const {
   photoFiles,
   form,
   onSubmit,
+  allowInventoryCommercialOps,
 } = useServiceRegisterFlow({
   isEmpleadoRegistro,
+  registerKind,
   panelOpenRef,
   async onAdminAfterCreate(created) {
     emit('created', created)
     emit('close')
-    await router.push(`/admin/servicios/${created.id}`)
+    if (registerKind.value === 'mantenimiento') {
+      await router.push('/admin/mantenimientos')
+      return
+    }
+    await router.push('/admin/servicios')
+  },
+  async onEmpleadoAfterCreate(created) {
+    emit('created', created)
+    emit('close')
+    if (registerKind.value === 'mantenimiento') {
+      await router.push({ name: 'emp-mantenimientos' })
+      return
+    }
+    await router.push(`/empleado/servicio/${created.id}`)
   },
 })
 
@@ -59,16 +118,13 @@ function onBackdropClick() {
       >
         <header class="drawer-header">
           <div class="drawer-header-text">
-            <p class="drawer-kicker">Nuevo servicio</p>
-            <h2 id="register-panel-title" class="drawer-title drawer-title--register">Registrar servicio</h2>
-            <p class="muted drawer-sub">
-              La fecha y el código (SERV-…) los asigna el servidor. Mismo formulario que en la página dedicada.
-            </p>
+            <p class="drawer-kicker">{{ panelKicker }}</p>
+            <h2 id="register-panel-title" class="drawer-title drawer-title--register">{{ panelTitle }}</h2>
           </div>
           <div class="drawer-header-actions">
             <RouterLink
               class="btn secondary btn-compact"
-              to="/admin/servicios/nuevo"
+              :to="fullPageTo"
               @click="emit('close')"
             >
               Pantalla completa
@@ -90,11 +146,14 @@ function onBackdropClick() {
               :key="formResetKey"
               v-model="form"
               v-model:photos="photoFiles"
+              :register-kind="registerKind"
               :companies="companies"
               :catalog-items="catalogItems"
+              :inventory-lots="inventoryLots"
               :client-suggestions="clientSuggestions"
               :field-errors="fieldErrors"
               :disabled="loading"
+              :allow-inventory-commercial-ops="effectiveAllowInventoryCommercialOps"
             />
           </form>
         </div>
@@ -189,7 +248,9 @@ function onBackdropClick() {
 
 .drawer-header-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
+  justify-content: flex-end;
   gap: 0.5rem;
   flex-shrink: 0;
 }

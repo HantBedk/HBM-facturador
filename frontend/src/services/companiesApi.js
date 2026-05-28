@@ -1,17 +1,19 @@
 import { api } from './api'
 
 /**
- * @param {{ q?: string, estado?: string, company_kind?: 'registered' | 'quick' }} [params]
+ * @param {{ q?: string, estado?: string }} [params]
  */
 export function fetchAdminCompanies(params = {}) {
   const qs = new URLSearchParams()
   if (params.q?.trim()) qs.set('q', params.q.trim())
   if (params.estado) qs.set('estado', params.estado)
-  if (params.company_kind === 'registered' || params.company_kind === 'quick') {
-    qs.set('company_kind', params.company_kind)
-  }
   const s = qs.toString()
   return api(`/admin/companies${s ? `?${s}` : ''}`).then((r) => r.data)
+}
+
+/** @returns {Promise<{ welcome_pdf_ready: boolean }>} */
+export function fetchWelcomeMailAttachmentReady() {
+  return api('/admin/companies/welcome-mail-attachment-ready')
 }
 
 /**
@@ -19,6 +21,7 @@ export function fetchAdminCompanies(params = {}) {
  *   nombre: string,
  *   factura_sigla: string,
  *   nit?: string | null,
+ *   direccion: string,
  *   telefono?: string | null,
  *   correo?: string | null,
  *   estado?: string
@@ -28,7 +31,10 @@ export function createCompany(payload) {
   return api('/admin/companies', {
     method: 'POST',
     body: JSON.stringify(payload),
-  }).then((r) => r.data)
+  }).then((r) => ({
+    data: r.data,
+    welcome_mail: r.welcome_mail ?? null,
+  }))
 }
 
 /**
@@ -37,6 +43,7 @@ export function createCompany(payload) {
  *   nombre: string,
  *   factura_sigla: string,
  *   nit?: string | null,
+ *   direccion: string,
  *   telefono?: string | null,
  *   correo?: string | null,
  *   estado: string
@@ -46,7 +53,10 @@ export function updateCompany(id, payload) {
   return api(`/admin/companies/${id}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
-  }).then((r) => r.data)
+  }).then((r) => ({
+    data: r.data,
+    welcome_mail: r.welcome_mail ?? null,
+  }))
 }
 
 /**

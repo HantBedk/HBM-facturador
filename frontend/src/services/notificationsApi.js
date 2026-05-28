@@ -36,3 +36,22 @@ export function markNotificationRead(id) {
 export function markAllNotificationsRead() {
   return api('/admin/notifications/read-all', { method: 'POST' })
 }
+
+/** Solicita un ticket de un solo uso para abrir el stream SSE de notificaciones. */
+export function requestAdminNotifStreamTicket() {
+  return api('/admin/notifications/stream-ticket', { method: 'POST' })
+}
+
+/**
+ * Paginado — para la página completa de historial de notificaciones.
+ * Devuelve { data: [], meta: { current_page, last_page, total, per_page } }
+ * @param {{ page?: number, per_page?: number, unread_only?: boolean, category?: string }} [params]
+ */
+export function fetchAdminNotificationsPage(params = {}) {
+  const qs = new URLSearchParams()
+  qs.set('page', String(params.page ?? 1))
+  if (params.per_page != null) qs.set('per_page', String(params.per_page))
+  if (params.unread_only) qs.set('unread_only', '1')
+  if (params.category) qs.set('category', params.category)
+  return api(`/admin/notifications?${qs.toString()}`)
+}

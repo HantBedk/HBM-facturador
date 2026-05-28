@@ -29,7 +29,10 @@ const forgotSuccess = ref('')
 
 const redirectTarget = computed(() => {
   const r = router.query.redirect
-  return typeof r === 'string' ? r : null
+  if (typeof r !== 'string') return null
+  // Solo rutas locales: deben empezar con / pero no con // (evita //evil.com)
+  if (!r.startsWith('/') || r.startsWith('//')) return null
+  return r
 })
 
 /** Misma regla mínima que el backend (AuthController): local@dominio, Unicode con /u. */
@@ -369,7 +372,7 @@ async function submitForgot() {
 
         <div class="mt-8 border-t border-white/10 pt-7">
           <p class="text-center text-xs font-medium text-slate-400">
-            ¿Cliente? Revisa tus facturas sin cuenta interna.
+            ¿Cliente? Consulta facturas o inventario en custodia sin cuenta interna.
           </p>
           <RouterLink
             :to="{ name: 'consulta-factura-publica' }"
@@ -387,6 +390,31 @@ async function submitForgot() {
             <span class="min-w-0 flex-1 text-center">Consultar factura</span>
             <svg
               class="h-4 w-4 shrink-0 text-sky-400/70 transition group-hover:translate-x-0.5 group-hover:text-sky-200"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <path d="M5 12h14M13 6l6 6-6 6" />
+            </svg>
+          </RouterLink>
+          <RouterLink
+            :to="{ name: 'consulta-empresa-publica' }"
+            class="group mt-3 flex w-full items-center justify-center gap-3 rounded-xl border border-violet-400/25 bg-gradient-to-b from-violet-500/12 to-violet-600/10 px-4 py-3.5 text-[0.9375rem] font-semibold text-violet-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_8px_32px_rgba(139,92,246,0.08)] backdrop-blur-sm transition hover:border-violet-400/45 hover:from-violet-500/18 hover:to-violet-600/15 hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_12px_40px_rgba(139,92,246,0.18)]"
+          >
+            <span
+              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-violet-400/20 bg-violet-400/10 text-violet-300 transition group-hover:border-violet-300/40 group-hover:bg-violet-400/20 group-hover:text-violet-100"
+              aria-hidden="true"
+            >
+              <svg class="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                <path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12" />
+              </svg>
+            </span>
+            <span class="min-w-0 flex-1 text-center">Consultar inventario</span>
+            <svg
+              class="h-4 w-4 shrink-0 text-violet-400/70 transition group-hover:translate-x-0.5 group-hover:text-violet-200"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"

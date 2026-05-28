@@ -9,6 +9,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Service extends Model
 {
+    public const KIND_SERVICIO = 'servicio';
+    public const KIND_MANTENIMIENTO = 'mantenimiento';
+
     public const STATUS_ACTIVO = 'activo';
 
     public const STATUS_CORREGIDO = 'corregido';
@@ -24,9 +27,11 @@ class Service extends Model
     protected $fillable = [
         'code',
         'company_id',
+        'inventory_lot_id',
         'user_id',
         'assigned_by_user_id',
         'catalog_id',
+        'kind',
         'client_name',
         'client_telefono',
         'contact_phone_key',
@@ -87,6 +92,11 @@ class Service extends Model
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+
+    public function inventoryLot(): BelongsTo
+    {
+        return $this->belongsTo(InventoryLot::class, 'inventory_lot_id');
     }
 
     public function user(): BelongsTo

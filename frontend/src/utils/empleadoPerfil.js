@@ -67,8 +67,10 @@ export function validateEmpleadoPerfilForm(form, bankCodes) {
     push('ciudad', 'La ciudad es obligatoria.')
   }
 
-  const dep = form.departamento
-  if (dep != null && String(dep).trim().length > 120) {
+  const dep = String(form.departamento ?? '').trim()
+  if (!dep) {
+    push('departamento', 'Seleccione el departamento.')
+  } else if (dep.length > 120) {
     push('departamento', 'Máximo 120 caracteres.')
   }
 

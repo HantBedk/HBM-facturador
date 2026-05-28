@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onUnmounted, ref, useId, watch } from 'vue'
-import { isLineDescriptionStillTemplate, templateLineDescription } from '@/utils/serviceLineDescriptionTemplate.js'
+import { isLineDescriptionStillTemplate } from '@/utils/serviceLineDescriptionTemplate.js'
 
 const clientListId = useId()
 const photoInputId = useId()
@@ -10,13 +10,23 @@ const props = defineProps({
   photos: { type: Array, default: () => [] },
   companies: { type: Array, default: () => [] },
   catalogItems: { type: Array, default: () => [] },
+  inventoryLots: { type: Array, default: () => [] },
   clientSuggestions: { type: Array, default: () => [] },
   fieldErrors: { type: Object, default: () => ({}) },
   disabled: { type: Boolean, default: false },
-  /** No permitir cambiar empresa / cliente puntual (p. ej. completar asignación administrativa). */
+  /** No permitir cambiar empresa (p. ej. completar asignación administrativa). */
   billingLocked: { type: Boolean, default: false },
   /** Ocultar el botón interno de envío (p. ej. la vista padre pone su propio `type="submit"`). */
   hideSubmitButton: { type: Boolean, default: false },
+  /**
+   * Venta y alquiler de inventario solo en panel administración.
+   * Técnicos: según permisos en configuración, o rutas dedicadas venta/alquiler.
+   */
+  allowInventoryCommercialOps: { type: Boolean, default: true },
+  /** servicio | venta | alquiler — rutas dedicadas evitan el selector triple. */
+  registerKind: { type: String, default: 'servicio' },
+  /** Vista ancha: pasos 1 y 2 en dos columnas desde `lg`. */
+  wideLayout: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue', 'update:photos'])
@@ -25,11 +35,6 @@ const previewUrls = ref([])
 
 function lineKey() {
   return `L-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-}
-
-function descFromCatalog(item) {
-  const label = item.label || item.name
-  return templateLineDescription(label, item.description)
 }
 
 function lineHasTemplateOnly(idx) {
@@ -64,32 +69,6 @@ function removePhoto(index) {
   )
 }
 
-/** Panel del catálogo en flujo normal (no flotante): evita cortes por overflow y clics fuera. */
-const catalogPanelOpen = ref(false)
-const typeFilter = ref('')
-const catalogSearchInputRef = ref(null)
-
-function afterLineAdded() {
-  typeFilter.value = ''
-  catalogPanelOpen.value = true
-}
-
-function toggleCatalogPanel() {
-  const canBill =
-    props.modelValue.use_quick_client || (props.modelValue.company_id !== '' && props.modelValue.company_id != null)
-  if (props.disabled || !canBill) return
-  catalogPanelOpen.value = !catalogPanelOpen.value
-  if (catalogPanelOpen.value) typeFilter.value = ''
-}
-
-watch(
-  () => [props.modelValue.company_id, props.modelValue.use_quick_client],
-  () => {
-    catalogPanelOpen.value = false
-    typeFilter.value = ''
-  }
-)
-
 const inner = computed({
   get: () => props.modelValue,
   set: (v) => emit('update:modelValue', v),
@@ -112,9 +91,17 @@ function totalFromLines(list) {
   return t
 }
 
+function lineLabelForServiceType(row) {
+  const desc = String(row?.line_description || '').trim()
+  if (desc) return desc
+  const name = String(row?.custom_name || row?.label || '').trim()
+  if (name && name !== 'Servicio') return name
+  return ''
+}
+
 function syncTypeAndAmount(list) {
-  const labels = list.map((r) => (r.label || r.custom_name || '').trim()).filter(Boolean)
-  const service_type = labels.length ? labels.join(' · ') : props.modelValue.service_type || ''
+  const labels = list.map((r) => lineLabelForServiceType(r)).filter(Boolean)
+  const service_type = labels.length ? labels.join(' · ') : props.modelValue.service_type || 'Servicio'
   return {
     lines: list,
     amount: String(totalFromLines(list).toFixed(2)),
@@ -132,56 +119,13 @@ function formatHintMoneyCop(n) {
   }).format(x)
 }
 
-function addCatalogLine(item) {
-  const label = item.label || item.name
-  const cid = item.catalog_id != null && item.catalog_id !== '' ? Number(item.catalog_id) : null
-  const baseRaw = item.basePrice ?? item.base_price ?? ''
-  const hintPrice =
-    baseRaw !== '' && baseRaw != null && !Number.isNaN(Number(baseRaw)) ? Number(baseRaw) : null
-  const hintDesc = descFromCatalog(item)
-  let row
-  if (cid != null && !Number.isNaN(cid)) {
-    row = {
-      key: lineKey(),
-      catalog_id: cid,
-      label,
-      custom_name: '',
-      line_description: '',
-      amount: '',
-      propose_catalog: false,
-      isOtherLine: false,
-      /** Tope orientativo (precio base del catálogo): el importe no puede superarlo en este formulario. */
-      catalog_max_price:
-        hintPrice != null && Number.isFinite(hintPrice) && hintPrice > 0 ? hintPrice : null,
-      catalog_hint_desc: hintDesc,
-      catalog_hint_price: hintPrice,
-      catalog_hint_dismissed: false,
-    }
-  } else {
-    row = {
-      key: lineKey(),
-      catalog_id: null,
-      label,
-      custom_name: label,
-      line_description: '',
-      amount: '',
-      propose_catalog: false,
-      isOtherLine: false,
-      catalog_hint_desc: hintDesc || `Referencia orientativa: ${String(label).trim()}`,
-      catalog_hint_price: hintPrice,
-      catalog_hint_dismissed: false,
-    }
-  }
-  patch(syncTypeAndAmount([...lines.value, row]))
-  afterLineAdded()
-}
-
-function addOtherLine() {
-  const row = {
+/** Una sola línea libre «Servicio» (sin catálogo) para el flujo de solo servicio. */
+function createServicioLine() {
+  return {
     key: lineKey(),
     catalog_id: null,
-    label: '',
-    custom_name: '',
+    label: 'Servicio',
+    custom_name: 'Servicio',
     line_description: '',
     amount: '',
     propose_catalog: false,
@@ -190,13 +134,17 @@ function addOtherLine() {
     catalog_hint_price: null,
     catalog_hint_dismissed: true,
   }
-  patch(syncTypeAndAmount([...lines.value, row]))
-  afterLineAdded()
 }
 
 function removeLine(index) {
   const next = lines.value.filter((_, i) => i !== index)
   patch(syncTypeAndAmount(next))
+}
+
+function addServicioConceptLine() {
+  if (props.disabled || props.billingLocked) return
+  if (String(props.modelValue.inventory_operation_type || 'servicio') !== 'servicio') return
+  patch(syncTypeAndAmount([...lines.value, createServicioLine()]))
 }
 
 function updateLine(index, partial) {
@@ -249,55 +197,6 @@ function amountInputMaxAttr(row) {
   return m != null ? m : undefined
 }
 
-/** Solo ítems que devuelve el servidor. Si el admin vació el catálogo, no se muestra lista orientativa local. */
-const effectiveTypeCatalog = computed(() =>
-  props.catalogItems.map((c) => ({
-    id: `db-${c.id}`,
-    label: c.name,
-    basePrice: Number(c.base_price),
-    description: c.description,
-    catalog_id: c.id,
-    isOther: false,
-  }))
-)
-
-const catalogWithOther = computed(() => [
-  ...effectiveTypeCatalog.value,
-  { id: '__otro__', label: 'Otro…', isOther: true, catalog_id: null, basePrice: 0, description: '' },
-])
-
-const filteredCatalog = computed(() => {
-  const q = typeFilter.value.trim().toLowerCase()
-  const list = catalogWithOther.value
-  if (!q) return list
-  const hit = list.filter(
-    (i) =>
-      (i.label || '').toLowerCase().includes(q) ||
-      String(i.id).toLowerCase().includes(q)
-  )
-  // Si el texto no coincide con nada, mostrar todo el catálogo para no dejar el menú vacío
-  return hit.length ? hit : list
-})
-
-function pickCatalogRow(item) {
-  if (item.isOther) {
-    addOtherLine()
-    return
-  }
-  addCatalogLine(item)
-}
-
-function onTypeInput(e) {
-  typeFilter.value = e.target.value
-  if (props.modelValue.company_id || props.modelValue.use_quick_client) catalogPanelOpen.value = true
-}
-
-function onTypeFocus() {
-  if (!props.modelValue.company_id && !props.modelValue.use_quick_client) return
-  catalogPanelOpen.value = true
-  if (lines.value.length > 0) typeFilter.value = ''
-}
-
 onUnmounted(() => {
   previewUrls.value.forEach((u) => URL.revokeObjectURL(u))
 })
@@ -311,11 +210,7 @@ const totalDisplay = computed(() => {
   }).format(n)
 })
 
-/** Valor sentinela al final del &lt;select&gt; (no es ID de empresa). */
-const QUICK_CLIENT_OPTION = '__quick_client__'
-
 const companySelectValue = computed(() => {
-  if (props.modelValue.use_quick_client) return QUICK_CLIENT_OPTION
   const id = props.modelValue.company_id
   if (id === '' || id == null) return ''
   return String(id)
@@ -324,37 +219,377 @@ const companySelectValue = computed(() => {
 function onCompanySelectChange(ev) {
   if (props.billingLocked) return
   const v = ev.target.value
-  if (v === QUICK_CLIENT_OPTION) {
-    patch({ use_quick_client: true, company_id: '' })
-  } else if (v) {
-    patch({ use_quick_client: false, company_id: Number(v) })
+  if (v) {
+    patch({ company_id: Number(v) })
   } else {
-    patch({ use_quick_client: false, company_id: '' })
+    patch({ company_id: '' })
   }
 }
+
+function readDescriptionField(description, key) {
+  const text = String(description || '')
+  const line = text
+    .split('\n')
+    .map((item) => item.trim())
+    .find((item) => item.toLowerCase().startsWith(`${key.toLowerCase()}:`) || item.toLowerCase().includes(key.toLowerCase()))
+  if (!line) return ''
+  const idx = line.indexOf(':')
+  if (idx >= 0) return line.slice(idx + 1).trim()
+  return line.trim()
+}
+
+function parseDescriptionFlag(description, keys) {
+  const lines = String(description || '')
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean)
+  for (const raw of lines) {
+    const line = raw.toLowerCase()
+    const hit = keys.some((k) => line.includes(String(k).toLowerCase()))
+    if (!hit) continue
+    const idx = raw.indexOf(':')
+    const value = (idx >= 0 ? raw.slice(idx + 1) : raw).trim().toLowerCase()
+    if (value.includes('no') || value === 'false' || value === '0') return false
+    if (value.includes('si') || value.includes('sí') || value.includes('true') || value === '1') return true
+    return true
+  }
+  return false
+}
+
+function isEnabledForSale(row) {
+  if (typeof row.allow_sale === 'boolean') return row.allow_sale
+  const desc = String(row.description || '')
+  if (!/(disponible|etiqueta).*venta/i.test(desc)) return true
+  return parseDescriptionFlag(desc, ['Disponible para venta', 'Etiqueta para venta'])
+}
+
+function isEnabledForRental(row) {
+  const desc = String(row.description || '')
+  const taggedEnabled = /(disponible|etiqueta).*alquiler/i.test(desc)
+    ? parseDescriptionFlag(desc, ['Disponible para alquiler', 'Etiqueta para alquiler'])
+    : false
+  if (typeof row.allow_rental === 'boolean') return row.allow_rental || taggedEnabled
+  return taggedEnabled
+}
+
+const operationType = computed(() => String(props.modelValue.inventory_operation_type || 'servicio'))
+
+function lotHasStock(row, minQty = 1) {
+  return Number(row?.quantity_available || 0) >= minQty
+}
+
+const operationLots = computed(() => {
+  const withStock = props.inventoryLots.filter((x) => lotHasStock(x, 1))
+  if (operationType.value === 'venta') return withStock.filter((x) => isEnabledForSale(x))
+  if (operationType.value === 'alquiler') return withStock.filter((x) => isEnabledForRental(x))
+  return []
+})
+
+const lotPickSearchQ = ref('')
+const selectedSaleLotId = ref('')
+const selectedRentalLotId = ref('')
+watch(
+  () => props.modelValue.inventory_operation_type,
+  () => {
+    lotPickSearchQ.value = ''
+    selectedSaleLotId.value = ''
+    selectedRentalLotId.value = ''
+  }
+)
+const filteredOperationLots = computed(() => {
+  const q = lotPickSearchQ.value.trim().toLowerCase()
+  const rows = operationLots.value
+  if (!q) return rows
+  return rows.filter((lot) => {
+    const blob = `${lot.name || ''} ${lot.internal_code || ''} ${lot.serial_number || ''}`.toLowerCase()
+    return blob.includes(q)
+  })
+})
+
+const rentalItems = computed(() =>
+  Array.isArray(props.modelValue.inventory_rental_items) ? props.modelValue.inventory_rental_items : []
+)
+
+const selectedRentalItemsDetailed = computed(() =>
+  rentalItems.value
+    .map((item) => {
+      const lotId = Number(item?.lot_id)
+      const lot = operationLots.value.find((x) => Number(x.id) === lotId)
+      if (!lot) return null
+      const quantity = Math.max(1, Number(item?.quantity || 1))
+      const days = Math.max(1, Number(item?.days ?? 1))
+      const unit = Number(lot.unit_price || 0)
+      return {
+        lot,
+        lot_id: lotId,
+        quantity,
+        days,
+        lineTotal: unit * quantity * days,
+      }
+    })
+    .filter(Boolean)
+)
+
+const availableRentalLotsForPick = computed(() => {
+  const used = new Set(rentalItems.value.map((item) => Number(item?.lot_id)))
+  return filteredOperationLots.value.filter((lot) => !used.has(Number(lot.id)))
+})
+
+const rentalGrandTotal = computed(() =>
+  selectedRentalItemsDetailed.value.reduce((acc, item) => acc + Number(item.lineTotal || 0), 0)
+)
+
+const saleItems = computed(() =>
+  Array.isArray(props.modelValue.inventory_sale_items) ? props.modelValue.inventory_sale_items : []
+)
+
+const selectedSaleItemsDetailed = computed(() =>
+  saleItems.value
+    .map((item) => {
+      const lotId = Number(item?.lot_id)
+      const lot = operationLots.value.find((x) => Number(x.id) === lotId)
+      if (!lot) return null
+      const quantity = Math.max(1, Number(item?.quantity || 1))
+      return {
+        lot,
+        lot_id: lotId,
+        quantity,
+        lineTotal: Number(lot.unit_price || 0) * quantity,
+      }
+    })
+    .filter(Boolean)
+)
+
+const availableSaleLotsForPick = computed(() => {
+  const used = new Set(saleItems.value.map((item) => Number(item?.lot_id)))
+  return filteredOperationLots.value.filter((lot) => !used.has(Number(lot.id)))
+})
+
+const saleGrandTotal = computed(() =>
+  selectedSaleItemsDetailed.value.reduce((acc, item) => acc + Number(item.lineTotal || 0), 0)
+)
+
+const submitButtonLabel = computed(() => {
+  if (props.disabled) return 'Guardando…'
+  if (operationType.value === 'venta') return 'Realizar venta'
+  if (operationType.value === 'alquiler') return 'Registrar alquiler'
+  return 'Cargar servicio'
+})
+
+function setInventoryOperationType(t) {
+  if (props.disabled) return
+  patch({
+    inventory_operation_type: t,
+    inventory_lot_id: '',
+    inventory_quantity: 1,
+    inventory_days: 1,
+    inventory_sale_items: [],
+    inventory_rental_items: [],
+  })
+}
+
+function addRentalItem() {
+  if (props.disabled) return
+  if (operationType.value !== 'alquiler') return
+  const lotId = Number(selectedRentalLotId.value)
+  if (!lotId) return
+  if (rentalItems.value.some((item) => Number(item?.lot_id) === lotId)) return
+  patch({
+    inventory_rental_items: [...rentalItems.value, { lot_id: lotId, quantity: 1, days: 1 }],
+  })
+  selectedRentalLotId.value = ''
+}
+
+function removeRentalItem(lotId) {
+  if (props.disabled) return
+  patch({
+    inventory_rental_items: rentalItems.value.filter((item) => Number(item?.lot_id) !== Number(lotId)),
+  })
+}
+
+function updateRentalItemQty(lotId, qtyRaw) {
+  if (props.disabled) return
+  const lot = props.inventoryLots.find((x) => Number(x.id) === Number(lotId))
+  const maxQ = lot != null ? Math.max(1, Number(lot.quantity_available || 0)) : 999999
+  let qty = Math.max(1, Number(qtyRaw || 1))
+  if (qty > maxQ) qty = maxQ
+  patch({
+    inventory_rental_items: rentalItems.value.map((item) =>
+      Number(item?.lot_id) === Number(lotId) ? { ...item, quantity: qty } : item
+    ),
+  })
+}
+
+function updateRentalItemDays(lotId, daysRaw) {
+  if (props.disabled) return
+  const days = Math.max(1, Number(daysRaw || 1))
+  patch({
+    inventory_rental_items: rentalItems.value.map((item) =>
+      Number(item?.lot_id) === Number(lotId) ? { ...item, days } : item
+    ),
+  })
+}
+
+function addSaleItem() {
+  if (props.disabled) return
+  if (operationType.value !== 'venta') return
+  const lotId = Number(selectedSaleLotId.value)
+  if (!lotId) return
+  if (saleItems.value.some((item) => Number(item?.lot_id) === lotId)) return
+  patch({
+    inventory_sale_items: [...saleItems.value, { lot_id: lotId, quantity: 1 }],
+  })
+  selectedSaleLotId.value = ''
+}
+
+function removeSaleItem(lotId) {
+  if (props.disabled) return
+  patch({
+    inventory_sale_items: saleItems.value.filter((item) => Number(item?.lot_id) !== Number(lotId)),
+  })
+}
+
+function updateSaleItemQty(lotId, qtyRaw) {
+  if (props.disabled) return
+  const lot = props.inventoryLots.find((x) => Number(x.id) === Number(lotId))
+  const maxQ = lot != null ? Math.max(1, Number(lot.quantity_available || 0)) : 999999
+  let qty = Math.max(1, Number(qtyRaw || 1))
+  if (qty > maxQ) qty = maxQ
+  patch({
+    inventory_sale_items: saleItems.value.map((item) =>
+      Number(item?.lot_id) === Number(lotId) ? { ...item, quantity: qty } : item
+    ),
+  })
+}
+
+watch(
+  () => props.allowInventoryCommercialOps,
+  (allow) => {
+    if (!allow && props.registerKind === 'servicio') {
+      patch({
+        inventory_operation_type: 'servicio',
+        inventory_lot_id: '',
+        inventory_quantity: 1,
+        inventory_days: 1,
+        inventory_sale_items: [],
+        inventory_rental_items: [],
+      })
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => props.registerKind,
+  (k) => {
+    if (k === 'venta' || k === 'alquiler') {
+      patch({
+        inventory_operation_type: k,
+        inventory_lot_id: '',
+        inventory_quantity: 1,
+        inventory_days: 1,
+        inventory_sale_items: [],
+        inventory_rental_items: [],
+      })
+    } else if (k === 'mantenimiento') {
+      patch({
+        inventory_operation_type: 'servicio',
+        inventory_quantity: 1,
+        inventory_days: 1,
+        inventory_sale_items: [],
+        inventory_rental_items: [],
+      })
+    }
+  },
+  { immediate: true }
+)
+
+const showCommercialInventoryShell = computed(
+  () =>
+    props.registerKind === 'venta' ||
+    props.registerKind === 'alquiler' ||
+    props.allowInventoryCommercialOps
+)
+
+const showCommercialTypeSwitcher = computed(
+  () => props.registerKind === 'servicio' && props.allowInventoryCommercialOps
+)
+const isMaintenanceMode = computed(() => props.registerKind === 'mantenimiento')
+const maintenanceLots = computed(() => {
+  const companyId = Number(props.modelValue.company_id || 0)
+  return props.inventoryLots.filter((lot) => {
+    if (Number(lot.tenant_company_id || 0) !== companyId) return false
+    if (!lot.is_active) return false
+    return String(lot.lifecycle_status || 'activo') === 'activo'
+  })
+})
+
+/** Aclara titular económico (owner del lote) vs ejecutor del registro en operaciones de inventario. */
+const showInventoryOwnerExecutorBanner = computed(
+  () =>
+    props.allowInventoryCommercialOps &&
+    (operationType.value === 'venta' || operationType.value === 'alquiler')
+)
+
+const isSimpleServicioMode = computed(() => {
+  if (props.billingLocked) return false
+  if (String(props.modelValue.inventory_operation_type || 'servicio') !== 'servicio') return false
+  const ls = lines.value
+  if (ls.length !== 1) return false
+  const r = ls[0]
+  return (r.catalog_id == null || r.catalog_id === '') && r.isOtherLine
+})
+
+watch(
+  () => [props.modelValue.inventory_operation_type, props.billingLocked],
+  () => {
+    if (props.billingLocked) {
+      return
+    }
+    const op = String(props.modelValue.inventory_operation_type || 'servicio')
+    if (op === 'servicio') {
+      const ls = lines.value
+      if (ls.length === 0) {
+        patch(syncTypeAndAmount([createServicioLine()]))
+      }
+    } else if (lines.value.length) {
+      patch(syncTypeAndAmount([]))
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => lines.value.length,
+  (len) => {
+    if (props.disabled || props.billingLocked) return
+    if (String(props.modelValue.inventory_operation_type || 'servicio') !== 'servicio') return
+    if (len === 0) {
+      patch(syncTypeAndAmount([createServicioLine()]))
+    }
+  }
+)
 </script>
 
 <template>
-  <div class="flex flex-col gap-8">
+  <div class="flex flex-col gap-8" :class="{ 'lg:gap-10': wideLayout }">
+    <div
+      :class="
+        wideLayout
+          ? 'grid grid-cols-1 gap-8 lg:grid-cols-2 lg:gap-10 lg:items-start'
+          : 'contents'
+      "
+    >
     <!-- Paso 1 -->
     <section class="step-section" aria-labelledby="reg-svc-step1">
       <h2 id="reg-svc-step1" class="step-title">
         <span class="step-badge" aria-hidden="true">1</span>
         Empresa y cliente
       </h2>
-      <p class="step-lede">
-        <template v-if="billingLocked">
-          Empresa y cliente fijados por la asignación administrativa; complete conceptos e importes abajo.
-        </template>
-        <template v-else>
-          Elige la empresa en el listado; al final puedes indicar cliente puntual si no está registrado en el sistema.
-        </template>
-      </p>
 
-    <!-- Empresa / cliente puntual (una sola lista) -->
     <div>
       <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Empresa o cliente a facturar <span class="text-red-400">*</span>
+        Empresa <span class="text-red-400">*</span>
       </label>
       <div class="relative">
         <span
@@ -371,16 +606,12 @@ function onCompanySelectChange(ev) {
         </span>
         <select
           class="w-full appearance-none rounded-2xl border border-slate-700/90 bg-[#141a22] py-3.5 pl-12 pr-10 text-[0.9375rem] text-white outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
-          :class="inner.use_quick_client ? 'border-amber-500/35' : ''"
           :value="companySelectValue"
           :disabled="disabled || billingLocked"
           @change="onCompanySelectChange"
         >
           <option value="" disabled>Seleccionar…</option>
           <option v-for="c in companies" :key="c.id" :value="String(c.id)">{{ c.nombre }}</option>
-          <option :value="QUICK_CLIENT_OPTION" class="text-amber-200">
-            Cliente sin registro
-          </option>
         </select>
         <span
           class="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500"
@@ -392,13 +623,9 @@ function onCompanySelectChange(ev) {
         </span>
       </div>
       <p v-if="fieldErrors.company_id" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.company_id[0] }}</p>
-      <p v-if="inner.use_quick_client" class="mt-2 text-[0.75rem] leading-snug text-amber-500/90">
-        Mismo teléfono agrupa servicios de este cliente para facturación.
-      </p>
     </div>
 
-    <!-- Cliente -->
-    <div v-if="!inner.use_quick_client">
+    <div>
       <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
         Cliente atendido <span class="text-red-400">*</span>
       </label>
@@ -427,163 +654,331 @@ function onCompanySelectChange(ev) {
       </div>
       <p v-if="fieldErrors.client_name" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.client_name[0] }}</p>
     </div>
-
-    <!-- Cliente puntual: nombre + teléfono -->
-    <template v-else>
-    <div>
-      <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Nombre del cliente <span class="text-red-400">*</span>
-      </label>
-      <div class="relative">
-        <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true">
-          <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-            <path
-              d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </span>
-        <input
-          :value="inner.client_name"
-          :list="clientListId"
-          autocomplete="off"
-          placeholder="Nombre del cliente"
-          :disabled="disabled"
-          class="w-full rounded-2xl border border-slate-700/90 bg-[#141a22] py-3.5 pl-12 pr-4 text-[0.9375rem] text-white placeholder:text-slate-600 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
-          @input="patch({ client_name: $event.target.value })"
-        />
-        <datalist :id="clientListId">
-          <option v-for="s in clientSuggestions" :key="s" :value="s" />
-        </datalist>
-      </div>
-      <p v-if="fieldErrors.client_name" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.client_name[0] }}</p>
-    </div>
-
-    <div>
-      <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Teléfono <span class="text-red-400">*</span>
-      </label>
-      <div class="relative">
-        <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true">
-          <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-            <path
-              d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </span>
-        <input
-          :value="inner.quick_telefono"
-          type="tel"
-          inputmode="tel"
-          autocomplete="tel"
-          placeholder="Ej. 3001234567"
-          :disabled="disabled"
-          class="w-full rounded-2xl border border-slate-700/90 bg-[#141a22] py-3.5 pl-12 pr-4 text-[0.9375rem] text-white placeholder:text-slate-600 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
-          @input="patch({ quick_telefono: $event.target.value })"
-        />
-      </div>
-      <p v-if="fieldErrors.quick_telefono" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.quick_telefono[0] }}</p>
-    </div>
-    </template>
     </section>
 
     <!-- Paso 2 -->
     <section class="step-section" aria-labelledby="reg-svc-step2">
       <h2 id="reg-svc-step2" class="step-title">
         <span class="step-badge" aria-hidden="true">2</span>
-        Conceptos cobrados
+        <template v-if="registerKind === 'venta'">Venta de equipo</template>
+        <template v-else-if="registerKind === 'alquiler'">Alquiler de equipo</template>
+        <template v-else-if="registerKind === 'mantenimiento'">Mantenimiento</template>
+        <template v-else>Conceptos cobrados</template>
       </h2>
-        <p class="step-lede">
-        Añade cada trabajo desde el catálogo de la empresa o «Otro…». En ítems del catálogo verás texto y precio solo como
-        referencia: debes describir el trabajo y el importe queda según las reglas de facturación del sistema.
+
+    <div
+      v-if="isMaintenanceMode"
+      class="rounded-2xl border border-slate-700/60 bg-slate-900/30 p-3"
+    >
+      <p class="mb-2 text-xs text-slate-400">
+        Seleccione el equipo de la empresa para vincular el mantenimiento facturable y la trazabilidad en hoja de vida.
       </p>
-
-    <!-- Catálogo: panel inline (no desplegable flotante) -->
-    <div class="rounded-2xl border border-slate-700/60 bg-slate-900/30 p-3">
-      <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Añadir desde catálogo <span class="text-red-400">*</span>
-      </label>
-      <div class="flex flex-col gap-2 sm:flex-row sm:items-stretch sm:gap-2">
-        <button
-          type="button"
-          class="flex min-h-[3.25rem] shrink-0 cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-sky-500/55 bg-sky-500/20 px-4 py-2 text-sm font-bold text-sky-100 shadow-inner shadow-sky-950/30 transition hover:bg-sky-500/30 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-40 sm:min-w-[10.5rem]"
-          :disabled="disabled || (!inner.company_id && !inner.use_quick_client)"
-          :aria-expanded="catalogPanelOpen"
-          aria-controls="catalog-panel-list"
-          @click="toggleCatalogPanel"
-        >
-          <span class="text-2xl font-light leading-none" aria-hidden="true">+</span>
-          <span>{{ catalogPanelOpen ? 'Ocultar catálogo' : 'Ver catálogo' }}</span>
-        </button>
-        <div class="relative min-w-0 flex-1">
-          <span class="pointer-events-none absolute left-3.5 top-1/2 z-[1] -translate-y-1/2 text-slate-500" aria-hidden="true">
-            <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-              <path
-                d="M21 21l-4.35-4.35M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16z"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </span>
-          <input
-            id="catalog-filter-input"
-            ref="catalogSearchInputRef"
-            :value="typeFilter"
-            type="text"
-            autocomplete="off"
-            placeholder="Filtrar lista (opcional)"
-            :disabled="disabled || (!inner.company_id && !inner.use_quick_client)"
-            class="h-[3.25rem] w-full rounded-2xl border border-slate-700/90 bg-[#141a22] py-3.5 pl-12 pr-4 text-[0.9375rem] text-white placeholder:text-slate-600 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
-            @input="onTypeInput"
-            @focus="onTypeFocus"
-          />
-        </div>
-      </div>
-
-      <div
-        v-show="catalogPanelOpen && (inner.company_id || inner.use_quick_client) && filteredCatalog.length && !disabled"
-        id="catalog-panel-list"
-        class="mt-3 max-h-60 overflow-y-auto rounded-xl border border-slate-600/80 bg-[#1a222d]"
-        role="listbox"
-        aria-label="Ítems del catálogo"
+      <select
+        :value="inner.inventory_lot_id ? String(inner.inventory_lot_id) : ''"
+        :disabled="disabled || !inner.company_id"
+        class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white outline-none focus:border-sky-500 disabled:opacity-50"
+        @change="patch({ inventory_lot_id: $event.target.value })"
       >
-        <button
-          v-for="item in filteredCatalog"
-          :key="item.id"
-          type="button"
-          class="flex w-full items-center gap-2 border-b border-slate-700/50 px-4 py-3 text-left text-sm text-slate-200 last:border-b-0 hover:bg-sky-500/15 active:bg-sky-500/25"
-          @click.prevent="pickCatalogRow(item)"
-        >
-          <span class="font-medium">{{ item.label }}</span>
-          <span v-if="!item.isOther" class="ml-auto text-xs tabular-nums text-slate-500">
-            ${{ Number(item.basePrice).toLocaleString('es-CO') }}
-          </span>
-          <span v-else class="ml-auto text-xs text-amber-400/90">nuevo</span>
-        </button>
-      </div>
-
-      <p
-        v-if="(inner.company_id || inner.use_quick_client) && catalogPanelOpen && !filteredCatalog.length && !disabled"
-        class="mt-2 text-sm text-amber-400/90"
-      >
-        No hay ítems en el catálogo para esta empresa.
+        <option value="" disabled>Seleccionar equipo de inventario…</option>
+        <option v-for="lot in maintenanceLots" :key="lot.id" :value="String(lot.id)">
+          {{ lot.name }} · {{ lot.internal_code || lot.serial_number || 'sin código' }}
+        </option>
+      </select>
+      <p v-if="!inner.company_id" class="mt-2 text-xs text-slate-500">Primero seleccione una empresa.</p>
+      <p v-else-if="!maintenanceLots.length" class="mt-2 text-xs text-slate-500">
+        La empresa no tiene equipos activos disponibles en inventario.
       </p>
-      <p v-if="!inner.company_id && !inner.use_quick_client" class="mt-2 text-[0.75rem] text-amber-500/90">
-        Primero elige empresa o cliente puntual; luego abre «Ver catálogo» y toca cada ítem que quieras sumar.
-      </p>
-      <p v-else-if="inner.company_id || inner.use_quick_client" class="mt-2 text-[0.75rem] text-slate-500">
-        <template v-if="catalogItems.length">{{ catalogItems.length }} ítem(s) en catálogo (definidos por administración).</template>
-        <template v-else>Sin ítems en catálogo: use solo «Nuevo ítem» y complete nombre del concepto, descripción e importe.</template>
-        Puedes tocar varios ítems seguidos sin cerrar el panel.
-      </p>
-      <p v-if="fieldErrors.items" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.items[0] }}</p>
+      <p v-if="fieldErrors.inventory_lot_id" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.inventory_lot_id[0] }}</p>
     </div>
 
-    <!-- Líneas -->
-    <ul v-if="lines.length" class="flex flex-col gap-3">
+    <!-- Venta / alquiler (admin con selector, o ruta dedicada) -->
+    <div
+      v-if="showCommercialInventoryShell"
+      class="rounded-2xl border border-slate-700/60 bg-slate-900/30 p-3"
+    >
+      <p
+        v-if="showInventoryOwnerExecutorBanner"
+        class="mb-3 rounded-xl border border-sky-500/35 bg-sky-950/45 px-3 py-2.5 text-xs leading-relaxed text-sky-100/95"
+      >
+        <span class="font-semibold text-sky-200">Importante:</span>
+        el valor facturable del equipo corresponde al titular del inventario (administración); usted figura como
+        <span class="font-medium">ejecutor del registro</span>. Las líneas de venta o alquiler de inventario
+        <span class="font-medium">no generan comisión</span> en la liquidación del técnico por ese concepto.
+      </p>
+      <template v-if="showCommercialTypeSwitcher">
+        <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Operación comercial
+        </label>
+        <div class="flex flex-wrap gap-2">
+          <button
+            type="button"
+            :disabled="disabled"
+            class="rounded-xl border px-3 py-2.5 text-sm font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-sky-500/40 disabled:opacity-50"
+            :class="
+              operationType === 'servicio'
+                ? 'border-sky-500 bg-sky-600/20 text-sky-100'
+                : 'border-slate-700/90 bg-[#141a22] text-slate-200 hover:border-slate-600'
+            "
+            @click="setInventoryOperationType('servicio')"
+          >
+            Servicio
+          </button>
+          <button
+            type="button"
+            :disabled="disabled"
+            class="rounded-xl border px-3 py-2.5 text-sm font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-sky-500/40 disabled:opacity-50"
+            :class="
+              operationType === 'venta'
+                ? 'border-sky-500 bg-sky-600/20 text-sky-100'
+                : 'border-slate-700/90 bg-[#141a22] text-slate-200 hover:border-slate-600'
+            "
+            @click="setInventoryOperationType('venta')"
+          >
+            Venta de equipo
+          </button>
+          <button
+            type="button"
+            :disabled="disabled"
+            class="rounded-xl border px-3 py-2.5 text-sm font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-sky-500/40 disabled:opacity-50"
+            :class="
+              operationType === 'alquiler'
+                ? 'border-sky-500 bg-sky-600/20 text-sky-100'
+                : 'border-slate-700/90 bg-[#141a22] text-slate-200 hover:border-slate-600'
+            "
+            @click="setInventoryOperationType('alquiler')"
+          >
+            Alquiler de equipo
+          </button>
+        </div>
+      </template>
+      <div v-if="operationType !== 'servicio'" class="mt-3 space-y-2">
+        <template v-if="operationType === 'venta'">
+          <input
+            v-model="lotPickSearchQ"
+            type="search"
+            autocomplete="off"
+            placeholder="Buscar producto por nombre o código…"
+            :disabled="disabled"
+            class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-sky-500 disabled:opacity-50"
+          />
+          <div class="flex gap-2">
+            <select
+              v-model="selectedSaleLotId"
+              :disabled="disabled"
+              class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white outline-none focus:border-sky-500 disabled:opacity-50"
+            >
+              <option value="" disabled>Seleccionar producto…</option>
+              <option v-for="lot in availableSaleLotsForPick" :key="lot.id" :value="String(lot.id)">
+                {{ lot.name }} · Stock {{ lot.quantity_available }} · {{ formatHintMoneyCop(lot.unit_price) }}
+              </option>
+            </select>
+            <button
+              type="button"
+              :disabled="disabled || !selectedSaleLotId"
+              class="shrink-0 rounded-xl border border-slate-600 px-3 py-2.5 text-xs font-semibold text-slate-200 transition hover:border-sky-500 hover:text-sky-300 disabled:opacity-50"
+              @click="addSaleItem"
+            >
+              Agregar
+            </button>
+          </div>
+          <p class="text-xs text-slate-400">
+            Productos seleccionados: {{ selectedSaleItemsDetailed.length }}
+          </p>
+          <ul
+            v-if="selectedSaleItemsDetailed.length"
+            class="max-h-56 divide-y divide-slate-700/50 overflow-y-auto rounded-xl border border-slate-700/80 bg-[#141a22]"
+          >
+            <li
+              v-for="item in selectedSaleItemsDetailed"
+              :key="item.lot_id"
+              class="flex flex-col gap-2 px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div class="text-slate-200">
+                {{ item.lot.name }} · {{ formatHintMoneyCop(item.lot.unit_price) }}
+              </div>
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-slate-400">
+                  Cantidad
+                  <input
+                    :value="item.quantity"
+                    type="number"
+                    min="1"
+                    :disabled="disabled"
+                    class="ml-1 w-16 rounded-lg border border-slate-700/90 bg-[#0f1419] px-2 py-1 text-sm text-white outline-none focus:border-sky-500"
+                    @input="updateSaleItemQty(item.lot_id, $event.target.value)"
+                  />
+                </label>
+                <span class="text-xs text-emerald-400">{{ formatHintMoneyCop(item.lineTotal) }}</span>
+                <button
+                  type="button"
+                  :disabled="disabled"
+                  class="rounded-lg px-2 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+                  @click="removeSaleItem(item.lot_id)"
+                >
+                  Quitar
+                </button>
+              </div>
+            </li>
+          </ul>
+          <p v-else class="text-xs text-slate-500">No hay productos agregados.</p>
+        </template>
+        <template v-else>
+          <input
+            v-model="lotPickSearchQ"
+            type="search"
+            autocomplete="off"
+            placeholder="Buscar equipo por nombre o código…"
+            :disabled="disabled"
+            class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 outline-none focus:border-sky-500 disabled:opacity-50"
+          />
+          <div class="flex gap-2">
+            <select
+              v-model="selectedRentalLotId"
+              :disabled="disabled"
+              class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2.5 text-sm text-white outline-none focus:border-sky-500 disabled:opacity-50"
+            >
+              <option value="" disabled>Seleccionar equipo…</option>
+              <option v-for="lot in availableRentalLotsForPick" :key="lot.id" :value="String(lot.id)">
+                {{ lot.name }} · Stock {{ lot.quantity_available }} · {{ formatHintMoneyCop(lot.unit_price) }}
+              </option>
+            </select>
+            <button
+              type="button"
+              :disabled="disabled || !selectedRentalLotId"
+              class="shrink-0 rounded-xl border border-slate-600 px-3 py-2.5 text-xs font-semibold text-slate-200 transition hover:border-sky-500 hover:text-sky-300 disabled:opacity-50"
+              @click="addRentalItem"
+            >
+              Agregar
+            </button>
+          </div>
+          <p class="text-xs text-slate-400">
+            Equipos en alquiler: {{ selectedRentalItemsDetailed.length }}
+          </p>
+          <div
+            v-if="selectedRentalItemsDetailed.length"
+            class="mt-1 flex flex-col gap-3"
+          >
+            <div
+              v-for="(item, rIdx) in selectedRentalItemsDetailed"
+              :key="item.lot_id"
+              class="rounded-xl border border-slate-600/70 bg-[#141a22] p-3.5 shadow-sm ring-1 ring-slate-800/40 sm:p-4"
+            >
+              <div class="mb-3 flex flex-wrap items-start justify-between gap-2 border-b border-slate-700/50 pb-2">
+                <div>
+                  <p class="text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">
+                    Equipo {{ rIdx + 1 }}
+                  </p>
+                  <p class="text-sm font-medium text-slate-100">
+                    {{ item.lot.name }}
+                  </p>
+                  <p class="mt-0.5 text-xs text-slate-400">
+                    Tarifa diaria {{ formatHintMoneyCop(item.lot.unit_price) }}
+                    <span class="text-slate-600"> · </span>
+                    Stock {{ item.lot.quantity_available }}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  :disabled="disabled"
+                  class="shrink-0 rounded-lg border border-red-500/30 px-2.5 py-1 text-xs font-semibold text-red-400 transition hover:bg-red-500/10 disabled:opacity-50"
+                  @click="removeRentalItem(item.lot_id)"
+                >
+                  Quitar
+                </button>
+              </div>
+              <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+                <label class="block text-xs text-slate-400">
+                  <span class="mb-1 block text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">Cantidad</span>
+                  <input
+                    :value="item.quantity"
+                    type="number"
+                    min="1"
+                    :max="Math.max(1, Number(item.lot.quantity_available || 0))"
+                    :disabled="disabled"
+                    class="w-full min-w-[5.5rem] rounded-lg border border-slate-700/90 bg-[#0f1419] px-3 py-2 text-sm text-white outline-none focus:border-sky-500 sm:w-24"
+                    @input="updateRentalItemQty(item.lot_id, $event.target.value)"
+                  />
+                </label>
+                <label class="block text-xs text-slate-400">
+                  <span class="mb-1 block text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">Días</span>
+                  <input
+                    :value="item.days"
+                    type="number"
+                    min="1"
+                    :disabled="disabled"
+                    class="w-full min-w-[5.5rem] rounded-lg border border-slate-700/90 bg-[#0f1419] px-3 py-2 text-sm text-white outline-none focus:border-sky-500 sm:w-24"
+                    @input="updateRentalItemDays(item.lot_id, $event.target.value)"
+                  />
+                </label>
+                <div class="flex flex-1 flex-col justify-end sm:min-w-[8rem] sm:items-end">
+                  <span class="text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">Subtotal</span>
+                  <span class="text-sm font-semibold tabular-nums text-emerald-400">{{ formatHintMoneyCop(item.lineTotal) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p v-else class="text-xs text-slate-500">No hay equipos agregados al alquiler.</p>
+        </template>
+      </div>
+      <p v-if="fieldErrors.inventory_lot_id" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.inventory_lot_id[0] }}</p>
+      <p v-if="fieldErrors.inventory_quantity" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.inventory_quantity[0] }}</p>
+      <p v-if="fieldErrors.inventory_days" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.inventory_days[0] }}</p>
+      <p v-if="operationType !== 'servicio' && fieldErrors.items" class="mt-2 text-sm text-red-400">
+        {{ fieldErrors.items[0] }}
+      </p>
+    </div>
+
+    <!-- Servicio (registro): una sola descripción + valor, sin catálogo -->
+    <div
+      v-if="isSimpleServicioMode && lines[0]"
+      class="rounded-2xl border border-slate-700/80 bg-[#0f1419] p-4"
+    >
+      <h3 class="mb-3 text-sm font-semibold text-slate-200">Servicio</h3>
+      <label class="mb-1 block text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">
+        Descripción del trabajo <span class="text-red-400">*</span>
+      </label>
+      <textarea
+        :value="lines[0].line_description"
+        rows="4"
+        :disabled="disabled"
+        placeholder="Describe el trabajo realizado…"
+        class="mb-4 w-full resize-y rounded-xl border border-slate-700/90 bg-[#141a22] px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+        @input="updateLine(0, { line_description: $event.target.value })"
+      />
+      <label class="mb-1 block text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500">
+        Valor (COP) <span class="text-red-400">*</span>
+      </label>
+      <div class="relative">
+        <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
+        <input
+          :value="lines[0].amount"
+          type="number"
+          inputmode="decimal"
+          min="0.01"
+          step="0.01"
+          :disabled="disabled"
+          placeholder="Importe de referencia"
+          class="w-full rounded-xl border border-slate-700/90 bg-[#141a22] py-2.5 pl-8 pr-3 text-sm text-white tabular-nums outline-none focus:border-sky-400"
+          @input="onLineAmountInput(0, $event)"
+          @wheel.prevent
+        />
+      </div>
+      <p v-if="fieldErrors.items" class="mt-3 text-sm text-red-400">{{ fieldErrors.items[0] }}</p>
+      <div class="mt-3 flex justify-end">
+        <button
+          v-if="!disabled"
+          type="button"
+          class="rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-sky-500 hover:text-sky-300"
+          @click="addServicioConceptLine"
+        >
+          + Agregar otro concepto
+        </button>
+      </div>
+    </div>
+
+    <!-- Líneas (p. ej. asignación administrativa con conceptos previos) -->
+    <div v-else-if="lines.length" class="flex flex-col gap-3">
+      <ul class="flex flex-col gap-3">
       <li
         v-for="(row, idx) in lines"
         :key="row.key"
@@ -622,9 +1017,6 @@ function onCompanySelectChange(ev) {
         <label class="mb-1 block text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500"
           >Qué hiciste en este concepto</label
         >
-        <p class="mb-1.5 text-[0.7rem] leading-snug text-slate-500">
-          No basta el nombre del ítem: indica trabajo real (falla, repuesto, zona, duración…).
-        </p>
         <div
           v-if="
             !row.isOtherLine &&
@@ -645,9 +1037,6 @@ function onCompanySelectChange(ev) {
             class="mt-1 text-[0.85rem] tabular-nums text-slate-400 line-through decoration-slate-500"
           >
             {{ formatHintMoneyCop(row.catalog_hint_price) }}
-          </p>
-          <p class="mt-1.5 text-[0.65rem] text-slate-500">
-            Al tocar descripción o importe abajo, esta guía se oculta. Escribe tu propio detalle e importe de referencia.
           </p>
         </div>
         <textarea
@@ -690,38 +1079,46 @@ function onCompanySelectChange(ev) {
           />
         </div>
       </li>
-    </ul>
+      </ul>
+      <div
+        v-if="!disabled && !billingLocked && operationType === 'servicio'"
+        class="flex justify-end"
+      >
+        <button
+          type="button"
+          class="rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-sky-500 hover:text-sky-300"
+          @click="addServicioConceptLine"
+        >
+          + Agregar otro concepto
+        </button>
+      </div>
+    </div>
 
     <p v-if="lines.length" class="rounded-2xl border border-sky-500/25 bg-sky-500/10 px-4 py-3 text-center text-sm font-semibold text-sky-100">
       Total referencia (lo que ingresas por línea): {{ totalDisplay }}
     </p>
 
-    <!-- Resumen tipo servicio (se sincroniza con los ítems; editable) -->
-    <div v-if="lines.length">
-      <label class="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Resumen en una línea <span class="text-red-400">*</span>
-      </label>
-      <p class="mb-2 text-[0.75rem] leading-relaxed text-slate-500">
-        Se arma con los nombres de los conceptos; puedes acortarlo para que se entienda de un vistazo.
-      </p>
-      <input
-        :value="inner.service_type"
-        type="text"
-        :disabled="disabled"
-        class="w-full rounded-2xl border border-slate-700/90 bg-[#141a22] px-4 py-3.5 text-[0.9375rem] text-white outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/35 disabled:opacity-50"
-        @input="patch({ service_type: $event.target.value })"
-      />
-      <p v-if="fieldErrors.service_type" class="mt-1.5 text-sm text-red-400">{{ fieldErrors.service_type[0] }}</p>
-    </div>
+    <!-- Resumen en una línea: oculto; `service_type` se arma desde descripción / conceptos (syncTypeAndAmount). -->
+    <p
+      v-if="lines.length && fieldErrors.service_type"
+      class="text-sm text-red-400"
+      role="alert"
+    >
+      {{ fieldErrors.service_type[0] }}
+    </p>
     </section>
+    </div>
 
-    <!-- Paso 3 -->
-    <section class="step-section" aria-labelledby="reg-svc-step3">
+    <!-- Paso 3: solo aplica a registro tipo servicio / mantenimiento (no venta ni alquiler de inventario). -->
+    <section
+      v-if="operationType !== 'venta' && operationType !== 'alquiler'"
+      class="step-section"
+      aria-labelledby="reg-svc-step3"
+    >
       <h2 id="reg-svc-step3" class="step-title">
         <span class="step-badge" aria-hidden="true">3</span>
         Evidencias
       </h2>
-      <p class="step-lede">Las fotos ayudan a respaldar el trabajo (opcional).</p>
 
     <!-- Fotos (máx. 4) -->
     <div>
@@ -775,13 +1172,26 @@ function onCompanySelectChange(ev) {
     </div>
     </section>
 
+    <p
+      v-if="operationType === 'venta'"
+      class="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-center text-sm font-semibold text-emerald-100"
+    >
+      Total de la venta: {{ formatHintMoneyCop(saleGrandTotal) }}
+    </p>
+    <p
+      v-if="operationType === 'alquiler' && selectedRentalItemsDetailed.length"
+      class="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-center text-sm font-semibold text-emerald-100"
+    >
+      Total del alquiler: {{ formatHintMoneyCop(rentalGrandTotal) }}
+    </p>
+
     <button
       v-if="!hideSubmitButton"
       type="submit"
       class="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 py-4 text-base font-bold text-white shadow-lg shadow-sky-500/25 transition hover:brightness-110 active:scale-[0.99] disabled:opacity-50"
       :disabled="disabled"
     >
-      {{ disabled ? 'Guardando…' : 'Cargar servicio' }}
+      {{ submitButtonLabel }}
     </button>
   </div>
 </template>

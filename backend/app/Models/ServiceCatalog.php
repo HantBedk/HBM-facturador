@@ -17,6 +17,8 @@ class ServiceCatalog extends Model
         'name',
         'description',
         'base_price',
+        /** Porcentaje de IVA aplicable al facturar servicios vinculados a esta categoría (sobre el importe de la línea). */
+        'iva_percent',
         'technician_discount_percent',
         'status',
     ];
@@ -25,6 +27,7 @@ class ServiceCatalog extends Model
     {
         return [
             'base_price' => 'decimal:2',
+            'iva_percent' => 'decimal:2',
             'technician_discount_percent' => 'decimal:2',
         ];
     }

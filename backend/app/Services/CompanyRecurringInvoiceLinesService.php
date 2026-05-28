@@ -65,8 +65,10 @@ class CompanyRecurringInvoiceLinesService
             $description = $this->resolveDescription($tpl, $catalog);
             $serviceType = $this->resolveServiceType($tpl, $catalog);
 
-            $row = DB::transaction(function () use ($company, $tpl, $userId, $dateStr, $description, $serviceType) {
-                $code = $this->codes->nextForDate(Carbon::parse($dateStr, config('app.timezone')));
+            $codeKind = $this->resolveCodeKind($tpl);
+
+            $row = DB::transaction(function () use ($company, $tpl, $userId, $dateStr, $description, $serviceType, $codeKind) {
+                $code = $this->codes->nextForDate(Carbon::parse($dateStr, config('app.timezone')), $codeKind);
 
                 return Service::query()->create([
                     'code' => $code,
@@ -89,6 +91,36 @@ class CompanyRecurringInvoiceLinesService
         return $ids;
     }
 
+    /**
+     * Materializa plantillas activas para cada mes calendario entre los extremos (inclusive).
+     *
+     * @return list<int> IDs de servicios recurrentes (existentes o recién creados) en ese rango.
+     */
+    public function ensureServicesForCalendarRange(Company $company, Carbon $rangeStart, Carbon $rangeEnd): array
+    {
+        $tz = config('app.timezone');
+        $cursor = $rangeStart->copy()->timezone($tz)->startOfMonth();
+        $last = $rangeEnd->copy()->timezone($tz)->endOfMonth();
+
+        if ($cursor->gt($last)) {
+            return [];
+        }
+
+        $ids = [];
+        while ($cursor->lte($last)) {
+            $y = (int) $cursor->year;
+            $m = (int) $cursor->month;
+            $start = $cursor->copy()->startOfMonth();
+            $end = $cursor->copy()->endOfMonth();
+            foreach ($this->ensureServicesForPeriod($company, $y, $m, $start, $end) as $id) {
+                $ids[] = $id;
+            }
+            $cursor->addMonthNoOverflow();
+        }
+
+        return array_values(array_unique($ids));
+    }
+
     private function resolveDescription(CompanyRecurringService $tpl, ?ServiceCatalog $catalog): string
     {
         $d = trim((string) ($tpl->description ?? ''));
@@ -106,7 +138,25 @@ class CompanyRecurringInvoiceLinesService
             }
         }
 
-        return 'Servicio fijo mensual';
+        return $this->defaultDescriptionForBillingKind($tpl->billing_kind ?? 'servicio');
+    }
+
+    private function defaultDescriptionForBillingKind(?string $kind): string
+    {
+        return match ($kind ?? 'servicio') {
+            'venta' => 'Cargo fijo mensual (venta)',
+            'alquiler' => 'Cargo fijo mensual (alquiler)',
+            default => 'Servicio fijo mensual',
+        };
+    }
+
+    private function resolveCodeKind(CompanyRecurringService $tpl): string
+    {
+        return match ($tpl->billing_kind ?? 'servicio') {
+            'venta' => ServiceCodeGenerator::KIND_VENTA,
+            'alquiler' => ServiceCodeGenerator::KIND_ALQUILER,
+            default => ServiceCodeGenerator::KIND_SERVICIO,
+        };
     }
 
     private function resolveServiceType(CompanyRecurringService $tpl, ?ServiceCatalog $catalog): ?string
@@ -121,7 +171,11 @@ class CompanyRecurringInvoiceLinesService
             return $n !== '' ? $n : null;
         }
 
-        return null;
+        return match ($tpl->billing_kind ?? 'servicio') {
+            'venta' => 'Venta',
+            'alquiler' => 'Alquiler',
+            default => 'Servicio',
+        };
     }
 
     private function resolveBillingUserId(): int

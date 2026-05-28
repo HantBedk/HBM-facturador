@@ -1,110 +1,211 @@
 <script setup>
+
 import { computed } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+
+import { useRoute, useRouter } from 'vue-router'
+
 import { useAuthStore } from '@/stores/auth'
+
 import { isAdminPanelRole } from '@/utils/roles.js'
+
 import ServiceRegisterEmpleadoForm from '@/components/services/ServiceRegisterEmpleadoForm.vue'
+
 import { useServiceRegisterFlow } from '@/composables/useServiceRegisterFlow.js'
 
+
+
 const auth = useAuthStore()
+
 const router = useRouter()
+
 const route = useRoute()
 
-const isEmpleadoRegistro = computed(() => route.name === 'emp-registro-servicio')
+
+
+const isEmpleadoRegistro = computed(() => String(route.path || '').startsWith('/empleado/'))
+
+
+
+const registerKind = computed(() => {
+
+  const n = route.name
+
+  if (n === 'emp-registro-venta' || n === 'admin-servicios-nuevo-venta') return 'venta'
+
+  if (n === 'emp-registro-alquiler' || n === 'admin-servicios-nuevo-alquiler') return 'alquiler'
+
+  if (n === 'emp-registro-mantenimiento' || n === 'admin-servicios-nuevo-mantenimiento') return 'mantenimiento'
+
+  return 'servicio'
+
+})
+
+
+
+const pageTitle = computed(() => {
+
+  if (registerKind.value === 'venta') return 'Registrar venta de equipo'
+
+  if (registerKind.value === 'alquiler') return 'Registrar alquiler de equipo'
+
+  if (registerKind.value === 'mantenimiento') return 'Registrar mantenimiento'
+
+  return 'Registrar servicio'
+
+})
 
 const basePrefix = computed(() => (isAdminPanelRole(auth.user?.rol) ? '/admin' : '/empleado'))
-const cancelTo = computed(() =>
-  isAdminPanelRole(auth.user?.rol) ? `${basePrefix.value}/servicios` : '/empleado'
-)
 
 const {
+
   companies,
+
   catalogItems,
+
+  inventoryLots,
+
   clientSuggestions,
+
   loading,
+
   fieldErrors,
+
   globalError,
+
   toast,
-  lastCreated,
+
   formResetKey,
+
   photoFiles,
+
   form,
+
   onSubmit,
+
+  allowInventoryCommercialOps,
+
 } = useServiceRegisterFlow({
+
   isEmpleadoRegistro,
+
+  registerKind,
+
   panelOpenRef: null,
-  async onAdminAfterCreate(created) {
-    await router.push(`${basePrefix.value}/servicios/${created.id}`)
+
+  async onAdminAfterCreate() {
+    if (registerKind.value === 'mantenimiento') {
+      await router.push(`${basePrefix.value}/mantenimientos`)
+      return
+    }
+    await router.push(`${basePrefix.value}/servicios`)
   },
+
   async onEmpleadoAfterCreate() {
     await new Promise((r) => setTimeout(r, 450))
+    if (registerKind.value === 'mantenimiento') {
+      await router.push({ name: 'emp-mantenimientos' })
+      return
+    }
     await router.push({ name: 'empleado-dashboard' })
   },
+
 })
+
+const effectiveAllowInventoryCommercialOps = computed(() =>
+  registerKind.value === 'venta' || registerKind.value === 'alquiler'
+    ? allowInventoryCommercialOps.value
+    : false
+)
+
 </script>
 
+
+
 <template>
-  <section class="mx-auto max-w-md px-3 pb-8 sm:px-0">
-    <header class="mb-6 text-center">
-      <p v-if="!isEmpleadoRegistro" class="mb-4">
-        <RouterLink
-          class="text-sm font-medium text-slate-400 underline decoration-slate-600 underline-offset-2 hover:text-slate-200"
-          :to="cancelTo"
-        >
-          ← Volver al listado
-        </RouterLink>
-      </p>
-      <h1 class="text-xl font-bold tracking-tight text-white sm:text-2xl">Registrar servicio</h1>
-      <p class="mt-2 text-[0.8rem] leading-snug text-slate-500">
-        La fecha del servicio y el código (SERV-…) los asigna el servidor al guardar.
-      </p>
+
+  <section class="mx-auto w-full max-w-7xl px-4 pb-8 sm:px-6 lg:px-8">
+
+    <header class="mb-6 text-center lg:text-left">
+
+      <h1 class="text-xl font-bold tracking-tight text-white sm:text-2xl">{{ pageTitle }}</h1>
+
     </header>
+
+
 
     <p v-if="globalError" class="banner" role="alert">{{ globalError }}</p>
 
-    <p
-      v-if="isEmpleadoRegistro && lastCreated"
-      class="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center text-sm text-emerald-200"
-    >
-      Último guardado:
-      <RouterLink
-        :to="`/empleado/servicio/${lastCreated.id}`"
-        class="font-semibold text-sky-300 underline decoration-sky-500/50 hover:text-sky-200"
-      >
-        {{ lastCreated.code }}
-      </RouterLink>
-    </p>
+
 
     <form
+
       class="rounded-3xl border border-slate-800/80 bg-[#121820] p-5 shadow-xl shadow-black/30 sm:p-6"
+
       @submit.prevent="onSubmit"
+
     >
+
       <ServiceRegisterEmpleadoForm
+
         :key="formResetKey"
+
         v-model="form"
+
         v-model:photos="photoFiles"
+
+        wide-layout
+
+        :register-kind="registerKind"
+
         :companies="companies"
+
         :catalog-items="catalogItems"
+
+        :inventory-lots="inventoryLots"
+
         :client-suggestions="clientSuggestions"
+
         :field-errors="fieldErrors"
+
         :disabled="loading"
+
+        :allow-inventory-commercial-ops="effectiveAllowInventoryCommercialOps"
+
       />
+
     </form>
 
+
+
     <Teleport to="body">
+
       <Transition name="toast">
+
         <div
+
           v-if="toast"
+
           class="fixed bottom-6 right-4 z-[100] flex items-center gap-2 rounded-2xl border border-emerald-500/40 bg-[#0f1a14] px-4 py-3 text-sm font-medium text-emerald-100 shadow-lg shadow-black/40"
+
           role="status"
+
         >
+
           <span class="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/25 text-emerald-400" aria-hidden="true">✓</span>
+
           {{ toast }}
+
         </div>
+
       </Transition>
+
     </Teleport>
+
   </section>
+
 </template>
+
+
 
 <style scoped>
 .banner {
@@ -122,9 +223,11 @@ const {
     opacity 0.25s ease,
     transform 0.25s ease;
 }
+
 .toast-enter-from,
 .toast-leave-to {
   opacity: 0;
   transform: translateY(12px);
 }
 </style>
+

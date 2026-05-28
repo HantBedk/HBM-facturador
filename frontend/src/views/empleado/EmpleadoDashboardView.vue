@@ -284,7 +284,7 @@ function toggleRow(id) {
         >
           <div class="min-w-0 flex-1">
             <h3 class="text-[0.7rem] font-semibold uppercase tracking-wide text-slate-500">
-              Saldo pendiente de abono
+              Saldo a favor
             </h3>
             <template v-if="owesPositive">
               <p class="mt-3 text-2xl font-bold tabular-nums text-amber-200 sm:text-[1.75rem]">
@@ -302,7 +302,7 @@ function toggleRow(id) {
             </template>
             <template v-else>
               <p class="mt-3 text-sm font-semibold leading-snug text-emerald-300/95">
-                No hay saldo de referencia pendiente de abono. Todo está al día.
+                Todo está al día.
               </p>
             </template>
           </div>

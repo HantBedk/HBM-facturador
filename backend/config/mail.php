@@ -113,4 +113,21 @@ return [
         'name' => env('MAIL_FROM_NAME', 'Example'),
     ],
 
+    /*
+    | PHPMailer: volcado SMTP a laravel.log (nivel debug). Ver MAIL_SMTP_DEBUG en .env.example.
+    */
+    'smtp_debug' => filter_var(env('MAIL_SMTP_DEBUG', false), FILTER_VALIDATE_BOOL),
+
+    /*
+    | Solo diagnóstico: relaja verify_peer al negociar TLS (p. ej. OpenSSL en contenedor).
+    | No dejar en true en producción.
+    */
+    'smtp_ssl_relaxed' => filter_var(env('MAIL_SMTP_SSL_RELAXED', false), FILTER_VALIDATE_BOOL),
+
+    /*
+    | Tras guardar SMTP en el panel, comprobar AUTH con el servidor (sin enviar mensaje).
+    | Desactivar en tests: MAIL_VERIFY_SMTP=false en phpunit.xml.
+    */
+    'verify_smtp_on_save' => filter_var(env('MAIL_VERIFY_SMTP', true), FILTER_VALIDATE_BOOL),
+
 ];

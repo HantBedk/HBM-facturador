@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Models\Service;
 use App\Models\ServiceCatalog;
 use App\Models\ServiceCatalogSuggestion;
+use App\Models\ServiceItem;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -54,10 +55,11 @@ class ServiceCatalogTest extends TestCase
         $emp = User::factory()->create(['rol' => User::ROL_EMPLEADO]);
         Sanctum::actingAs($emp);
 
-        $this->getJson('/api/service-catalog/active')
-            ->assertOk()
-            ->assertHeader('Cache-Control', 'private, no-store, must-revalidate')
-            ->assertJsonCount(1, 'data');
+        $res = $this->getJson('/api/service-catalog/active')->assertOk()->assertJsonCount(1, 'data');
+        $cc = (string) $res->headers->get('Cache-Control');
+        $parts = array_values(array_filter(array_map('trim', explode(',', $cc))));
+        sort($parts);
+        $this->assertSame(['must-revalidate', 'no-store', 'private'], $parts);
     }
 
     public function test_admin_can_crud_catalog_and_service_stores_catalog_id(): void
@@ -525,5 +527,91 @@ class ServiceCatalogTest extends TestCase
         $this->assertNotNull($row);
         $this->assertSame('1500.75', (string) $row->base_price);
         $this->assertSame('Texto auxiliar', $row->description);
+    }
+
+    public function test_venta_de_equipo_usa_prefijo_vent_en_codigo(): void
+    {
+        $company = Company::query()->create([
+            'nombre' => 'Emp VENT',
+            'factura_sigla' => 'EVN',
+            'nit' => '903-VENT',
+            'estado' => Company::ESTADO_ACTIVO,
+        ]);
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        $lineDesc = 'Equipo Router (INV-REF-1), cantidad 1, precio unitario fijo 50000.00.';
+        $r = $this->postJson('/api/services', [
+            'company_id' => $company->id,
+            'client_name' => 'Cliente venta',
+            'service_type' => 'Venta de equipo',
+            'description' => $lineDesc,
+            'items' => [[
+                'custom_name' => 'Venta equipo: Router',
+                'amount' => 50000,
+                'line_description' => $lineDesc,
+            ]],
+        ])->assertCreated();
+
+        $this->assertMatchesRegularExpression('/^VENT-260415\d{2}$/', (string) $r->json('data.code'));
+    }
+
+    public function test_venta_equipo_custom_line_no_technician_accrual_executes_owner_rule(): void
+    {
+        $company = Company::query()->create([
+            'nombre' => 'Emp VENT Tech',
+            'factura_sigla' => 'EVT',
+            'nit' => '903-VTECH',
+            'estado' => Company::ESTADO_ACTIVO,
+        ]);
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        $lineDesc = 'Equipo Router (INV-REF-1), cantidad 1, precio unitario fijo 50000.00.';
+        $r = $this->postJson('/api/services', [
+            'company_id' => $company->id,
+            'client_name' => 'Cliente venta',
+            'service_type' => 'Venta de equipo',
+            'description' => $lineDesc,
+            'items' => [[
+                'custom_name' => 'Venta equipo: Router',
+                'amount' => 50000,
+                'line_description' => $lineDesc,
+            ]],
+        ])->assertCreated();
+
+        $serviceId = (int) $r->json('data.id');
+        $item = ServiceItem::query()->where('service_id', $serviceId)->first();
+        $this->assertNotNull($item);
+        $this->assertSame('0.00', (string) $item->technician_line_amount);
+        // Referencia interna 50_000 con margen global venta inventario por defecto (10 %) → 50_000 ÷ 0,9.
+        $this->assertSame('55555.56', number_format((float) $item->amount, 2, '.', ''));
+    }
+
+    public function test_alquiler_de_equipo_usa_prefijo_alq_en_codigo(): void
+    {
+        $company = Company::query()->create([
+            'nombre' => 'Emp ALQ',
+            'factura_sigla' => 'EAQ',
+            'nit' => '904-ALQ',
+            'estado' => Company::ESTADO_ACTIVO,
+        ]);
+        $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
+        Sanctum::actingAs($admin);
+
+        $lineDesc = 'Equipo Proyector (PRY-1), cantidad 1, días 2, tarifa diaria fijo 10000.00.';
+        $r = $this->postJson('/api/services', [
+            'company_id' => $company->id,
+            'client_name' => 'Cliente alquiler',
+            'service_type' => 'Alquiler de equipo',
+            'description' => $lineDesc,
+            'items' => [[
+                'custom_name' => 'Alquiler equipo: Proyector',
+                'amount' => 20000,
+                'line_description' => $lineDesc,
+            ]],
+        ])->assertCreated();
+
+        $this->assertMatchesRegularExpression('/^ALQ-260415\d{2}$/', (string) $r->json('data.code'));
     }
 }

@@ -15,6 +15,7 @@ class CompanyRecurringServiceResource extends JsonResource
             'id' => $this->id,
             'company_id' => $this->company_id,
             'catalog_id' => $this->catalog_id,
+            'billing_kind' => $this->billing_kind ?? 'servicio',
             'service_type' => $this->service_type,
             'description' => $this->description,
             'amount' => (string) $this->amount,

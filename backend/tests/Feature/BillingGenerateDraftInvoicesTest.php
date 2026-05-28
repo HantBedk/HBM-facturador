@@ -290,6 +290,7 @@ class BillingGenerateDraftInvoicesTest extends TestCase
         CompanyRecurringService::query()->create([
             'company_id' => $company->id,
             'catalog_id' => $catalog->id,
+            'billing_kind' => 'servicio',
             'service_type' => null,
             'description' => 'Cargo mensual membresía',
             'amount' => 125000.5,

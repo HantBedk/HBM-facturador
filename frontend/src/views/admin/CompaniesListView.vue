@@ -5,6 +5,7 @@ import {
   createCompany,
   createCompanyRecurringService,
   deleteCompany,
+  fetchWelcomeMailAttachmentReady,
   deleteCompanyRecurringService,
   fetchAdminCompanies,
   fetchCompanyMonthlyDashboard,
@@ -13,10 +14,19 @@ import {
   updateCompanyRecurringService,
 } from '@/services/companiesApi.js'
 import { fetchAdminInvoices } from '@/services/invoicesApi.js'
-import { fetchServiceCatalogActive, fetchServices } from '@/services/servicesApi.js'
+import { fetchServices } from '@/services/servicesApi.js'
 import { useUiDialogStore } from '@/stores/uiDialog'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
 import { tableAriaSort, tableSortIndicator } from '@/utils/tableSort.js'
+import {
+  formatDate,
+  formatServiceDate,
+  moneyCOP,
+  MONTH_NAMES,
+  normalizeFacturaSigla,
+  prevCalendarMonth,
+  serviceStatusLabel,
+} from './companiesListHelpers.js'
 
 const uiDialog = useUiDialogStore()
 
@@ -29,6 +39,8 @@ const search = ref('')
 const modalOpen = ref(false)
 const modalMode = ref('create')
 const editingId = ref(null)
+/** Si al abrir edición la empresa ya tenía correo (no reenviar bienvenida al guardar). */
+const editingHadCorreo = ref(false)
 const saving = ref(false)
 const modalError = ref('')
 const fieldErrors = ref({})
@@ -37,6 +49,7 @@ const form = ref({
   nombre: '',
   factura_sigla: '',
   nit: '',
+  direccion: '',
   telefono: '',
   correo: '',
   estado: 'activo',
@@ -95,14 +108,24 @@ const recurringModalMode = ref('create')
 const recurringEditingId = ref(null)
 const recurringSaving = ref(false)
 const recurringModalError = ref('')
-const recurringCatalogOptions = ref([])
+
+const RECURRING_BILLING_KIND_OPTIONS = [
+  { value: 'venta', label: 'Venta' },
+  { value: 'servicio', label: 'Servicio' },
+  { value: 'alquiler', label: 'Alquiler' },
+]
+
+function recurringBillingKindLabel(k) {
+  const key = k && String(k).trim() !== '' ? k : 'servicio'
+  return RECURRING_BILLING_KIND_OPTIONS.find((o) => o.value === key)?.label || '—'
+}
+
 const recurringForm = ref({
-  catalog_id: '',
+  billing_kind: '',
   amount: '',
   description: '',
   service_type: '',
   is_active: true,
-  sort_order: 0,
 })
 
 /** Empresa objetivo del modal de servicios fijos (tabla o panel). */
@@ -140,28 +163,6 @@ const {
 
 const directoryPageTitle = 'Empresas registradas'
 
-const MONTH_NAMES = [
-  'Enero',
-  'Febrero',
-  'Marzo',
-  'Abril',
-  'Mayo',
-  'Junio',
-  'Julio',
-  'Agosto',
-  'Septiembre',
-  'Octubre',
-  'Noviembre',
-  'Diciembre',
-]
-
-function prevCalendarMonth() {
-  const d = new Date()
-  d.setDate(1)
-  d.setMonth(d.getMonth() - 1)
-  return { year: d.getFullYear(), month: d.getMonth() + 1 }
-}
-
 const dashboardYearOptions = computed(() => {
   const y = new Date().getFullYear()
   return [y, y - 1, y - 2]
@@ -173,28 +174,6 @@ const dashboardPeriodTitle = computed(() => {
   const name = MONTH_NAMES[(p.month || 1) - 1] || ''
   return `${name} ${p.year}`
 })
-
-function moneyCOP(v) {
-  const n = Number(v)
-  if (Number.isNaN(n)) return String(v ?? '—')
-  return new Intl.NumberFormat('es-CO', {
-    style: 'currency',
-    currency: 'COP',
-    maximumFractionDigits: 0,
-  }).format(n)
-}
-
-function serviceStatusLabel(status) {
-  const m = { activo: 'Activo', corregido: 'Corregido', eliminado: 'Eliminado' }
-  return m[status] ?? status ?? '—'
-}
-
-function formatServiceDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso + (String(iso).length === 10 ? 'T12:00:00' : ''))
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
-}
 
 function openCompanyPanel(row) {
   companyPanelCompany.value = row
@@ -260,16 +239,6 @@ async function loadRecurringModalList() {
   }
 }
 
-async function ensureRecurringCatalogLoaded() {
-  if (recurringCatalogOptions.value.length) return
-  try {
-    recurringCatalogOptions.value = await fetchServiceCatalogActive()
-  } catch {
-    recurringCatalogOptions.value = []
-    recurringModalError.value = 'No se pudo cargar el catálogo.'
-  }
-}
-
 async function loadCompanyRecurringServices() {
   const id = companyPanelCompany.value?.id
   if (!id) return
@@ -305,15 +274,13 @@ async function openRecurringCreate(companyRow) {
   recurringModalMode.value = 'create'
   recurringEditingId.value = null
   recurringForm.value = {
-    catalog_id: '',
+    billing_kind: '',
     amount: '',
     description: '',
     service_type: '',
     is_active: true,
-    sort_order: 0,
   }
   await loadRecurringModalList()
-  await ensureRecurringCatalogLoaded()
 }
 
 async function openRecurringShowFormCreate() {
@@ -321,14 +288,12 @@ async function openRecurringShowFormCreate() {
   recurringEditingId.value = null
   recurringModalError.value = ''
   recurringForm.value = {
-    catalog_id: '',
+    billing_kind: '',
     amount: '',
     description: '',
     service_type: '',
     is_active: true,
-    sort_order: 0,
   }
-  await ensureRecurringCatalogLoaded()
   recurringFormSectionOpen.value = true
 }
 
@@ -336,18 +301,16 @@ function applyRecurringFormFromRow(row) {
   recurringModalMode.value = 'edit'
   recurringEditingId.value = row.id
   recurringForm.value = {
-    catalog_id: row.catalog_id,
+    billing_kind: row.billing_kind || 'servicio',
     amount: String(row.amount ?? ''),
     description: row.description || '',
     service_type: row.service_type || '',
     is_active: row.is_active !== false,
-    sort_order: row.sort_order ?? 0,
   }
 }
 
 async function openRecurringModalEditRow(row) {
   recurringModalError.value = ''
-  await ensureRecurringCatalogLoaded()
   applyRecurringFormFromRow(row)
   recurringFormSectionOpen.value = true
 }
@@ -366,7 +329,6 @@ async function openRecurringEdit(row) {
   recurringModalError.value = ''
   recurringModalListError.value = ''
   await loadRecurringModalList()
-  await ensureRecurringCatalogLoaded()
   applyRecurringFormFromRow(row)
   recurringFormSectionOpen.value = true
 }
@@ -390,9 +352,9 @@ async function submitRecurringModal() {
   recurringModalError.value = ''
   recurringSaving.value = true
   try {
-    const catalogId = Number(recurringForm.value.catalog_id)
-    if (!Number.isFinite(catalogId) || catalogId < 1) {
-      recurringModalError.value = 'Seleccione un ítem del catálogo.'
+    const bk = String(recurringForm.value.billing_kind || '').trim()
+    if (!['venta', 'servicio', 'alquiler'].includes(bk)) {
+      recurringModalError.value = 'Seleccione el tipo de cargo: Venta, Servicio o Alquiler.'
       return
     }
     const amt = Number(String(recurringForm.value.amount).replace(/\s/g, '').replace(',', '.'))
@@ -401,12 +363,11 @@ async function submitRecurringModal() {
       return
     }
     const payload = {
-      catalog_id: catalogId,
+      billing_kind: bk,
       amount: amt,
       description: recurringForm.value.description.trim() || null,
       service_type: recurringForm.value.service_type.trim() || null,
       is_active: Boolean(recurringForm.value.is_active),
-      sort_order: Number(recurringForm.value.sort_order) || 0,
     }
     if (recurringModalMode.value === 'create') {
       await createCompanyRecurringService(companyId, payload)
@@ -624,7 +585,7 @@ async function load() {
   error.value = ''
   loading.value = true
   try {
-    const params = { q: search.value, company_kind: 'registered' }
+    const params = { q: search.value }
     rows.value = await fetchAdminCompanies(params)
   } catch (e) {
     error.value = e.data?.message || e.message || 'No se pudieron cargar las empresas.'
@@ -661,6 +622,7 @@ function openCreate() {
     nombre: '',
     factura_sigla: '',
     nit: '',
+    direccion: '',
     telefono: '',
     correo: '',
     estado: 'activo',
@@ -671,12 +633,14 @@ function openCreate() {
 function openEdit(row) {
   modalMode.value = 'edit'
   editingId.value = row.id
+  editingHadCorreo.value = !!(row.correo && String(row.correo).trim())
   modalError.value = ''
   fieldErrors.value = {}
   form.value = {
     nombre: row.nombre || '',
     factura_sigla: (row.factura_sigla || '').toString().toUpperCase().slice(0, 3),
     nit: row.nit || '',
+    direccion: row.direccion || '',
     telefono: row.telefono || '',
     correo: row.correo || '',
     estado: row.estado === 'inactivo' ? 'inactivo' : 'activo',
@@ -690,19 +654,54 @@ function closeModal() {
 
 const modalTitle = computed(() => (modalMode.value === 'create' ? 'Nueva empresa' : 'Editar empresa'))
 
-function normalizeFacturaSigla(s) {
-  return (s ?? '').toString().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3)
-}
-
 const deleteExpectedSigla = computed(() =>
   deleteCompanyTarget.value ? normalizeFacturaSigla(deleteCompanyTarget.value.factura_sigla) : ''
 )
 
-function formatDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
+/** Si hay correo y no hay PDF de bienvenida, confirma antes de disparar el envío. */
+async function confirmWelcomePdfIfCorreo(correo) {
+  if (!correo || !String(correo).trim()) return true
+  try {
+    const st = await fetchWelcomeMailAttachmentReady()
+    if (!st.welcome_pdf_ready) {
+      const creating = modalMode.value === 'create'
+      const ok = await uiDialog.confirm({
+        title: 'Bienvenida sin PDF adjunto',
+        message:
+          'No hay PDF de bienvenida configurado o el archivo no está disponible. Se programará el envío del correo solo con el texto de la plantilla (sin adjunto), en segundo plano tras guardar. ¿Continuar?',
+        confirmLabel: creating ? 'Crear empresa' : 'Guardar',
+        cancelLabel: 'Volver',
+      })
+      return ok
+    }
+  } catch (e) {
+    modalError.value =
+      e.data?.message || e.message || 'No se pudo comprobar si hay PDF de bienvenida.'
+    return false
+  }
+  return true
+}
+
+/** Tras guardar: aviso si el bienvenida quedó en cola; error solo si el API aún devolviera fallo síncrono. */
+async function notifyWelcomeMailOutcome(welcomeMail) {
+  if (!welcomeMail) return
+  if (welcomeMail.skipped_reason === 'no_correo') return
+  if (welcomeMail.queued) {
+    const dest = welcomeMail.to ? ` (${welcomeMail.to})` : ''
+    await uiDialog.alert({
+      title: 'Correo de bienvenida',
+      message: `La empresa se guardó. El correo de bienvenida${dest} se enviará en segundo plano; recibirá una notificación en el panel cuando termine (éxito o error).`,
+    })
+    return
+  }
+  if (!welcomeMail.sent && welcomeMail.skipped_reason === 'send_failed') {
+    const extra = welcomeMail.detail ? `\n\nDetalle: ${welcomeMail.detail}` : ''
+    const dest = welcomeMail.to ? ` a ${welcomeMail.to}` : ''
+    await uiDialog.alert({
+      title: 'No se envió el correo de bienvenida',
+      message: `La empresa se guardó, pero el envío${dest} falló.${extra}\n\nRevise Admin → Correo del sistema (SMTP y remitente) y storage/logs/laravel.log.`,
+    })
+  }
 }
 
 async function onSubmitModal() {
@@ -714,17 +713,37 @@ async function onSubmitModal() {
       nombre: form.value.nombre.trim(),
       factura_sigla: form.value.factura_sigla.trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3),
       nit: form.value.nit.trim() || null,
+      direccion: form.value.direccion.trim(),
       telefono: form.value.telefono.trim() || null,
       correo: form.value.correo.trim() || null,
       estado: form.value.estado,
     }
     if (modalMode.value === 'create') {
-      await createCompany(payload)
+      if (payload.correo) {
+        const okPdf = await confirmWelcomePdfIfCorreo(payload.correo)
+        if (!okPdf) {
+          saving.value = false
+          return
+        }
+      }
+      const res = await createCompany(payload)
+      modalOpen.value = false
+      await load()
+      await notifyWelcomeMailOutcome(res.welcome_mail)
     } else {
-      await updateCompany(editingId.value, payload)
+      const addedFirstCorreo = !editingHadCorreo.value && !!payload.correo
+      if (addedFirstCorreo) {
+        const okPdf = await confirmWelcomePdfIfCorreo(payload.correo)
+        if (!okPdf) {
+          saving.value = false
+          return
+        }
+      }
+      const res = await updateCompany(editingId.value, payload)
+      modalOpen.value = false
+      await load()
+      if (res.welcome_mail) await notifyWelcomeMailOutcome(res.welcome_mail)
     }
-    modalOpen.value = false
-    await load()
   } catch (e) {
     if (e.data?.errors) fieldErrors.value = e.data.errors
     else modalError.value = e.data?.message || e.message || 'No se pudo guardar.'
@@ -866,6 +885,25 @@ async function submitDeleteCompanyModal() {
               <td class="muted">{{ formatDate(c.created_at) }}</td>
               <td class="actions-col">
                 <div class="actions-wrap">
+                  <RouterLink
+                    :to="{
+                      name: 'admin-empresa-inventario',
+                      params: { companyId: String(c.id) },
+                      state: { empresaNombre: c.nombre || '' },
+                    }"
+                    class="icon-act icon-act--inventory"
+                    title="Inventario y activos de esta empresa"
+                    @click.stop
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+                      />
+                    </svg>
+                  </RouterLink>
                   <button
                     type="button"
                     class="icon-act icon-act--recurring"
@@ -1050,7 +1088,7 @@ async function submitDeleteCompanyModal() {
                 <table class="panel-table">
                   <thead>
                     <tr>
-                      <th scope="col">Catálogo</th>
+                      <th scope="col">Tipo</th>
                       <th scope="col">Detalle</th>
                       <th class="num" scope="col">Importe</th>
                       <th scope="col">Estado</th>
@@ -1059,7 +1097,7 @@ async function submitDeleteCompanyModal() {
                   </thead>
                   <tbody>
                     <tr v-for="r in recurringRows" :key="'rec-' + r.id">
-                      <td>{{ r.catalog?.name || '—' }}</td>
+                      <td>{{ recurringBillingKindLabel(r.billing_kind) }}</td>
                       <td class="muted">
                         <span v-if="r.service_type" class="recurring-type">{{ r.service_type }}</span>
                         <span v-if="r.description">{{ r.description }}</span>
@@ -1334,7 +1372,7 @@ async function submitDeleteCompanyModal() {
                 autocapitalize="characters"
                 autocomplete="off"
               />
-              <small class="muted">En facturas: <strong>FAC-YYMMDD-XXX</strong> (1 por día y empresa). Debe ser única entre empresas.</small>
+              <small class="muted">En facturas: <strong>FAC-YYMMDD-XXX</strong> (varias el mismo día: <strong>-2</strong>, <strong>-3</strong>, …). La sigla debe ser única entre empresas.</small>
               <small v-if="fieldErrors.factura_sigla" class="err">{{ fieldErrors.factura_sigla[0] }}</small>
             </label>
             <label class="field">
@@ -1343,13 +1381,33 @@ async function submitDeleteCompanyModal() {
               <small v-if="fieldErrors.nit" class="err">{{ fieldErrors.nit[0] }}</small>
             </label>
             <label class="field">
+              <span>Dirección <abbr title="obligatorio">*</abbr></span>
+              <textarea
+                v-model="form.direccion"
+                class="input"
+                rows="2"
+                required
+                maxlength="512"
+                placeholder="Dirección comercial o fiscal que aparecerá en la factura"
+              />
+              <small class="muted">Se muestra en el PDF de factura (bloque «Facturar a»).</small>
+              <small v-if="fieldErrors.direccion" class="err">{{ fieldErrors.direccion[0] }}</small>
+            </label>
+            <label class="field">
               <span>Teléfono</span>
               <input v-model="form.telefono" class="input" maxlength="64" placeholder="Opcional" />
               <small v-if="fieldErrors.telefono" class="err">{{ fieldErrors.telefono[0] }}</small>
             </label>
             <label class="field">
               <span>Correo</span>
-              <input v-model="form.correo" type="email" class="input" maxlength="255" placeholder="Opcional" />
+              <input
+                v-model="form.correo"
+                type="email"
+                class="input"
+                maxlength="255"
+                placeholder="ej. contacto@empresa.com"
+              />
+              
               <small v-if="fieldErrors.correo" class="err">{{ fieldErrors.correo[0] }}</small>
             </label>
             <fieldset class="field">
@@ -1405,7 +1463,7 @@ async function submitDeleteCompanyModal() {
               <table class="recurring-modal-table">
                 <thead>
                   <tr>
-                    <th scope="col">Catálogo</th>
+                    <th scope="col">Tipo</th>
                     <th scope="col">Detalle</th>
                     <th class="num" scope="col">Importe</th>
                     <th scope="col">Estado</th>
@@ -1414,7 +1472,7 @@ async function submitDeleteCompanyModal() {
                 </thead>
                 <tbody>
                   <tr v-for="r in recurringModalRows" :key="'mod-rec-' + r.id">
-                    <td>{{ r.catalog?.name || '—' }}</td>
+                    <td>{{ recurringBillingKindLabel(r.billing_kind) }}</td>
                     <td class="muted recurring-modal-detail">
                       <span v-if="r.service_type" class="recurring-type">{{ r.service_type }}</span>
                       <span v-if="r.description">{{ r.description }}</span>
@@ -1464,10 +1522,12 @@ async function submitDeleteCompanyModal() {
             </h3>
             <form class="modal-form" @submit.prevent="submitRecurringModal">
               <label class="field">
-                <span>Ítem del catálogo <abbr title="obligatorio">*</abbr></span>
-                <select v-model.number="recurringForm.catalog_id" class="input" required>
+                <span>Tipo de cargo <abbr title="obligatorio">*</abbr></span>
+                <select v-model="recurringForm.billing_kind" class="input" required>
                   <option disabled value="">Seleccione…</option>
-                  <option v-for="c in recurringCatalogOptions" :key="c.id" :value="c.id">{{ c.name }}</option>
+                  <option v-for="opt in RECURRING_BILLING_KIND_OPTIONS" :key="opt.value" :value="opt.value">
+                    {{ opt.label }}
+                  </option>
                 </select>
               </label>
               <label class="field">
@@ -1487,16 +1547,12 @@ async function submitDeleteCompanyModal() {
                   v-model="recurringForm.service_type"
                   class="input"
                   maxlength="255"
-                  placeholder="Si vacío, se usa el nombre del catálogo"
+                  placeholder="Si vacío, se usa una etiqueta según el tipo (Venta / Servicio / Alquiler)"
                 />
               </label>
               <label class="field">
                 <span>Descripción / detalle (opcional)</span>
                 <textarea v-model="recurringForm.description" class="input" rows="2" placeholder="Texto en el cuerpo de la línea" />
-              </label>
-              <label class="field">
-                <span>Orden en factura</span>
-                <input v-model.number="recurringForm.sort_order" class="input" type="number" min="0" step="1" />
               </label>
               <fieldset class="field">
                 <legend>Plantilla</legend>
@@ -2217,6 +2273,15 @@ h1 {
 .icon-act--recurring:hover:not(:disabled) {
   background: rgba(56, 189, 248, 0.22);
   color: #7dd3fc;
+}
+
+a.icon-act--inventory {
+  text-decoration: none;
+}
+
+.icon-act--inventory:hover {
+  background: rgba(52, 211, 153, 0.2);
+  color: #6ee7b7;
 }
 
 .recurring-hint {

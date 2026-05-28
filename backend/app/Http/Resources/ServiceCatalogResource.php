@@ -10,6 +10,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * @mixin ServiceCatalog
  *
  * - `base_price` en BD = referencia orientativa (placeholder); el importe facturable lo define el empleado al cargar el servicio.
+ * - `iva_percent` = IVA del estado aplicado sobre el importe de línea al armar la factura (subtotal = suma de líneas; total = subtotal + IVA).
  * - technician_discount_percent null = usar el % global de margen técnico → empresa al facturar líneas.
  */
 class ServiceCatalogResource extends JsonResource
@@ -27,6 +28,7 @@ class ServiceCatalogResource extends JsonResource
             'name' => $this->name,
             'description' => $this->description,
             'base_price' => $displayPrice,
+            'iva_percent' => (string) $this->iva_percent,
             /** El % de margen/diferencia no se expone a empleados (solo admin en panel catálogo). */
             'technician_discount_percent' => $this->when(
                 ! $isEmpleado,

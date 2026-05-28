@@ -14,7 +14,7 @@ class AdminCompanyRecurringServiceApiTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function seed(): array
+    private function seedData(): array
     {
         $admin = User::factory()->create(['rol' => User::ROL_ADMIN]);
         $company = Company::query()->create([
@@ -35,23 +35,32 @@ class AdminCompanyRecurringServiceApiTest extends TestCase
 
     public function test_admin_can_list_create_update_and_delete_recurring_lines(): void
     {
-        $s = $this->seed();
+        $s = $this->seedData();
         Sanctum::actingAs($s['admin']);
 
         $list = $this->getJson('/api/admin/companies/'.$s['company']->id.'/recurring-services');
         $list->assertOk()->assertJsonCount(0, 'data');
 
         $create = $this->postJson('/api/admin/companies/'.$s['company']->id.'/recurring-services', [
-            'catalog_id' => $s['cat']->id,
+            'billing_kind' => 'servicio',
             'amount' => 99.5,
             'description' => 'Mensual',
             'is_active' => true,
         ]);
         $create->assertCreated()
-            ->assertJsonPath('data.amount', '99.50');
+            ->assertJsonPath('data.amount', '99.50')
+            ->assertJsonPath('data.billing_kind', 'servicio')
+            ->assertJsonPath('data.sort_order', 0);
 
         $id = (int) $create->json('data.id');
         $this->assertGreaterThan(0, $id);
+
+        $create2 = $this->postJson('/api/admin/companies/'.$s['company']->id.'/recurring-services', [
+            'billing_kind' => 'venta',
+            'amount' => 10,
+            'is_active' => true,
+        ]);
+        $create2->assertCreated()->assertJsonPath('data.sort_order', 1);
 
         $update = $this->putJson(
             '/api/admin/companies/'.$s['company']->id.'/recurring-services/'.$id,
@@ -60,6 +69,10 @@ class AdminCompanyRecurringServiceApiTest extends TestCase
         $update->assertOk()
             ->assertJsonPath('data.amount', '150.00')
             ->assertJsonPath('data.is_active', false);
+
+        $id2 = (int) $create2->json('data.id');
+        $this->deleteJson('/api/admin/companies/'.$s['company']->id.'/recurring-services/'.$id2)
+            ->assertNoContent();
 
         $this->deleteJson('/api/admin/companies/'.$s['company']->id.'/recurring-services/'.$id)
             ->assertNoContent();
@@ -71,7 +84,7 @@ class AdminCompanyRecurringServiceApiTest extends TestCase
 
     public function test_update_returns_404_when_recurring_belongs_to_other_company(): void
     {
-        $s = $this->seed();
+        $s = $this->seedData();
         $other = Company::query()->create([
             'nombre' => 'Otra',
             'factura_sigla' => 'OTR',
@@ -81,6 +94,7 @@ class AdminCompanyRecurringServiceApiTest extends TestCase
         $row = CompanyRecurringService::query()->create([
             'company_id' => $other->id,
             'catalog_id' => $s['cat']->id,
+            'billing_kind' => 'servicio',
             'description' => 'X',
             'amount' => 10,
             'is_active' => true,
