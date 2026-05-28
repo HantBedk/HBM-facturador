@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref, computed, defineAsyncComponent } from 'vue'
+import { onMounted, ref, computed, watch, defineAsyncComponent } from 'vue'
 import { RouterLink } from 'vue-router'
 import { api } from '@/services/api.js'
 import { useClientSortedRows } from '@/composables/useClientSortedRows.js'
@@ -41,7 +41,11 @@ const chartBaseOptions = {
   yaxis: {
     labels: {
       style: { colors: '#94a3b8', fontSize: '11px' },
-      formatter: (value) => value >= 1000 ? (value / 1000).toFixed(0) + 'k' : value,
+      formatter: (value) => {
+          if (value >= 1_000_000) return (value / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
+          if (value >= 1_000) return (value / 1_000).toFixed(0) + 'k'
+          return value
+        },
     },
   },
   grid: {
@@ -59,28 +63,76 @@ const chartBaseOptions = {
   },
 }
 
+// ── Selector de período del gráfico ────────────────────────────────────────
+const CHART_PERIODS = [
+  { key: 'semana', label: 'Semana' },
+  { key: 'mes',    label: 'Mes' },
+  { key: 'año',    label: 'Año' },
+]
+const chartPeriod  = ref('mes')
+const chartLoading = ref(true)
+const chartData    = ref(null)
+const chartKey     = ref(0)
+
+async function loadChart(period = chartPeriod.value) {
+  chartLoading.value = true
+  try {
+    chartData.value = await api(`/admin/dashboard/chart?period=${period}`)
+    chartKey.value++
+  } catch { /* silencioso */ } finally {
+    chartLoading.value = false
+  }
+}
+
+watch(chartPeriod, loadChart)
+
+const chartTitle = computed(() => {
+  if (chartPeriod.value === 'semana') return `Ingresos — Semana actual`
+  if (chartPeriod.value === 'año')    return `Ingresos — ${data.value?.period?.year ?? new Date().getFullYear()}`
+  return `Ingresos por servicios — ${data.value?.period?.label || '—'}`
+})
+
 const chartSeries = computed(() => {
-  const raw = data.value?.monthly_revenue_chart?.series
+  const raw = chartData.value?.series
   if (!Array.isArray(raw) || raw.length === 0) {
     return [
-      { name: 'Este mes', data: [] },
-      { name: 'Mes anterior', data: [] },
+      { name: 'Este período',    data: [] },
+      { name: 'Período anterior', data: [] },
     ]
   }
   return raw.map((s) => ({
     name: s.name ?? '',
-    // null se preserva tal cual → ApexCharts corta la línea en ese punto
     data: (s.data ?? []).map((v) => (v === null || v === undefined ? null : Number(v))),
   }))
 })
 
-const chartOptions = computed(() => ({
-  ...chartBaseOptions,
-  xaxis: {
-    ...chartBaseOptions.xaxis,
-    categories: data.value?.monthly_revenue_chart?.categories ?? [],
-  },
-}))
+const chartOptions = computed(() => {
+  const categories = chartData.value?.categories ?? []
+  const isMonth    = chartPeriod.value === 'mes'
+  const isWeek     = chartPeriod.value === 'semana'
+
+  const xTooltip = isMonth
+    ? (val) => 'Día ' + val
+    : isWeek
+      ? (val) => String(val)
+      : (val) => String(val)
+
+  return {
+    ...chartBaseOptions,
+    xaxis: {
+      ...chartBaseOptions.xaxis,
+      categories,
+      tickAmount: isMonth ? 10 : undefined,
+      title: isMonth
+        ? { text: 'Día del mes', style: { color: '#64748b', fontSize: '11px' } }
+        : { text: '' },
+    },
+    tooltip: {
+      ...chartBaseOptions.tooltip,
+      x: { formatter: xTooltip },
+    },
+  }
+})
 
 async function loadDashboard() {
   loading.value = true
@@ -101,6 +153,7 @@ const technicianPendingPanelOpen = ref(false)
 
 onMounted(() => {
   loadDashboard()
+  loadChart()
 })
 
 function openPendingInvoicesPanel() {
@@ -346,25 +399,60 @@ const netAfterTechniciansClass = computed(() => {
       <!-- ROW 2: CONTENIDO CENTRAL (Gráfico Izquierdo + 2 Tablas Derecha) -->
       <div class="grid grid-cols-1 xl:grid-cols-[1.8fr_1.2fr] gap-6">
         
-        <!-- MITAD IZQUIERDA: GRÁFICO APEXCHARTS ("Ingresos Mensuales - Octubre 2023") -->
+        <!-- MITAD IZQUIERDA: GRÁFICO APEXCHARTS -->
         <section class="bg-[#1e2532] rounded-2xl shadow-lg border border-transparent overflow-hidden">
-          <div class="px-7 py-6 flex items-center justify-between">
-            <h2 class="text-xl font-bold text-white tracking-wide m-0">
-              Ingresos por servicios — {{ data?.period?.label || '—' }}
-            </h2>
-            <div class="flex items-center gap-5 text-sm font-semibold">
-               <div class="flex items-center gap-2 text-slate-300">
-                 <span class="h-2 w-2 rounded-full bg-[#22c55e]"></span> Este mes
-               </div>
-               <div class="flex items-center gap-2 text-slate-500">
-                 <span class="h-2 w-2 rounded-full bg-slate-500 opacity-60"></span>
-                 {{ data?.monthly_revenue_chart?.prev_label || 'Mes anterior' }}
-               </div>
+
+          <!-- Cabecera: título + selector de período + leyenda -->
+          <div class="px-7 pt-5 pb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 class="text-[1.05rem] font-bold text-white tracking-wide m-0 leading-snug">
+                {{ chartTitle }}
+              </h2>
+              <div class="flex items-center gap-4 mt-1.5 text-xs font-semibold">
+                <div class="flex items-center gap-1.5 text-slate-300">
+                  <span class="h-2 w-2 rounded-full bg-[#22c55e] shrink-0"></span>
+                  {{ chartSeries[0]?.name || 'Este período' }}
+                </div>
+                <div class="flex items-center gap-1.5 text-slate-500">
+                  <span class="h-2 w-5 border-t-2 border-dashed border-slate-500 shrink-0"></span>
+                  {{ chartSeries[1]?.name || 'Período anterior' }}
+                </div>
+              </div>
+            </div>
+
+            <!-- Tabs de período -->
+            <div class="flex items-center gap-0.5 rounded-lg bg-slate-800/70 p-0.5 self-start shrink-0">
+              <button
+                v-for="p in CHART_PERIODS"
+                :key="p.key"
+                type="button"
+                class="rounded-md px-3 py-1.5 text-xs font-semibold transition-colors"
+                :class="chartPeriod === p.key
+                  ? 'bg-slate-600 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'"
+                @click="chartPeriod = p.key"
+              >
+                {{ p.label }}
+              </button>
             </div>
           </div>
-          <!-- Gráfico: altura explícita en px — ApexCharts no puede leer height:100% en flex -->
-          <div class="px-4 pb-6">
-             <VueApexCharts width="100%" height="380" type="area" :options="chartOptions" :series="chartSeries" />
+
+          <!-- Gráfico -->
+          <div class="px-4 pb-6 relative min-h-[400px]">
+            <div v-if="chartLoading" class="absolute inset-0 flex items-center justify-center z-10">
+              <span class="text-sm text-slate-500">Cargando…</span>
+            </div>
+            <div :class="{ invisible: chartLoading }">
+              <VueApexCharts
+                v-if="chartData"
+                :key="chartKey"
+                width="100%"
+                height="380"
+                type="area"
+                :options="chartOptions"
+                :series="chartSeries"
+              />
+            </div>
           </div>
         </section>
 

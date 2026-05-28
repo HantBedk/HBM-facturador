@@ -231,6 +231,7 @@ Route::middleware(['auth:sanctum', 'throttle:180,1'])->group(function () {
         ->middleware('role:admin,super_admin');
 
     Route::get('/admin/dashboard', [AdminDashboardController::class, 'index'])->middleware('role:admin,super_admin');
+    Route::get('/admin/dashboard/chart', [AdminDashboardController::class, 'chart'])->middleware('role:admin,super_admin');
 
     Route::get('/empleado/historial', [EmployeeHistorialController::class, 'forSelf'])->middleware('role:empleado');
     Route::get('/empleado/dashboard', [EmpleadoDashboardController::class, 'index'])->middleware('role:empleado');
